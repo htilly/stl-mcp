@@ -570,7 +570,7 @@ async function refresh(first) {
   renderSide();
 }
 
-subscribe((d) => { if (d.id === id) refresh(false); }, $("live"));
+subscribe((d) => { if (d.resync || d.id === id) refresh(false); }, $("live"));
 resize();
 refresh(true);
 </script>

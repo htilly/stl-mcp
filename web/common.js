@@ -12,24 +12,37 @@ export async function api(path, opts = {}) {
   return data;
 }
 
-// Live updates via server-sent events. cb({revision, id}) is called on change.
+// Live updates via server-sent events. cb({revision, id}) is called on every change.
+//
+// Phones suspend pages: a locked screen, a backgrounded tab or a network switch drops the stream,
+// often without any error event, and changes made meanwhile would never be fetched. So the server's
+// revision is remembered, and whenever the stream (re)connects and the revision moved, cb gets
+// {revision, resync: true} - "something changed, re-read everything". The stream is also re-opened
+// whenever the page becomes visible again.
 export function subscribe(cb, statusEl) {
-  let es, first = true;
+  let es, last = null, retry;
   const connect = () => {
+    clearTimeout(retry);
+    es?.close();
     es = new EventSource("/api/events");
     es.onopen = () => statusEl?.classList.add("on");
     es.onmessage = (e) => {
       const d = JSON.parse(e.data);
-      if (first) { first = false; return; }
-      cb(d);
+      const before = last;
+      last = d.revision;
+      if (before === null) return;                     // first connection: nothing to catch up on
+      if (d.id) cb(d);                                 // a live change
+      else if (d.revision !== before) cb({ revision: d.revision, resync: true });  // hello after a gap
     };
     es.onerror = () => {
       statusEl?.classList.remove("on");
       es.close();
-      setTimeout(connect, 3000);
+      retry = setTimeout(connect, 3000);
     };
   };
   connect();
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) connect(); });
+  window.addEventListener("pageshow", (e) => { if (e.persisted) connect(); });
 }
 
 export function ago(ts) {
