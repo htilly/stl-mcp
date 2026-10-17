@@ -1,44 +1,44 @@
 # stl-mcp
 
-Självhostad MCP-server som skapar STL-filer (mm) åt Claude. Streamable HTTP på `/mcp`,
-nedladdning på `/files/<namn>.stl`.
+Self-hosted MCP server that creates STL files (mm) for Claude. Streamable HTTP on `/mcp`,
+downloads at `/files/<name>.stl`.
 
-## Köra
+## Running
 ```
-cp .env.example .env     # fyll i MCP_TOKEN och PUBLIC_URL
+cp .env.example .env     # fill in MCP_TOKEN and PUBLIC_URL
 docker compose up -d --build
 ```
-Utan Docker: `pip install -r requirements.txt && MCP_TOKEN=... python server.py`
+Without Docker: `pip install -r requirements.txt && MCP_TOKEN=... python server.py`
 
-## Koppla till Claude
-- Claude Desktop/Code: `claude mcp add --transport http stl https://<din-url>/mcp --header "Authorization: Bearer <token>"`
-- claude.ai: Settings → Connectors → Add custom connector → `https://<din-url>/mcp`
-  (claude.ai kan inte skicka egen header; lägg då servern bakom din reverse proxy/OAuth, eller kör via Claude Desktop/Code.)
+## Connecting to Claude
+- Claude Desktop/Code: `claude mcp add --transport http stl https://<your-url>/mcp --header "Authorization: Bearer <token>"`
+- claude.ai: Settings → Connectors → Add custom connector → `https://<your-url>/mcp`
+  (claude.ai cannot send a custom header; put the server behind your reverse proxy/OAuth, or use Claude Desktop/Code.)
 
-## Verktyg
-- `create_enclosure` – låda + lock med hörnskruvar, distanser, utskärningar, lockhål
+## Tools
+- `create_enclosure` – box + lid with corner screws, standoffs, cutouts, lid holes
 - `create_primitive` – box, cylinder, sphere, cone, tube
-- `create_from_script` – godtycklig trimesh-Python (kräver `ALLOW_SCRIPT=1`, kör kod på servern!)
-- `import_file` – tar in STL/OBJ/GLB/PLY/OFF via `url` eller `data_base64` (zip med obj+mtl packas upp)
-- `file_info` – mått, bounds, volym, antal lösa delar
-- `modify_file` – skala, rotera, spegla, placera, lägg till/skär bort former (t.ex. skruvhål), laga nät, förenkla
-- `split_file` – delar upp en fil i sina lösa delar
-- `export_obj` – slår ihop flera STL till en färgad OBJ (+ .mtl och .zip)
+- `create_from_script` – arbitrary trimesh Python (requires `ALLOW_SCRIPT=1`, runs code on the server!)
+- `import_file` – imports STL/OBJ/GLB/PLY/OFF via `url` or `data_base64` (zip with obj+mtl is unpacked)
+- `file_info` – dimensions, bounds, volume, number of loose parts
+- `modify_file` – scale, rotate, mirror, place, add/subtract shapes (e.g. screw holes), repair mesh, simplify
+- `split_file` – splits a file into its loose parts
+- `export_obj` – merges several STLs into one colored OBJ (+ .mtl and .zip)
 - `list_files`, `delete_file`
 
 ## Tinkercad
-Tinkercad har inget offentligt API, så utbytet går via filer:
+Tinkercad has no public API, so exchange happens via files:
 
-- **Till Tinkercad:** ladda ned `.stl` (en del) eller `export_obj`-resultatet (flera färgade delar) och
-  välj *Import* i Tinkercad. Filer större än `TINKERCAD_MAX_MB` (default 25) får automatiskt en
-  förenklad kopia `<namn>_tinkercad.stl`.
-- **Från Tinkercad:** *Export* → `.STL` eller `.OBJ` (zip). Ladda upp filen till servern:
+- **To Tinkercad:** download the `.stl` (one part) or the `export_obj` result (several colored parts) and
+  choose *Import* in Tinkercad. Files larger than `TINKERCAD_MAX_MB` (default 25) automatically get a
+  simplified copy `<name>_tinkercad.stl`.
+- **From Tinkercad:** *Export* → `.STL` or `.OBJ` (zip). Upload the file to the server:
   ```
-  curl -T modell.stl -H "Authorization: Bearer <token>" https://<din-url>/upload/modell.stl
+  curl -T model.stl -H "Authorization: Bearer <token>" https://<your-url>/upload/model.stl
   ```
-  eller låt Claude hämta den med `import_file` (url). Bygg sedan vidare med `modify_file`.
-  `import_file` hämtar bara från publika adresser om inte `ALLOW_PRIVATE_URLS=1`.
+  or let Claude fetch it with `import_file` (url). Then keep building with `modify_file`.
+  `import_file` only fetches from public addresses unless `ALLOW_PRIVATE_URLS=1`.
 
-## Säkerhet
-Sätt alltid `MCP_TOKEN` och lägg servern bakom HTTPS. `FILES_PUBLIC=1` gör nedladdningslänkarna
-klickbara utan token (filnamnen är gissningsbara). `/upload/*` kräver alltid token när `MCP_TOKEN` är satt. Lämna `ALLOW_SCRIPT` av om servern är nåbar utifrån.
+## Security
+Always set `MCP_TOKEN` and put the server behind HTTPS. `FILES_PUBLIC=1` makes the download links
+clickable without a token (filenames are guessable). `/upload/*` always requires a token when `MCP_TOKEN` is set. Keep `ALLOW_SCRIPT` off if the server is reachable from outside.
