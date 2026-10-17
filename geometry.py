@@ -1,4 +1,7 @@
 """Geometri-hjälpare (mm). Alla former byggs med trimesh + manifold3d."""
+import io
+import zipfile
+
 import numpy as np
 import trimesh
 from trimesh.creation import box as _box, cylinder as _cyl, icosphere, cone as _cone
@@ -116,3 +119,142 @@ def enclosure(inner_x, inner_y, inner_z, wall=2.4, floor=2.4, lid_t=2.4,
         cuts.append(blk(s["w"], s["h"], lid_t + 1, wall + s["x"], wall + s["y"], -0.5))
     lid = diff(lid, cuts)
     return body, lid
+
+
+# ---------------------------------------------------------------- import / ändring / export
+
+IMPORT_FORMATS = ("stl", "obj", "glb", "ply", "off")
+
+
+def load_mesh(data: bytes, fmt: str | None = None) -> trimesh.Trimesh:
+    """Läser en mesh ur bytes. Zip (t.ex. Tinkercads OBJ-export) packas upp automatiskt.
+    Scener slås ihop till en mesh; färger/texturer slängs."""
+    if data[:2] == b"PK":
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            names = [n for n in z.namelist() if n.rsplit(".", 1)[-1].lower() in IMPORT_FORMATS]
+            if not names:
+                raise ValueError("zip-filen innehåller ingen stl/obj/glb/ply/off")
+            fmt = names[0].rsplit(".", 1)[-1].lower()
+            data = z.read(names[0])
+    fmt = (fmt or "stl").lower().lstrip(".")
+    if fmt not in IMPORT_FORMATS:
+        raise ValueError(f"format {fmt} stöds inte ({', '.join(IMPORT_FORMATS)})")
+    loaded = trimesh.load(io.BytesIO(data), file_type=fmt)
+    if isinstance(loaded, trimesh.Scene):
+        meshes = []
+        for node in loaded.graph.nodes_geometry:
+            transform, gname = loaded.graph[node]
+            geo = loaded.geometry[gname]
+            if isinstance(geo, trimesh.Trimesh):
+                m = trimesh.Trimesh(geo.vertices, geo.faces)
+                m.apply_transform(transform)
+                meshes.append(m)
+        loaded = trimesh.util.concatenate(meshes) if meshes else None
+    if not isinstance(loaded, trimesh.Trimesh) or len(loaded.faces) == 0:
+        raise ValueError("filen innehåller ingen mesh")
+    return trimesh.Trimesh(loaded.vertices, loaded.faces)
+
+
+def repair(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
+    mesh = mesh.copy()
+    mesh.merge_vertices()
+    mesh.update_faces(mesh.nondegenerate_faces())
+    mesh.update_faces(mesh.unique_faces())
+    mesh.remove_unreferenced_vertices()
+    trimesh.repair.fill_holes(mesh)
+    trimesh.repair.fix_normals(mesh)
+    return mesh
+
+
+def shape_at(spec: dict) -> trimesh.Trimesh:
+    """{shape, x,y,z | diameter, inner_diameter, height, at=[x,y,z], rotate=[rx,ry,rz]}.
+    at = formens mittpunkt, cylindrar/koner står längs z innan rotation."""
+    m = primitive(spec["shape"], x=spec.get("x", 0), y=spec.get("y", 0), z=spec.get("z", 0),
+                  diameter=spec.get("diameter", 0), inner_diameter=spec.get("inner_diameter", 0),
+                  height=spec.get("height", 0))
+    m.apply_translation(-m.bounds.mean(axis=0))
+    if spec.get("rotate"):
+        m.apply_transform(_rotation(spec["rotate"]))
+    m.apply_translation(spec.get("at", [0, 0, 0]))
+    return m
+
+
+def _rotation(deg) -> np.ndarray:
+    rx, ry, rz = np.radians(deg)
+    return trimesh.transformations.euler_matrix(rx, ry, rz, "sxyz")
+
+
+def modify(mesh: trimesh.Trimesh, scale=None, rotate=None, mirror=None, place_on_bed=True,
+           center_xy=False, add=None, subtract=None, do_repair=False) -> trimesh.Trimesh:
+    """Ordning: reparation, skala, rotera (kring boxens mitt), spegla, placering, add, subtract."""
+    mesh = repair(mesh) if do_repair else mesh.copy()
+    if scale is not None:
+        s = np.broadcast_to(np.asarray(scale, dtype=float), 3)
+        if np.any(s <= 0):
+            raise ValueError("scale måste vara > 0")
+        mesh.apply_transform(np.diag([*s, 1.0]))
+    if rotate:
+        c = mesh.bounds.mean(axis=0)
+        mesh.apply_translation(-c)
+        mesh.apply_transform(_rotation(rotate))
+        mesh.apply_translation(c)
+    for axis in (mirror or ""):
+        if axis not in "xyz":
+            raise ValueError("mirror får bara innehålla x, y, z")
+        c = mesh.bounds.mean(axis=0)
+        normal = np.eye(3)["xyz".index(axis)]
+        mesh.apply_transform(trimesh.transformations.reflection_matrix(c, normal))
+    if center_xy:
+        c = mesh.bounds.mean(axis=0)
+        mesh.apply_translation([-c[0], -c[1], 0])
+    if place_on_bed:
+        mesh.apply_translation([0, 0, -mesh.bounds[0][2]])
+    if add or subtract:
+        if not mesh.is_volume:
+            raise ValueError("modellen är inte vattentät; prova repair=true innan add/subtract")
+        if add:
+            mesh = union([mesh] + [shape_at(s) for s in add])
+        if subtract:
+            mesh = diff(mesh, [shape_at(s) for s in subtract])
+    return mesh
+
+
+def stl_size(mesh: trimesh.Trimesh) -> int:
+    return 84 + 50 * len(mesh.faces)
+
+
+def simplify_to(mesh: trimesh.Trimesh, max_bytes: int) -> trimesh.Trimesh:
+    """Minskar antalet trianglar så att binär STL ryms inom max_bytes."""
+    faces = int((max_bytes * 0.98 - 84) // 50)
+    return mesh.simplify_quadric_decimation(face_count=faces)
+
+
+COLORS = {
+    "red": "#e8312f", "orange": "#ff8a00", "yellow": "#fcd116", "green": "#22a347",
+    "blue": "#1d70b7", "purple": "#7d3c98", "pink": "#f49ac2", "white": "#f2f2f2",
+    "gray": "#8c8c8c", "grey": "#8c8c8c", "black": "#222222", "brown": "#8b5a2b",
+}
+PALETTE = ["red", "blue", "yellow", "green", "orange", "purple", "gray", "pink"]
+
+
+def _rgb(color: str) -> tuple[float, float, float]:
+    h = COLORS.get(color.lower(), color).lstrip("#")
+    if not (len(h) == 6 and all(ch in "0123456789abcdefABCDEF" for ch in h)):
+        raise ValueError(f"okänd färg: {color} (namn som red/blue eller #rrggbb)")
+    return tuple(int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
+
+
+def to_obj(parts: list[tuple[str, trimesh.Trimesh, str]], mtl_name: str) -> tuple[str, str]:
+    """parts: [(namn, mesh, färg)] -> (obj-text, mtl-text). Ett objekt + material per del."""
+    obj = [f"mtllib {mtl_name}"]
+    mtl = []
+    offset = 1
+    for i, (pname, mesh, color) in enumerate(parts):
+        r, g_, b = _rgb(color or PALETTE[i % len(PALETTE)])
+        mat = f"m{i}_{pname}"
+        mtl += [f"newmtl {mat}", f"Kd {r:.4f} {g_:.4f} {b:.4f}", "Ka 0 0 0", "d 1", "illum 1", ""]
+        obj += [f"o {pname}", f"usemtl {mat}"]
+        obj += [f"v {x:.5g} {y:.5g} {z:.5g}" for x, y, z in mesh.vertices]
+        obj += [f"f {a + offset} {b_ + offset} {c + offset}" for a, b_, c in mesh.faces]
+        offset += len(mesh.vertices)
+    return "\n".join(obj) + "\n", "\n".join(mtl)

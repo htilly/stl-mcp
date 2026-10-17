@@ -84,6 +84,21 @@ async def main():
                                                        "note": "M4-hål", "resolves": [c["id"]]}))
             g = out(await s.call_tool("get_model", {"model_id": p["model_id"]}))
             print("efter åtgärd: öppna", len(g["comments"]), "lösta", g["resolved_comments"], "v", u["version"])
+            # fristående filer (Tinkercad): import, modify, export av bibliotekets delar
+            async with httpx.AsyncClient(base_url=URL, headers={"Authorization": f"Bearer {TOKEN}"}) as http:
+                stl = await http.get(u["parts"]["model"]["url"].removeprefix(URL))
+                r = await http.put("/upload/import_test.stl", content=stl.content)
+                assert r.status_code == 200, r.text
+            f = out(await s.call_tool("modify_file", {"file": "import_test.stl", "name": "import_hal",
+                "subtract": [{"shape": "cylinder", "diameter": 3, "height": 30, "at": [10, 10, 5]}]}))
+            print("modify_file:", f["file"], f["watertight"])
+            rel = lambda p: "/".join(p["url"].split("/files/")[1].split("/"))
+            x = out(await s.call_tool("export_obj", {"name": "set", "parts": [
+                {"file": rel(e["parts"]["botten"]), "color": "blue"},
+                {"file": rel(e["parts"]["lock"]), "color": "red"}]}))
+            print("export_obj:", x["parts"], x["triangles"])
+            res = await s.call_tool("list_files", {})
+            print("filer:", [json.loads(c.text)["file"] for c in res.content])
             res = await s.call_tool("list_models", {})
             print("lista:", [json.loads(c.text)["model_id"] for c in res.content])
 

@@ -6,3 +6,7 @@ uvicorn
 starlette
 pillow
 fonttools
+scipy
+networkx
+fast-simplification
+httpx

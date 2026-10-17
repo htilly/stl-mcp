@@ -66,6 +66,12 @@ sätter en cookie.
 | `reply_to_comment` | svara på en kommentar, eventuellt markera den löst |
 | `render_model` | PNG-bild (iso/fram/ovan/höger) så att Claude kan granska modellen visuellt |
 | `list_models`, `revert_model`, `duplicate_model`, `delete_model` | |
+| `import_file` | tar in STL/OBJ/GLB/PLY/OFF via `url` eller `data_base64` (zip med obj+mtl packas upp) |
+| `file_info` | mått, bounds, volym, antal lösa delar |
+| `modify_file` | skala, rotera, spegla, placera, lägg till/skär bort former (t.ex. skruvhål), laga nät, förenkla |
+| `split_file` | delar upp en fil i sina lösa delar |
+| `export_obj` | slår ihop flera STL (även bibliotekets, `<model_id>/v3/lock.stl`) till en färgad OBJ (+ .mtl och .zip) |
+| `list_files`, `delete_file` | fristående filer (import/export) |
 
 ### CSG-spec i korthet
 ```json
@@ -112,6 +118,22 @@ Exempel med mallar, en platta med försänkta M3-hål och ingraverad text:
 ]}}
 ```
 
+## Tinkercad
+Tinkercad har inget offentligt API, så utbytet går via filer:
+
+- **Till Tinkercad:** ladda ned `.stl` (en del) eller `export_obj`-resultatet (flera färgade delar) och
+  välj *Import* i Tinkercad. Filer större än `TINKERCAD_MAX_MB` (default 25) får automatiskt en
+  förenklad kopia `<namn>_tinkercad.stl`.
+- **Från Tinkercad:** *Export* → `.STL` eller `.OBJ` (zip). Ladda upp filen till servern:
+  ```
+  curl -T modell.stl -H "Authorization: Bearer <token>" https://<din-url>/upload/modell.stl
+  ```
+  eller låt Claude hämta den med `import_file` (url). Bygg sedan vidare med `modify_file`.
+  `import_file` hämtar bara från publika adresser om inte `ALLOW_PRIVATE_URLS=1`.
+
+Importerade och modifierade filer är fristående filer i `STL_DIR` (`/files/<namn>`). De syns inte
+i webbens bibliotek.
+
 ## Lagring
 `STL_DIR/models/<id>/model.json` (recept och historik) och `v<N>/<del>.stl`. De 50 senaste
 versionerna behåller sina filer. Äldre versioner kan återskapas med `revert_model`.
@@ -120,7 +142,8 @@ versionerna behåller sina filer. Äldre versioner kan återskapas med `revert_m
 Sätt alltid `MCP_TOKEN` och lägg servern bakom HTTPS. Webbgränssnittet kräver token (cookie)
 om inte `UI_PUBLIC=1`, som gör det läsbart för alla medan ändringar fortfarande kräver token.
 `FILES_PUBLIC=1` gör bara STL-länkarna klickbara utan token (modell-id:n går att gissa). Lämna
-`ALLOW_SCRIPT` av om servern är nåbar utifrån. CSG-specen är säker att låta Claude skriva.
+`ALLOW_SCRIPT` av om servern är nåbar utifrån. `/upload/*` kräver alltid token när
+`MCP_TOKEN` är satt. CSG-specen är säker att låta Claude skriva.
 
 three.js (MIT) levereras lokalt från `web/vendor/three`, så gränssnittet behöver ingen CDN.
 Typsnittet DejaVu Sans (fri licens, se `fonts/LICENSE`) används för text-mallen.
