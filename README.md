@@ -31,6 +31,12 @@ docker compose up -d --build
 ```
 Utan Docker: `pip install -r requirements.txt && MCP_TOKEN=... python server.py`
 
+Containern lyssnar bara på `127.0.0.1:8765`. Sätt `BIND=0.0.0.0` för att exponera porten direkt,
+eller sätt `DOMAIN` och kör `docker compose --profile caddy up -d` för automatiskt HTTPS.
+
+**Automatisk deploy** till egen server med en self-hosted GitHub-runner: se
+[`deploy/README.md`](deploy/README.md).
+
 Öppna `http://localhost:8765/` och logga in med token, eller gå till `/?token=<token>`, som
 sätter en cookie.
 

@@ -1,0 +1,7 @@
+{$DOMAIN} {
+	encode gzip
+	reverse_proxy stl-mcp:8765 {
+		# SSE (live-uppdateringar) och MCP-strömmar ska inte buffras
+		flush_interval -1
+	}
+}

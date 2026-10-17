@@ -2,11 +2,31 @@ services:
   stl-mcp:
     build: .
     restart: unless-stopped
-    ports: ["8765:8765"]
+    # bara lokalt som default – exponera via reverse proxy (Caddy-profilen nedan eller egen)
+    ports: ["${BIND:-127.0.0.1}:8765:8765"]
     environment:
       MCP_TOKEN: ${MCP_TOKEN:?sätt MCP_TOKEN i .env}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8765}
       ALLOW_SCRIPT: ${ALLOW_SCRIPT:-0}
       FILES_PUBLIC: ${FILES_PUBLIC:-0}
       UI_PUBLIC: ${UI_PUBLIC:-0}
-    volumes: ["./data:/data"]
+    volumes: ["${DATA_DIR:-./data}:/data"]
+
+  # Valfri HTTPS med automatiskt certifikat: `docker compose --profile caddy up -d`
+  # Kräver DOMAIN i .env, DNS som pekar hit och lediga portar 80/443.
+  caddy:
+    image: caddy:2.8
+    profiles: [caddy]
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      DOMAIN: ${DOMAIN:-}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [stl-mcp]
+
+volumes:
+  caddy_data:
+  caddy_config:
