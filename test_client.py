@@ -5,6 +5,8 @@ import json
 import os
 import sys
 
+import httpx
+
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
@@ -58,6 +60,30 @@ async def main():
 
             r = await s.call_tool("update_model", {"model_id": m["model_id"], "changes": {"/root/op": "nope"}})
             print("felhantering:", r.isError, r.content[0].text[:80])
+            # mallar + kommentarer
+            p = out(await s.call_tool("create_model", {"name": "Platta med skruvar", "spec": {
+                "vars": {"t": 4},
+                "root": {"op": "difference", "children": [
+                    {"shape": "box", "size": [60, 30, "=t"], "radius": 3, "round": "vertical"},
+                    {"name": "skruvhål", "shape": "screw_hole", "size": "M3", "head": "countersunk",
+                     "h": "=t", "translate": [8, 15, "=t"], "array": {"count": [2, 1, 1], "step": [44, 0, 0]}},
+                    {"shape": "text", "text": "OK", "size": 8, "h": 1, "halign": "center",
+                     "valign": "center", "translate": [30, 15, "=t-0.6"]}]}}}))
+            print("mallar:", p["model_id"], p["parts"]["model"]["extents_mm"], p["parts"]["model"]["watertight"])
+            async with httpx.AsyncClient(base_url=URL, headers={"Authorization": f"Bearer {TOKEN}"}) as http:
+                r = await http.post(f"/api/models/{p['model_id']}", json={
+                    "action": "comment_add", "text": "hålet här ska vara 2 mm större",
+                    "point": [8.2, 15.1, 4.0], "part": "model"})
+                assert r.status_code == 200, r.text
+            g = out(await s.call_tool("get_model", {"model_id": p["model_id"]}))
+            c = g["comments"][0]
+            print("kommentar:", c["id"], c["text"], "→", c["near_nodes"][0])
+            assert c["near_nodes"][0]["pointer"] == "/root/children/1", c["near_nodes"]
+            u = out(await s.call_tool("update_model", {"model_id": p["model_id"],
+                                                       "changes": {"/root/children/1/size": "M4"},
+                                                       "note": "M4-hål", "resolves": [c["id"]]}))
+            g = out(await s.call_tool("get_model", {"model_id": p["model_id"]}))
+            print("efter åtgärd: öppna", len(g["comments"]), "lösta", g["resolved_comments"], "v", u["version"])
             res = await s.call_tool("list_models", {})
             print("lista:", [json.loads(c.text)["model_id"] for c in res.content])
 

@@ -243,11 +243,13 @@ class Store:
 
     def update(self, mid: str, *, params: dict | None = None, changes: dict | None = None,
                remove: list[str] | None = None, note: str = "", name: str | None = None,
-               description: str | None = None) -> dict:
+               description: str | None = None, resolves: list[str] | None = None) -> dict:
         with self.lock:
             m = self._read(mid)
             cur = self.current(m)
             kind = cur["kind"]
+            for cid in resolves or []:
+                self._comment(m, cid)                          # validera innan bygget
             if params is not None or changes or remove:
                 base = params if params is not None else cur["params"]
                 newp = apply_changes(kind, base, changes, remove)
@@ -256,6 +258,12 @@ class Store:
                     bits += [f"-{r}" for r in remove or []]
                     note = ", ".join(bits) or "nytt recept"
                 self._new_version(m, kind, newp, note)
+            for cid in resolves or []:
+                c = self._comment(m, cid)
+                c["status"] = "resolved"
+                msg = f"Åtgärdat i v{m['current']}" + (f": {note}" if note else "")
+                c["replies"].append({"author": "claude", "text": msg, "at": time.time(),
+                                     "version": m["current"]})
             if name is not None:
                 m["name"] = name
             if description is not None:
@@ -289,6 +297,75 @@ class Store:
         cur = self.current(m)
         return self.create(name, cur["kind"], copy.deepcopy(cur["params"]), m.get("description", ""),
                            f"kopia av {mid} v{cur['version']}")
+
+    # -- kommentarer (pekas ut i webbens 3D-vy, läses och besvaras av Claude)
+    @staticmethod
+    def _comment(m: dict, cid: str) -> dict:
+        for c in m.get("comments", []):
+            if c["id"] == cid:
+                return c
+        raise KeyError(f"kommentaren '{cid}' finns inte på '{m['id']}'")
+
+    def _hints(self, m: dict, version: int, part: str | None, point) -> dict:
+        """Koppla en punkt till receptet: närmaste CSG-noder, eller invändiga koordinater för lådor."""
+        v = self.version(m, version)
+        try:
+            if v["kind"] == "csg":
+                return {"near_nodes": csg.locate(v["params"], part, point)}
+            if v["kind"] == "enclosure":
+                p = v["params"]
+                w, fl = p.get("wall", 2.4), p.get("floor", 2.4)
+                inner = [round(point[0] - w, 2), round(point[1] - w, 2)]
+                if part == "botten":
+                    inner.append(round(point[2] - fl, 2))
+                return {"inner_xy" if part != "botten" else "inner_xyz": inner}
+        except Exception:  # noqa: BLE001 – ledtrådar är best effort
+            pass
+        return {}
+
+    def add_comment(self, mid: str, text: str, point=None, normal=None, part: str | None = None,
+                    version: int | None = None, author: str = "user") -> dict:
+        text = (text or "").strip()
+        if not text:
+            raise ValueError("kommentaren är tom")
+        with self.lock:
+            m = self._read(mid)
+            comments = m.setdefault("comments", [])
+            ver = int(version or m["current"])
+            self.version(m, ver)
+            n = max([int(c["id"][1:]) for c in comments] or [0]) + 1
+            c = {"id": f"c{n}", "text": text[:2000], "author": author, "created": time.time(),
+                 "version": ver, "part": part, "status": "open", "replies": []}
+            if point is not None:
+                c["point"] = [round(float(x), 2) for x in point][:3]
+                if normal is not None:
+                    c["normal"] = [round(float(x), 3) for x in normal][:3]
+                c.update(self._hints(m, ver, part, c["point"]))
+            comments.append(c)
+            self._write(m)
+            return c
+
+    def comment_action(self, mid: str, cid: str, action: str, text: str = "",
+                       author: str = "user") -> dict:
+        with self.lock:
+            m = self._read(mid)
+            if action == "delete":
+                self._comment(m, cid)
+                m["comments"] = [c for c in m["comments"] if c["id"] != cid]
+                self._write(m)
+                return m
+            c = self._comment(m, cid)
+            if action in ("reply", "resolve") and text.strip():
+                c["replies"].append({"author": author, "text": text.strip()[:2000], "at": time.time(),
+                                     "version": m["current"]})
+            if action == "resolve":
+                c["status"] = "resolved"
+            elif action == "reopen":
+                c["status"] = "open"
+            elif action != "reply":
+                raise ValueError(f"okänd kommentarsåtgärd '{action}'")
+            self._write(m)
+            return m
 
     def delete(self, mid: str):
         with self.lock:

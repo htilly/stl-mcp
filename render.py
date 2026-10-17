@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import io
 import math
+from pathlib import Path
 
 import numpy as np
 import trimesh
@@ -79,7 +80,8 @@ def _rot(az, el):
 
 
 def _font(size):
-    for f in ("DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"):
+    bundled = str(Path(__file__).parent / "fonts" / "DejaVuSans.ttf")
+    for f in (bundled, "DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"):
         try:
             return ImageFont.truetype(f, size)
         except OSError:

@@ -5,3 +5,4 @@ numpy
 uvicorn
 starlette
 pillow
+fonttools

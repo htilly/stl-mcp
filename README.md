@@ -7,6 +7,10 @@ med ett webbgränssnitt för att se, rotera och bläddra bland modellerna.
 - **Bibliotek** på `/`: alla modeller med förhandsbild, sök, uppdateras live
 - **3D-vy** på `/m/<id>`: rotera/zooma, visa/dölj delar, versionshistorik, redigera parametrar,
   ladda ner STL. Vyn uppdateras **direkt** när Claude ändrar modellen.
+- **Kommentarer**: klicka på en punkt i modellen och skriv vad som ska ändras. Claude ser
+  punkten och vilken del av receptet som ligger där.
+- **Mallar**: skruvhål (M2–M5, försänkta/cylindriska, mutterficka), värmeinsatser, skruvtorn,
+  snäpplås, gångjärn och text.
 
 ## Idén: modeller är recept, inte filer
 
@@ -23,6 +27,11 @@ Typiskt arbetsflöde, med 3D-vyn öppen i webbläsaren bredvid chatten:
    historiken visar v2.
 4. Du kan också ändra parametrarna direkt i webben. Claude ser ändringen nästa gång den läser
    modellen med `get_model`.
+5. Eller peka: klicka **💬 Kommentera**, klicka på hålet och skriv *"2 mm större"*. Säg sedan
+   *"titta på kommentarerna"*. Claude får punkten, delen och `near_nodes`, alltså vilken nod i
+   receptet som ligger där (t.ex. `/root/children/1`, ett `screw_hole`). Den ändrar modellen
+   och stänger kommentaren med `update_model(..., resolves=["c1"])`, eller svarar med
+   `reply_to_comment`.
 
 ## Köra
 ```
@@ -53,7 +62,8 @@ sätter en cookie.
 | `create_enclosure` | låda + lock med hörnskruvar, distanser, utskärningar och lockhål |
 | `create_from_script` | godtycklig trimesh-Python (kräver `ALLOW_SCRIPT=1`, kör kod på servern!) |
 | `update_model` | ändra variabler/parametrar eller valfritt värde via JSON-pekare → ny version |
-| `get_model` | receptet, mått och historik |
+| `get_model` | receptet, mått, historik och öppna kommentarer (med `near_nodes`) |
+| `reply_to_comment` | svara på en kommentar, eventuellt markera den löst |
 | `render_model` | PNG-bild (iso/fram/ovan/höger) så att Claude kan granska modellen visuellt |
 | `list_models`, `revert_model`, `duplicate_model`, `delete_model` | |
 
@@ -70,6 +80,9 @@ sätter en cookie.
 ```
 - Former: `box` (med `radius`), `cylinder`, `cone`, `sphere`, `tube`, `torus`, `wedge`,
   `extrude` (polygon/cirkel/rektangel-profil, `twist`, `scale_top`) och `revolve`
+- Mallar: `screw_hole`, `heat_insert`, `nut_trap` (skärande: ytan vid z=0, går nedåt),
+  `boss`, `snap_hook`, `hinge` (print-in-place eller med separat axel) och `text`
+  (DejaVu Sans, upphöjd eller ingraverad). Mått för M2–M5 finns i `templates.py`.
 - Operationer: `union`, `difference`, `intersection`, `hull`, `minkowski`
 - Alla noder: `translate`, `rotate` (grader), `scale`, `mirror`, `array`, `polar`, `hidden`
 - Flera delar (en STL per del): `{"parts": {"botten": {...}, "lock": {...}}}`
@@ -85,6 +98,18 @@ Fullständig referens finns i `csg.py` (`SPEC_HELP`), och Claude får den i verk
 {"changes": {"/root/children/-": {"shape": ...}}} // lägg till en nod
 {"remove": ["/root/children/2"]}                  // ta bort en nod
 {"params": {...}}                                 // ersätt hela receptet
+{"changes": {...}, "resolves": ["c1"]}            // ...och markera kommentar c1 som åtgärdad
+```
+
+Exempel med mallar, en platta med försänkta M3-hål och ingraverad text:
+```json
+{"vars": {"t": 4}, "root": {"op": "difference", "children": [
+  {"shape": "box", "size": [60, 30, "=t"], "radius": 3, "round": "vertical"},
+  {"shape": "screw_hole", "size": "M3", "head": "countersunk", "h": "=t",
+   "translate": [8, 15, "=t"], "array": {"count": [2, 1, 1], "step": [44, 0, 0]}},
+  {"shape": "text", "text": "OK", "size": 8, "h": 1, "halign": "center", "valign": "center",
+   "translate": [30, 15, "=t-0.6"]}
+]}}
 ```
 
 ## Lagring
@@ -98,3 +123,4 @@ om inte `UI_PUBLIC=1`, som gör det läsbart för alla medan ändringar fortfara
 `ALLOW_SCRIPT` av om servern är nåbar utifrån. CSG-specen är säker att låta Claude skriva.
 
 three.js (MIT) levereras lokalt från `web/vendor/three`, så gränssnittet behöver ingen CDN.
+Typsnittet DejaVu Sans (fri licens, se `fonts/LICENSE`) används för text-mallen.

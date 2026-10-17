@@ -30,7 +30,17 @@
       <button id="edges" class="on">Kanter</button>
       <button id="wire">Trådnät</button>
       <button id="rotate">Snurra</button>
+      <button id="commentmode" title="Klicka sedan på modellen för att lämna en kommentar till Claude">💬 Kommentera</button>
     </div>
+    <div id="pins"></div>
+    <form class="cpop" id="cpop" hidden>
+      <textarea id="ctext" rows="3" placeholder="T.ex. ”hålet här ska vara 2 mm större”"></textarea>
+      <div class="row">
+        <button class="primary" type="submit">Spara</button>
+        <button type="button" id="ccancel">Avbryt</button>
+        <span class="hint">Ctrl+Enter</span>
+      </div>
+    </form>
     <div class="loading" id="loading">Laddar…</div>
     <div class="hud" id="hud"></div>
     <div class="toast" id="toast"></div>
@@ -47,6 +57,15 @@
     <div class="sec">
       <h2>Delar <span id="vlabel" class="pill"></span></h2>
       <div id="parts"></div>
+    </div>
+    <div class="sec">
+      <h2>Kommentarer <span class="pill" id="ccount"></span></h2>
+      <div id="comments"></div>
+      <div class="row hint" style="margin-top:6px">
+        <label><input type="checkbox" id="showresolved"> Visa lösta</label>
+      </div>
+      <p class="hint" id="chint">Klicka <b>💬 Kommentera</b> och sedan på modellen. Säg till Claude
+        ”titta på kommentarerna” så ser den exakt vilken del du menar.</p>
     </div>
     <div class="sec" id="paramsec" hidden>
       <h2>Parametrar</h2>
@@ -141,7 +160,7 @@ function resize() {
 }
 new ResizeObserver(resize).observe(stage);
 
-renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); updatePins(); });
 
 function bbox() {
   const b = new THREE.Box3();
@@ -296,6 +315,8 @@ function renderSide() {
   $("veractions").hidden = viewVersion === model.current;
 
   $("recipe").textContent = JSON.stringify(ver.params, null, 2);
+  renderComments();
+  renderPins();
 }
 
 // Redigerbara parametrar: vars för CSG, toppnivåvärden för övriga.
@@ -336,6 +357,150 @@ $("apply").onclick = async () => {
   try { await api(`/api/models/${encodeURIComponent(id)}`, { method: "POST", body: { action: "update", changes, note } }); }
   catch (e) { toast(e.message, true); $("apply").disabled = false; }
 };
+
+// ------------------------------------------------------------ kommentarer
+let commentMode = false, showResolved = false, pending = null, focusId = null;
+const raycaster = new THREE.Raycaster();
+const pinsEl = $("pins");
+
+const visibleComments = () => (model?.comments || []).filter((c) => showResolved || c.status === "open");
+
+function worldOf(c) {
+  const obj = group.children.find((o) => o.name === c.part);
+  if (!obj || !obj.visible || !c.point) return null;
+  return new THREE.Vector3(...c.point).add(obj.position);
+}
+
+function renderPins() {
+  const list = visibleComments().filter((c) => c.point);
+  pinsEl.innerHTML = list.map((c) => `<button class="pin${c.status !== "open" ? " done" : ""}${c.id === focusId ? " focus" : ""}"
+      data-id="${c.id}" title="${esc(c.text)}">${c.id.slice(1)}</button>`).join("")
+    + (pending ? '<span class="pin new" data-id="new">+</span>' : "");
+  pinsEl.querySelectorAll("button.pin").forEach((b) => b.onclick = () => focusComment(b.dataset.id, false));
+}
+
+const _v = new THREE.Vector3();
+function updatePins() {
+  if (!pinsEl.childElementCount) return;
+  const w = stage.clientWidth, h = stage.clientHeight;
+  for (const el of pinsEl.children) {
+    const id = el.dataset.id;
+    let p = null;
+    if (id === "new") p = pending && pending.world;
+    else { const c = model.comments.find((x) => x.id === id); p = c && worldOf(c); }
+    if (!p) { el.style.display = "none"; continue; }
+    _v.copy(p).project(camera);
+    if (_v.z > 1) { el.style.display = "none"; continue; }
+    el.style.display = "";
+    el.style.transform = `translate(${(_v.x + 1) / 2 * w}px, ${(1 - _v.y) / 2 * h}px)`;
+  }
+}
+
+function focusComment(id, moveCamera) {
+  focusId = id;
+  renderPins(); renderComments();
+  const item = document.querySelector(`.cmt[data-id="${id}"]`);
+  item?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  const c = model.comments.find((x) => x.id === id);
+  const p = c && worldOf(c);
+  if (moveCamera && p) {
+    const off = camera.position.clone().sub(controls.target);
+    controls.target.copy(p);
+    camera.position.copy(p).add(off);
+  }
+}
+
+function renderComments() {
+  const all = model.comments || [];
+  const open = all.filter((c) => c.status === "open").length;
+  $("ccount").textContent = all.length ? `${open} öppna` : "";
+  const list = visibleComments();
+  $("comments").innerHTML = list.length ? list.map((c) => `
+    <div class="cmt${c.status !== "open" ? " done" : ""}${c.id === focusId ? " focus" : ""}" data-id="${c.id}">
+      <span class="badge">${c.id.slice(1)}</span>
+      <div>
+        <div class="ctext">${esc(c.text)}</div>
+        <div class="hint">v${c.version}${c.part ? " · " + esc(c.part) : ""} · ${ago(c.created)}${c.point ? "" : " · utan punkt"}</div>
+        ${(c.replies || []).map((r) => `<div class="reply ${r.author}"><b>${r.author === "claude" ? "Claude" : "Du"}:</b> ${esc(r.text)}</div>`).join("")}
+        <div class="row cact">
+          ${c.status === "open" ? `<button data-a="resolve">Markera löst</button>` : `<button data-a="reopen">Öppna igen</button>`}
+          <button data-a="reply">Svara</button>
+          <button data-a="delete" class="danger">Radera</button>
+        </div>
+      </div>
+    </div>`).join("") : "";
+  document.querySelectorAll(".cmt").forEach((el) => {
+    const id = el.dataset.id;
+    el.onclick = (e) => { if (!e.target.closest("button")) focusComment(id, true); };
+    el.querySelectorAll("button[data-a]").forEach((b) => b.onclick = async () => {
+      const a = b.dataset.a;
+      let text = "";
+      if (a === "reply" && !(text = prompt("Svar:") || "")) return;
+      if (a === "delete" && !confirm("Radera kommentaren?")) return;
+      await post({ action: "comment_" + a, id, text });
+    });
+  });
+  $("chint").hidden = all.length > 0;
+}
+
+function setCommentMode(on) {
+  commentMode = on;
+  $("commentmode").classList.toggle("on", on);
+  stage.classList.toggle("commenting", on);
+  if (!on) closePopup();
+}
+
+function closePopup() {
+  pending = null;
+  $("cpop").hidden = true;
+  renderPins();
+}
+
+let downAt = null;
+renderer.domElement.addEventListener("pointerdown", (e) => { downAt = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener("pointerup", (e) => {
+  if (!commentMode || !downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4) return;
+  const r = renderer.domElement.getBoundingClientRect();
+  raycaster.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1,
+    -((e.clientY - r.top) / r.height) * 2 + 1), camera);
+  const meshes = group.children.filter((o) => o.visible).map((o) => o.children[0]);
+  const hit = raycaster.intersectObjects(meshes, false)[0];
+  if (!hit) return;
+  const obj = hit.object.parent;
+  pending = {
+    world: hit.point.clone(),
+    point: hit.point.clone().sub(obj.position).toArray(),
+    normal: hit.face ? hit.face.normal.toArray() : null,
+    part: obj.name,
+  };
+  const pop = $("cpop");
+  pop.hidden = false;
+  const x = Math.min(e.clientX - r.left + 14, r.width - pop.offsetWidth - 8);
+  const y = Math.min(e.clientY - r.top + 14, r.height - pop.offsetHeight - 8);
+  pop.style.left = Math.max(8, x) + "px"; pop.style.top = Math.max(8, y) + "px";
+  $("ctext").value = ""; $("ctext").focus();
+  renderPins();
+});
+
+$("cpop").onsubmit = async (e) => {
+  e.preventDefault();
+  const text = $("ctext").value.trim();
+  if (!text || !pending) return;
+  const { point, normal, part } = pending;
+  try {
+    await post({ action: "comment_add", text, point, normal, part, version: viewVersion });
+    closePopup();
+    toast("Kommentar sparad – be Claude titta på den");
+  } catch { /* toast visas av post */ }
+};
+$("ctext").onkeydown = (e) => {
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) $("cpop").requestSubmit();
+  if (e.key === "Escape") closePopup();
+};
+$("ccancel").onclick = closePopup;
+$("commentmode").onclick = () => setCommentMode(!commentMode);
+$("showresolved").onchange = (e) => { showResolved = e.target.checked; renderComments(); renderPins(); };
+addEventListener("keydown", (e) => { if (e.key === "Escape" && commentMode && $("cpop").hidden) setCommentMode(false); });
 
 // ------------------------------------------------------------ händelser
 function toast(msg, err = false) {

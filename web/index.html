@@ -38,7 +38,8 @@ function render(flashId) {
     const parts = Object.values(m.parts);
     const dims = parts.length === 1 ? fmt(parts[0].extents_mm) : `${parts.length} delar`;
     return `<a class="card${m.id === flashId ? " flash" : ""}" href="/m/${encodeURIComponent(m.id)}">
-      <div class="thumb"><img loading="lazy" alt="" src="/api/models/${encodeURIComponent(m.id)}/preview.png?v=${m.version}"></div>
+      <div class="thumb"><img loading="lazy" alt="" src="/api/models/${encodeURIComponent(m.id)}/preview.png?v=${m.version}">
+        ${m.open_comments ? `<span class="cbadge" title="Öppna kommentarer">💬 ${m.open_comments}</span>` : ""}</div>
       <div class="meta">
         <div class="name" title="${esc(m.name)}">${esc(m.name)}</div>
         <div class="sub"><span>${dims}</span><span>v${m.version}</span><span>${ago(m.updated)}</span></div>

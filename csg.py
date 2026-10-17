@@ -24,6 +24,8 @@ import manifold3d as mf
 import numpy as np
 import trimesh
 
+from templates import HELP as TEMPLATE_HELP, TEMPLATES
+
 M = mf.Manifold
 CS = mf.CrossSection
 
@@ -217,8 +219,10 @@ def _shape(n) -> M:
                           tuple(n.get("scale_top", (1.0, 1.0))))
     if kind == "revolve":
         return _profile(n).revolve(segs, float(n.get("degrees", 360)))
+    if kind in TEMPLATES:
+        return TEMPLATES[kind](n)
     raise ValueError(f"okänd form '{kind}'. Tillgängliga: box, cylinder, cone, sphere, tube, torus, "
-                     "wedge, extrude, revolve")
+                     f"wedge, extrude, revolve, {', '.join(TEMPLATES)}")
 
 
 def _transform(m: M, n: dict) -> M:
@@ -323,6 +327,55 @@ def build(spec: dict) -> dict[str, trimesh.Trimesh]:
     return out
 
 
+def locate(spec: dict, part: str | None, point, limit: int = 4) -> list[dict]:
+    """Hitta de noder (former) i specen som ligger närmast en punkt – används för att koppla en
+    kommentar i webben till rätt del av receptet. Returnerar [{pointer, shape, name?, distance_mm}]."""
+    env = resolve_vars(spec.get("vars", {}))
+    if "parts" in spec:
+        roots = {k: (f"/parts/{k}", v) for k, v in spec["parts"].items()}
+        if part not in roots:
+            part = next(iter(roots))
+        start = [roots[part]]
+    else:
+        start = [("/root", spec.get("root"))]
+    p = np.asarray(point, dtype=float)
+    found = []
+
+    def walk(node, ptr, ancestors, depth=0):
+        if not isinstance(node, dict) or node.get("hidden") or depth > 64:
+            return
+        if "op" in node:
+            res = resolve({k: v for k, v in node.items() if k != "children"}, env)
+            for i, c in enumerate(node.get("children", [])):
+                walk(c, f"{ptr}/children/{i}", [res] + ancestors, depth + 1)
+            return
+        if "shape" not in node:
+            return
+        try:
+            m = build_node(node, env)
+            for a in ancestors:                               # inifrån och ut
+                m = _transform(_array(m, a), a)
+        except Exception:  # noqa: BLE001 – en trasig nod ska inte stoppa sökningen
+            return
+        if m.is_empty():
+            return
+        bb = m.bounding_box()
+        lo, hi = np.array(bb[:3]), np.array(bb[3:])
+        dist = float(np.linalg.norm(np.maximum(0, np.maximum(lo - p, p - hi))))
+        item = {"pointer": ptr, "shape": node["shape"], "distance_mm": round(dist, 2),
+                "_vol": float(np.prod(hi - lo))}
+        if node.get("name"):
+            item["name"] = node["name"]
+        found.append(item)
+
+    for ptr, node in start:
+        walk(node, ptr, [])
+    found.sort(key=lambda f: (f["distance_mm"], f["_vol"]))
+    for f in found:
+        f.pop("_vol")
+    return found[:limit]
+
+
 SPEC_HELP = """\
 CSG-spec (mm, z uppåt, byggplatta z=0):
 {"vars": {"w": 40}, "root": <nod>}            – en del
@@ -346,4 +399,5 @@ Alla noder: translate:[x,y,z], rotate:[rx,ry,rz] (grader), scale, mirror:[nx,ny,
   array:{count:[nx,ny,nz], step:[dx,dy,dz]}, polar:{count, degrees?}, segments, hidden:true,
   name:"valfri etikett"
 Värden kan vara uttryck: "=w/2+wall", "=max(a,b)", "=sqrt(x)", "=cos(30)" (grader).
-"""
+
+""" + TEMPLATE_HELP

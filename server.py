@@ -52,8 +52,12 @@ mcp = FastMCP(
         "kan rotera modellen. Arbetsflöde: create_model (CSG-spec) eller create_enclosure → "
         "render_model för att själv se resultatet → update_model med små ändringar (t.ex. "
         "{'wall': 3} eller {'/root/children/1/d': 8}) tills användaren är nöjd. Använd "
-        "variabler i 'vars' för mått som troligen kommer justeras. get_model visar receptet. "
-        "Ge alltid användaren viewer_url."),
+        "variabler i 'vars' för mått som troligen kommer justeras, och mallarna (screw_hole, "
+        "heat_insert, boss, snap_hook, hinge, text …) i stället för att bygga sådant själv. "
+        "get_model visar receptet och användarens kommentarer: de är punkter som användaren "
+        "klickat ut i 3D-vyn, med near_nodes = vilka noder i receptet som ligger närmast. "
+        "Åtgärda dem med update_model(..., resolves=[id]) eller svara med reply_to_comment. "
+        "list_models visar open_comments per modell. Ge alltid användaren viewer_url."),
     transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
 )
 
@@ -77,12 +81,25 @@ def _summary(m: dict, full: bool = False) -> dict:
         out["description"] = m.get("description", "")
         out["params"] = cur["params"]
         out["history"] = [{"version": v["version"], "note": v["note"]} for v in m["versions"][-15:]]
+        comments = m.get("comments", [])
+        out["comments"] = [_comment_view(c) for c in comments if c["status"] == "open"]
+        out["resolved_comments"] = sum(c["status"] != "open" for c in comments)
     return out
+
+
+def _comment_view(c: dict) -> dict:
+    keep = ("id", "text", "part", "point", "normal", "version", "near_nodes", "inner_xy",
+            "inner_xyz", "replies")
+    return {k: c[k] for k in keep if k in c and c[k] not in (None, [])}
 
 
 async def _run(fn, *a, **kw):
     """Kör tunga byggen i tråd så servern (och webb-UI:t) förblir responsiv."""
     return await anyio.to_thread.run_sync(lambda: fn(*a, **kw))
+
+
+def _open(m: dict) -> int:
+    return sum(c["status"] == "open" for c in m.get("comments", []))
 
 
 # ---------------------------------------------------------------- MCP-verktyg
@@ -142,7 +159,7 @@ async def create_from_script(name: str, code: str, description: str = "") -> dic
 @mcp.tool()
 async def update_model(model_id: str, changes: dict | None = None, remove: list[str] | None = None,
                        params: dict | None = None, note: str = "", name: str | None = None,
-                       description: str | None = None) -> dict:
+                       description: str | None = None, resolves: list[str] | None = None) -> dict:
     """Justerar en modell och skapar en ny version (webbvyn uppdateras direkt).
 
     changes: {"nyckel": värde} – för CSG-modeller sätter det vars[nyckel], annars parametern.
@@ -151,17 +168,30 @@ async def update_model(model_id: str, changes: dict | None = None, remove: list[
     remove:  lista med JSON-pekare att ta bort, t.ex. ["/root/children/3"].
     params:  ersätt hela receptet (spec för CSG, {"code": ...} för script).
     note:    kort beskrivning av ändringen (visas i historiken).
+    resolves: kommentar-id:n (t.ex. ["c2"]) som ändringen åtgärdar – markeras lösta med svar.
     Läs receptet med get_model först om du är osäker på strukturen.
     """
     m = await _run(store.update, model_id, params=params, changes=changes, remove=remove,
-                   note=note, name=name, description=description)
+                   note=note, name=name, description=description, resolves=resolves)
     return _summary(m)
 
 
 @mcp.tool()
 def get_model(model_id: str) -> dict:
-    """Hämtar modellens nuvarande recept (params), mått per del och versionshistorik."""
+    """Hämtar modellens nuvarande recept (params), mått per del, versionshistorik och öppna
+    kommentarer. En kommentar har text, point (mm, i delens koordinater = STL-filens), part,
+    version och near_nodes (JSON-pekare till de närmaste noderna i receptet)."""
     return _summary(store.get(model_id), full=True)
+
+
+@mcp.tool()
+def reply_to_comment(model_id: str, comment_id: str, text: str, resolve: bool = False) -> dict:
+    """Svarar på en kommentar från webben (t.ex. en motfråga), och markerar den löst om resolve=True.
+    Svaret syns direkt i 3D-vyn. Använd update_model(..., resolves=[id]) när du ändrat modellen."""
+    m = store.comment_action(model_id, comment_id, "resolve" if resolve else "reply", text,
+                             author="claude")
+    c = Store._comment(m, comment_id)
+    return {**_comment_view(c), "status": c["status"]}
 
 
 @mcp.tool()
@@ -193,7 +223,7 @@ def list_models() -> list[dict]:
         cur = Store.current(m)
         out.append({"model_id": m["id"], "name": m["name"], "kind": cur["kind"],
                     "version": cur["version"], "parts": list(cur["parts"]),
-                    "viewer_url": f"{PUBLIC_URL}/m/{m['id']}"})
+                    "open_comments": _open(m), "viewer_url": f"{PUBLIC_URL}/m/{m['id']}"})
     return out
 
 
@@ -269,7 +299,7 @@ async def api_models(_):
         cur = Store.current(m)
         out.append({"id": m["id"], "name": m["name"], "description": m.get("description", ""),
                     "updated": m["updated"], "version": cur["version"], "kind": cur["kind"],
-                    "versions": len(m["versions"]),
+                    "versions": len(m["versions"]), "open_comments": _open(m),
                     "parts": {n: {"url": f"/files/{m['id']}/{p['file']}",
                                   "extents_mm": p["extents_mm"]} for n, p in cur["parts"].items()}})
     return JSONResponse({"models": out, "revision": store.revision})
@@ -293,6 +323,13 @@ async def api_model(request):
             elif action == "update":
                 m = await _run(store.update, mid, params=body.get("params"),
                                changes=body.get("changes"), note=body.get("note", "från webben"))
+            elif action == "comment_add":
+                await _run(store.add_comment, mid, body.get("text", ""), body.get("point"),
+                           body.get("normal"), body.get("part"), body.get("version"))
+                m = store.get(mid)
+            elif action in ("comment_resolve", "comment_reopen", "comment_reply", "comment_delete"):
+                m = store.comment_action(mid, body["id"], action.removeprefix("comment_"),
+                                         body.get("text", ""))
             elif action == "duplicate":
                 m = await _run(store.duplicate, mid, body.get("name") or f"{mid} kopia")
             else:
