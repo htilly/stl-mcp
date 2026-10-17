@@ -33,6 +33,20 @@ Typical workflow, with the 3D view open in the browser next to the chat:
    and closes the comment with `update_model(..., resolves=["c1"])`, or answers with
    `reply_to_comment`.
 
+### Having Claude react to comments immediately
+Instead of saying *"look at the comments"*, run `tools/stl_watch.py watch` as a background monitor in a
+Claude Code session. It follows the server's `/api/events` stream and prints one
+`NEW_COMMENT model=<id> open=<n> url=...` line for each new open comment, which wakes Claude, who
+reads it (`tools/stl_watch.py comments`) and answers it with `update_model(..., resolves=[...])`.
+```
+export STL_MCP_URL=https://your-server          # default: https://stl.tilly.se
+export STL_MCP_TOKEN=...                        # or store it once in the macOS keychain:
+security add-generic-password -a "$USER" -s stl-mcp-token -U -w
+python3 tools/stl_watch.py watch
+```
+The script needs only the standard library and never prints the token. It runs while that session
+is open; comments made while nothing is watching simply wait.
+
 ## Running
 ```
 cp .env.example .env     # fill in MCP_TOKEN and PUBLIC_URL
