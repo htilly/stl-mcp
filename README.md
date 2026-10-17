@@ -15,6 +15,12 @@ Without Docker: `pip install -r requirements.txt && MCP_TOKEN=... python server.
 - claude.ai: Settings → Connectors → Add custom connector → `https://<your-url>/mcp`
   (claude.ai cannot send a custom header; put the server behind your reverse proxy/OAuth, or use Claude Desktop/Code.)
 
+## Tests
+```
+pip install -r requirements.txt -r requirements-dev.txt
+python -m pytest
+```
+
 ## Tools
 - `create_enclosure` – box + lid with corner screws, standoffs, cutouts, lid holes
 - `create_primitive` – box, cylinder, sphere, cone, tube
