@@ -5,8 +5,14 @@ with a web interface for viewing, rotating and browsing the models.
 
 - **MCP** (streamable HTTP) at `/mcp`
 - **Library** at `/`: all models with preview, search, live updates
+
+![The library](docs/img/library.png)
+
 - **3D view** at `/m/<id>`: rotate/zoom, show/hide parts, version history, edit parameters,
   download STL. The view updates **immediately** when Claude changes the model.
+
+![The 3D view](docs/img/viewer.png)
+
 - **Comments**: click a point on the model and write what should change. Claude sees the
   point and which part of the recipe is located there.
 - **Templates**: screw holes (M2–M5, countersunk/cylindrical, nut trap), heat inserts, screw bosses,
@@ -32,6 +38,58 @@ Typical workflow, with the 3D view open in the browser next to the chat:
    the recipe is located there (e.g. `/root/children/1`, a `screw_hole`). It changes the model
    and closes the comment with `update_model(..., resolves=["c1"])`, or answers with
    `reply_to_comment`.
+
+## Commenting directly in the UI
+
+Instead of describing *"the third hole, on the right side, near the top"* in chat, you point at it.
+
+1. Open the model at `/m/<id>` and click **💬 Comment** (<kbd>Esc</kbd> leaves comment mode).
+2. Click the spot on the model that you mean. A popup appears next to the point.
+3. Write what should change and press **Save** (or <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>Enter</kbd>).
+
+![Clicking a hole in comment mode and writing a comment](docs/img/comment-popup.png)
+
+The comment shows up as a numbered pin on the model and in the **Comments** list in the side panel.
+Click a comment in the list to centre the view on its pin. Each comment can be replied to, marked
+resolved/reopened or deleted; tick **Show resolved** to see the closed ones.
+
+![The saved comment as a pin on the model and in the side panel](docs/img/comment-pin.png)
+
+### What Claude sees
+Comments are stored with the model. `get_model` returns them with the exact point you clicked and
+`near_nodes`, the recipe nodes closest to that point, so Claude knows which part of the recipe you mean
+without guessing:
+
+```json
+{
+  "id": "c1",
+  "text": "Make this hole 2 mm larger so a marker fits",
+  "version": 1,
+  "part": "model",
+  "status": "open",
+  "point": [32.8, 13.07, 37.38],
+  "normal": [0.514, -0.858, 0.0],
+  "near_nodes": [
+    {"pointer": "/root/children/1", "shape": "cylinder", "distance_mm": 0.0},
+    {"pointer": "/root/children/0", "shape": "box", "distance_mm": 0.0}
+  ]
+}
+```
+
+### Example round trip
+1. You click the hole and write *"Make this hole 2 mm larger so a marker fits"*.
+2. You tell Claude *"look at the comments"* (or let [`tools/stl_watch.py`](#having-claude-react-to-comments-immediately)
+   do it automatically).
+3. Claude reads `near_nodes`, sees that `/root/children/1` is the pen hole cylinder driven by the variable `d`,
+   and calls:
+   ```jsonc
+   update_model("pen-holder", {"changes": {"d": 14}, "resolves": ["c1"]})
+   ```
+4. The 3D view reloads as v2 and the comment is marked resolved (hidden unless **Show resolved** is ticked).
+   If Claude needs more information it calls `reply_to_comment` instead, and the answer appears under your comment.
+
+Comments belong to the version they were made on (shown as `v1 · model` in the list), so you can still tell what
+a comment referred to after the model has changed.
 
 ### Having Claude react to comments immediately
 Instead of saying *"look at the comments"*, run `tools/stl_watch.py watch` as a background monitor in a
