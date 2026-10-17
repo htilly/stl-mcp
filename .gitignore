@@ -1,0 +1,11 @@
+# Secrets — MCP_TOKEN lives here. Never commit it.
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Generated STL files (STL_DIR default ./out; docker-compose mounts ./data)
+out/
+data/

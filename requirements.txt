@@ -1,0 +1,6 @@
+mcp>=1.2,<2
+trimesh
+manifold3d
+numpy
+uvicorn
+starlette
