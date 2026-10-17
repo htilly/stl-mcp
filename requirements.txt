@@ -4,6 +4,8 @@ manifold3d
 numpy
 uvicorn
 starlette
+pillow
+fonttools
 scipy
 networkx
 fast-simplification
