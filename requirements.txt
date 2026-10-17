@@ -4,3 +4,7 @@ manifold3d
 numpy
 uvicorn
 starlette
+scipy
+networkx
+fast-simplification
+httpx
