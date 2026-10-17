@@ -1,55 +1,43 @@
-# Deploy to tilly.se (self-hosted GitHub runner)
+# Deploy to tillyse (stl.tilly.se)
 
-The workflow `.github/workflows/deploy.yml` runs on push to `main` (or manually via *Run workflow*):
+Merging to `main` deploys automatically. Two workflows, mirroring the fiskeapp setup:
 
-1. **test** (GitHub-hosted): installs dependencies, starts the server and runs `test_client.py`
-   and auth checks.
-2. **deploy** (on the server, runner label `tillyse`): `deploy/deploy.sh` writes
-   `/opt/stl-mcp/.env`, runs `docker compose up -d --build` and waits for `/health`.
-   Data lives in `/opt/stl-mcp/data` and survives redeploys.
+1. **`Build and Push Docker Image`** (`.github/workflows/docker-image.yml`, GitHub-hosted):
+   runs the test suite, then builds the image and pushes `ghcr.io/htilly/stl-mcp:main` and
+   `:main-<short sha>`, with the commit baked in as `GIT_SHA`.
+2. **`Deploy to tillyse`** (`.github/workflows/deploy.yml`): triggered by a successful build.
+   - A gate job on GitHub's runner requires a push to `main` in this repo (no forks, no PRs)
+     and that both the build's actor and the re-run's actor are in `ALLOWED_ACTORS`.
+   - The deploy job runs on the self-hosted runner `stl-mcp-runner` (labels `tillyse,stl-mcp`)
+     in the `tillyse` environment, which only admits `main`.
+   - It pulls `:main-<sha>`, recreates **only** the `stl-mcp` service, and fails unless the
+     container logs `STL_MCP_READY sha=<that commit>` (printed by `server.py` once uvicorn is
+     listening), runs exactly the pulled image, answers `/health`, returns 401 on `/mcp`
+     without a token and accepts the token.
+   - On failure it rolls back to the previous `:main` and notifies ntfy. The Actions log is
+     public, so the startup log is only summarised in redacted form.
 
-## One-time setup
+The runner talks to Docker through a socket proxy with `BUILD=0` and `EXEC=0`: nothing is ever
+built on the server. Don't build `:main` locally on tillyse either - it would become the rollback
+target and break the image-id provenance check.
 
-1. **Runner token:** GitHub → repo → Settings → Actions → Runners → *New self-hosted runner*
-   → copy the string after `--token`. It is valid for one hour.
-2. **On the server** (as root):
-   ```
-   curl -fsSL https://raw.githubusercontent.com/htilly/stl-mcp/main/deploy/setup-runner.sh -o setup-runner.sh
-   sudo bash setup-runner.sh <TOKEN>
-   ```
-   Before the merge the script only exists on the PR branch. In that case replace `main` with
-   `feature/web-ui-parametric-models` in the URL.
-   The script installs Docker if missing, creates the user `gh-runner` and registers the
-   runner as a systemd service.
-3. **Repo settings** (Settings → Secrets and variables → Actions):
-   - Secret `MCP_TOKEN`: a long random string, e.g. from `openssl rand -hex 32`
-   - Variable `PUBLIC_URL`: e.g. `https://stl.tilly.se`
-   - Variable `DOMAIN` (optional): e.g. `stl.tilly.se` starts the built-in Caddy with automatic
-     HTTPS. This requires DNS pointing at the server and ports 80/443 being free.
-   - Variables `UI_PUBLIC`, `FILES_PUBLIC` (optional): `0`/`1`
-4. **Run** Actions → Deploy → *Run workflow*, or push to `main`.
+## Server side (already set up, lives outside this repo)
 
-## HTTPS when ports 80/443 are already in use (e.g. by the mail server)
+- `/config/docker-compose.yml`: services `stl-mcp` (`127.0.0.1:8892` -> `8765`, data in
+  `/config/stl-mcp/data`) and `stl-mcp-runner`.
+- `/config/secrets/stl-mcp.env`: `MCP_TOKEN`, `PUBLIC_URL`, `FILES_PUBLIC=0`, `ALLOW_SCRIPT=0`.
+- `/config/secrets/stl-mcp-runner.env`: `RUNNER_TOKEN`, `NTFY_TOKEN`, `MCP_TOKEN`.
+- SWAG site-conf `stl.tilly.se.conf` proxies to `127.0.0.1:8892` with `proxy_buffering off`
+  (MCP's streamable HTTP transport uses SSE).
 
-Leave `DOMAIN` empty. The app then only listens on `127.0.0.1:8765`. Add a vhost to the
-existing web server. Nginx:
-```nginx
-server {
-    server_name stl.tilly.se;
-    location / {
-        proxy_pass http://127.0.0.1:8765;
-        proxy_set_header Host $host;
-        proxy_http_version 1.1;
-        proxy_buffering off;          # live updates (SSE) and MCP streams
-        proxy_read_timeout 1h;
-    }
-    # + certificate (certbot --nginx -d stl.tilly.se)
-}
+The repo's own `docker-compose.yml` (with `build: .` and the optional Caddy profile) is for
+running stl-mcp on other machines; tillyse does not read it.
+
+## Rolling back manually
+
+Each deploy tags the previous image `rollback-<timestamp>` (see the run summary). On tillyse:
+```bash
+docker tag ghcr.io/htilly/stl-mcp:rollback-<timestamp> ghcr.io/htilly/stl-mcp:main
+cd /config && docker compose -p config --env-file /config/stl-mcp-runner/compose.env \
+  -f /config/docker-compose.yml up -d --no-deps --force-recreate stl-mcp
 ```
-
-## Security
-- The workflow is only triggered by push to `main` and manually, never by pull requests. Code from
-  forks is therefore not run on the server. If the repo is public: still set Settings → Actions →
-  *Require approval for all outside collaborators*.
-- The runner user is in the `docker` group, which effectively gives root on the server. Only give
-  trusted people write access to `main`.

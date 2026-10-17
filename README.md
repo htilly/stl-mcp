@@ -43,7 +43,7 @@ Without Docker: `pip install -r requirements.txt && MCP_TOKEN=... python server.
 The container only listens on `127.0.0.1:8765`. Set `BIND=0.0.0.0` to expose the port directly,
 or set `DOMAIN` and run `docker compose --profile caddy up -d` for automatic HTTPS.
 
-**Automatic deploy** to your own server with a self-hosted GitHub runner: see
+**Deploy:** merging to `main` builds the image on GitHub and deploys it to stl.tilly.se; see
 [`deploy/README.md`](deploy/README.md).
 
 Open `http://localhost:8765/` and log in with the token, or go to `/?token=<token>`, which

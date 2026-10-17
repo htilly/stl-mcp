@@ -647,5 +647,26 @@ app = Starlette(
 )
 app.add_middleware(Auth)
 
+# Startup marker for the deploy: .github/workflows/deploy.yml does not accept a deploy
+# until exactly this line, with the commit that was built, shows up in the container log.
+# GIT_SHA is baked in via a build-arg in the Dockerfile. If the text changes here,
+# READY_MARKER in deploy.yml must change too.
+READY_MARKER = "STL_MCP_READY"
+
+
+def ready_line(port: int) -> str:
+    return f"{READY_MARKER} sha={os.environ.get('GIT_SHA') or 'unknown'} port={port}"
+
+
+class Server(uvicorn.Server):
+    # uvicorn runs the lifespan startup (MCP's session manager) BEFORE binding, so the
+    # marker is printed only once both are done - i.e. when the port is actually listening.
+    async def startup(self, sockets=None):
+        await super().startup(sockets=sockets)
+        if self.started:
+            print(ready_line(self.config.port), flush=True)
+
+
 if __name__ == "__main__":
-    uvicorn.run(app, host=os.environ.get("HOST", "0.0.0.0"), port=int(os.environ.get("PORT", "8765")))
+    Server(uvicorn.Config(app, host=os.environ.get("HOST", "0.0.0.0"),
+                          port=int(os.environ.get("PORT", "8765")))).run()
