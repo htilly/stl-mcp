@@ -2,10 +2,31 @@ services:
   stl-mcp:
     build: .
     restart: unless-stopped
-    ports: ["8765:8765"]
+    # local only by default – expose via a reverse proxy (the Caddy profile below or your own)
+    ports: ["${BIND:-127.0.0.1}:8765:8765"]
     environment:
       MCP_TOKEN: ${MCP_TOKEN:?set MCP_TOKEN in .env}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8765}
       ALLOW_SCRIPT: ${ALLOW_SCRIPT:-0}
       FILES_PUBLIC: ${FILES_PUBLIC:-0}
-    volumes: ["./data:/data"]
+      UI_PUBLIC: ${UI_PUBLIC:-0}
+    volumes: ["${DATA_DIR:-./data}:/data"]
+
+  # Optional HTTPS with an automatic certificate: `docker compose --profile caddy up -d`
+  # Requires DOMAIN in .env, DNS pointing here and free ports 80/443.
+  caddy:
+    image: caddy:2.8
+    profiles: [caddy]
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      DOMAIN: ${DOMAIN:-}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [stl-mcp]
+
+volumes:
+  caddy_data:
+  caddy_config:

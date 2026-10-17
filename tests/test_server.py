@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 import zipfile
@@ -8,6 +9,10 @@ from starlette.testclient import TestClient
 
 import server
 
+run = asyncio.run
+
+BOX_SPEC = {"vars": {"w": 20}, "root": {"shape": "box", "size": ["=w", 10, 5]}}
+
 
 def _stl_bytes(extents=(10, 10, 10)):
     return trimesh.creation.box(extents=extents).export(file_type="stl")
@@ -16,6 +21,10 @@ def _stl_bytes(extents=(10, 10, 10)):
 def _write_box(out_dir, name="box.stl", extents=(10, 20, 30)):
     (out_dir / name).write_bytes(_stl_bytes(extents))
     return name
+
+
+def _new_model(name="demo", spec=None):
+    return run(server.create_model(name, spec or BOX_SPEC))
 
 
 # ---- helpers
@@ -53,27 +62,23 @@ def test_check_public_blocks_private(monkeypatch):
     server._check_public("127.0.0.1")
 
 
-def test_fetch_rejects_non_http(monkeypatch):
+def test_fetch_rejects_non_http():
     with pytest.raises(ValueError, match="http"):
         server._fetch("file:///etc/passwd")
 
 
-# ---- tools
-
-def test_create_primitive_sits_on_bed(out_dir):
-    info = server.create_primitive("ball", "sphere", diameter=10)
-    assert info["file"] == "ball.stl" and (out_dir / "ball.stl").is_file()
-    assert info["bounds_mm"][0][2] == 0
-    assert info["extents_mm"] == [10.0, 10.0, 10.0]
+def test_open_counts_open_comments():
+    m = {"comments": [{"status": "open"}, {"status": "resolved"}, {"status": "open"}]}
+    assert server._open(m) == 2
+    assert server._open({}) == 0
 
 
-def test_create_enclosure_returns_two_files(out_dir):
-    res = server.create_enclosure("my box", 40, 30, 15)
-    assert set(res) == {"body", "lid"}
-    assert res["body"]["file"] == "my_box_body.stl"
-    assert res["lid"]["file"] == "my_box_lid.stl"
-    assert (out_dir / "my_box_body.stl").is_file() and (out_dir / "my_box_lid.stl").is_file()
+def test_comment_view_drops_empty_and_internal_fields():
+    c = {"id": "c1", "text": "hi", "part": None, "replies": [], "author": "user", "point": [1, 2, 3]}
+    assert server._comment_view(c) == {"id": "c1", "text": "hi", "point": [1, 2, 3]}
 
+
+# ---- standalone file tools
 
 def test_save_makes_simplified_copy_over_limit(out_dir, monkeypatch):
     monkeypatch.setattr(server, "TINKERCAD_MAX", 20_000)
@@ -174,43 +179,194 @@ def test_list_and_delete_files(out_dir):
         server.delete_file("box.stl")
 
 
-def test_create_from_script_disabled_by_default(monkeypatch):
-    monkeypatch.setattr(server, "ALLOW_SCRIPT", False)
-    with pytest.raises(PermissionError, match="disabled"):
-        server.create_from_script("s", "result = None")
-
-
-def test_create_from_script_runs(out_dir, monkeypatch):
-    monkeypatch.setattr(server, "ALLOW_SCRIPT", True)
-    info = server.create_from_script("s", "result = g.diff(g.blk(20,20,10,0,0,0), [g.cyl(5,12,10,10,-1)])")
-    assert info["file"] == "s.stl" and info["watertight"]
-
-
-def test_create_from_script_reports_errors(out_dir, monkeypatch):
-    monkeypatch.setattr(server, "ALLOW_SCRIPT", True)
-    with pytest.raises(RuntimeError, match="boom"):
-        server.create_from_script("s", "raise Exception('boom')")
-
+# ---- model library tools
 
 def test_tools_are_registered():
-    import asyncio
-    names = {t.name for t in asyncio.run(server.mcp.list_tools())}
-    assert names == {"create_enclosure", "create_primitive", "create_from_script", "import_file",
-                     "file_info", "modify_file", "split_file", "export_obj", "list_files",
-                     "delete_file"}
+    names = {t.name for t in run(server.mcp.list_tools())}
+    assert names == {
+        "create_model", "create_enclosure", "create_from_script", "update_model", "get_model",
+        "reply_to_comment", "render_model", "list_models", "revert_model", "duplicate_model",
+        "delete_model", "import_file", "file_info", "modify_file", "split_file", "export_obj",
+        "list_files", "delete_file"}
+
+
+def test_create_model(out_dir):
+    s = _new_model("My Demo")
+    assert s["model_id"] == "my-demo" and s["version"] == 1 and s["kind"] == "csg"
+    assert s["viewer_url"].endswith("/m/my-demo")
+    part = s["parts"]["model"]
+    assert part["extents_mm"] == [20.0, 10.0, 5.0] and part["watertight"]
+    assert part["url"].endswith("/files/my-demo/v1/model.stl")
+
+
+def test_create_model_rejects_bad_spec(out_dir):
+    with pytest.raises(ValueError):
+        run(server.create_model("bad", {"nothing": 1}))
+    assert server.list_models() == []
+
+
+def test_create_enclosure_has_body_and_lid(out_dir):
+    s = run(server.create_enclosure("my box", 40, 30, 15))
+    assert s["kind"] == "enclosure" and set(s["parts"]) == {"body", "lid"}
+    assert (out_dir / "models" / "my-box" / "v1" / "body.stl").is_file()
+    assert (out_dir / "models" / "my-box" / "v1" / "lid.stl").is_file()
+
+
+def test_create_from_script_disabled_by_default(out_dir):
+    with pytest.raises(PermissionError, match="disabled"):
+        run(server.create_from_script("s", "result = None"))
+
+
+def test_create_from_script_runs(out_dir):
+    server.store.allow_script = True
+    s = run(server.create_from_script("s", "result = g.blk(2, 3, 4, 0, 0, 0)"))
+    assert s["kind"] == "script" and s["parts"]["model"]["extents_mm"] == [2.0, 3.0, 4.0]
+
+
+def test_create_from_script_reports_errors(out_dir):
+    server.store.allow_script = True
+    with pytest.raises(RuntimeError, match="boom"):
+        run(server.create_from_script("s", "raise Exception('boom')"))
+
+
+def test_update_model_changes_var_and_creates_version(out_dir):
+    _new_model()
+    s = run(server.update_model("demo", changes={"w": 40}, note="wider"))
+    assert s["version"] == 2 and s["parts"]["model"]["extents_mm"][0] == 40.0
+    assert [h["note"] for h in server.get_model("demo")["history"]] == ["created", "wider"]
+
+
+def test_update_model_json_pointer_and_remove(out_dir):
+    spec = {"root": {"op": "union", "children": [
+        {"shape": "box", "size": [10, 10, 10]},
+        {"shape": "box", "size": [5, 5, 5], "translate": [20, 0, 0]}]}}
+    _new_model("two", spec)
+    s = run(server.update_model("two", changes={"/root/children/1/size/0": 8}))
+    assert s["version"] == 2
+    s = run(server.update_model("two", remove=["/root/children/1"]))
+    assert s["parts"]["model"]["extents_mm"] == [10.0, 10.0, 10.0]
+
+
+def test_update_model_rename_without_new_version(out_dir):
+    _new_model()
+    s = run(server.update_model("demo", name="Renamed", description="d"))
+    assert s["version"] == 1 and s["name"] == "Renamed"
+    assert server.get_model("demo")["description"] == "d"
+
+
+def test_update_model_failed_build_saves_nothing(out_dir):
+    _new_model()
+    with pytest.raises(Exception):
+        run(server.update_model("demo", changes={"/root/shape": "nonsense"}))
+    assert server.get_model("demo")["version"] == 1
+
+
+def test_update_unknown_model(out_dir):
+    with pytest.raises(KeyError):
+        run(server.update_model("nope", changes={"w": 1}))
+
+
+def test_get_model_full_summary(out_dir):
+    _new_model(spec=BOX_SPEC)
+    m = server.get_model("demo")
+    assert m["params"] == BOX_SPEC and m["comments"] == [] and m["resolved_comments"] == 0
+    assert m["history"] == [{"version": 1, "note": "created"}]
+
+
+def test_comment_lifecycle_via_tools(out_dir):
+    _new_model()
+    server.store.add_comment("demo", "make it taller", point=[0, 0, 5], part="model")
+    cm = server.get_model("demo")["comments"]
+    assert cm[0]["id"] == "c1" and cm[0]["text"] == "make it taller"
+    assert server.list_models()[0]["open_comments"] == 1
+    r = server.reply_to_comment("demo", "c1", "how tall?")
+    assert r["status"] == "open" and r["replies"][-1]["author"] == "claude"
+    r = server.reply_to_comment("demo", "c1", "done", resolve=True)
+    assert r["status"] == "resolved"
+    full = server.get_model("demo")
+    assert full["comments"] == [] and full["resolved_comments"] == 1
+
+
+def test_update_model_resolves_comments(out_dir):
+    _new_model()
+    server.store.add_comment("demo", "wider please")
+    run(server.update_model("demo", changes={"w": 30}, resolves=["c1"]))
+    m = server.store.get("demo")
+    assert m["comments"][0]["status"] == "resolved"
+    assert m["comments"][0]["replies"][0]["text"].startswith("Addressed in v2")
+
+
+def test_update_model_unknown_comment_does_not_build(out_dir):
+    _new_model()
+    with pytest.raises(KeyError):
+        run(server.update_model("demo", changes={"w": 30}, resolves=["c9"]))
+    assert server.get_model("demo")["version"] == 1
+
+
+def test_list_models_most_recent_first(out_dir):
+    _new_model("one")
+    _new_model("two")
+    run(server.update_model("one", changes={"w": 21}))
+    rows = server.list_models()
+    assert [r["model_id"] for r in rows] == ["one", "two"]
+    assert rows[0]["parts"] == ["model"] and rows[0]["version"] == 2
+
+
+def test_revert_model_creates_new_version(out_dir):
+    _new_model()
+    run(server.update_model("demo", changes={"w": 40}))
+    s = run(server.revert_model("demo", 1))
+    assert s["version"] == 3 and s["parts"]["model"]["extents_mm"][0] == 20.0
+    assert server.get_model("demo")["history"][-1]["note"] == "reverted from v1"
+
+
+def test_duplicate_model(out_dir):
+    _new_model()
+    s = run(server.duplicate_model("demo", "Variant"))
+    assert s["model_id"] == "variant" and s["version"] == 1
+    assert {r["model_id"] for r in server.list_models()} == {"demo", "variant"}
+
+
+def test_delete_model(out_dir):
+    _new_model()
+    assert server.delete_model("demo") == "deleted demo"
+    assert server.list_models() == []
+    with pytest.raises(KeyError):
+        server.delete_model("demo")
+
+
+def test_render_model_returns_info_and_png(out_dir):
+    _new_model()
+    info, image = run(server.render_model("demo", views=["iso", "bogus"]))
+    assert json.loads(info)["rendered_version"] == 1
+    assert image.data[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_render_model_unknown_views_fall_back_to_iso(out_dir):
+    _new_model()
+    _, image = run(server.render_model("demo", views=["bogus"]))
+    assert image.data[:4] == b"\x89PNG"
 
 
 # ---- HTTP app
 
 @pytest.fixture
-def client(out_dir):
+def client(out_dir, monkeypatch):
+    monkeypatch.setattr(server, "TOKEN", "")
     # Not used as a context manager: the MCP lifespan is not needed for these routes.
-    return TestClient(server.app)
+    return TestClient(server.app, follow_redirects=False)
 
 
 def test_health_is_open_even_with_token(client, monkeypatch):
     monkeypatch.setattr(server, "TOKEN", "secret")
     assert client.get("/health").text == "ok"
+
+
+def test_pages_and_static(client):
+    r = client.get("/")
+    assert r.status_code == 200 and "<html" in r.text.lower()
+    assert client.get("/m/anything").status_code == 200
+    assert client.get("/static/style.css").status_code == 200
 
 
 def test_auth_required_when_token_set(client, out_dir, monkeypatch):
@@ -219,7 +375,23 @@ def test_auth_required_when_token_set(client, out_dir, monkeypatch):
     assert client.get("/files/box.stl").status_code == 401
     assert client.get("/files/box.stl", headers={"Authorization": "Bearer wrong"}).status_code == 401
     assert client.get("/files/box.stl", headers={"Authorization": "Bearer secret"}).status_code == 200
-    assert client.get("/files/box.stl?token=secret").status_code == 200
+
+
+def test_html_request_without_token_gets_login_page(client, monkeypatch):
+    monkeypatch.setattr(server, "TOKEN", "secret")
+    r = client.get("/", headers={"accept": "text/html"})
+    assert r.status_code == 401 and "<html" in r.text.lower()
+    assert client.get("/api/models").json() == {"error": "unauthorized"}
+
+
+def test_token_query_sets_cookie_and_redirects(client, out_dir, monkeypatch):
+    monkeypatch.setattr(server, "TOKEN", "secret")
+    _write_box(out_dir)
+    r = client.get("/files/box.stl?token=secret")
+    assert r.status_code == 303 and r.headers["location"] == "/files/box.stl"
+    assert "stl_token=secret" in r.headers["set-cookie"]
+    client.cookies.set("stl_token", "secret")
+    assert client.get("/files/box.stl").status_code == 200
 
 
 def test_files_public_skips_auth_for_downloads_only(client, out_dir, monkeypatch):
@@ -227,11 +399,21 @@ def test_files_public_skips_auth_for_downloads_only(client, out_dir, monkeypatch
     monkeypatch.setattr(server, "FILES_PUBLIC", True)
     _write_box(out_dir)
     assert client.get("/files/box.stl").status_code == 200
+    assert client.get("/api/models").status_code == 401
     assert client.put("/upload/x.stl", content=_stl_bytes()).status_code == 401
 
 
-def test_file_download_content_type_and_404(client, out_dir, monkeypatch):
-    monkeypatch.setattr(server, "TOKEN", "")
+def test_ui_public_allows_reads_but_not_writes(client, monkeypatch):
+    monkeypatch.setattr(server, "TOKEN", "secret")
+    monkeypatch.setattr(server, "UI_PUBLIC", True)
+    assert client.get("/").status_code == 200
+    assert client.get("/api/models").status_code == 200
+    r = client.post("/api/models/x", json={"action": "rename"})
+    assert r.status_code == 401
+    assert client.delete("/api/models/x").status_code == 401
+
+
+def test_flat_file_download_content_type_and_404(client, out_dir):
     _write_box(out_dir)
     r = client.get("/files/box.stl")
     assert r.status_code == 200 and r.headers["content-type"].startswith("model/stl")
@@ -240,8 +422,125 @@ def test_file_download_content_type_and_404(client, out_dir, monkeypatch):
     assert client.get("/files/x.txt").status_code == 404
 
 
-def test_upload_converts_to_stl(client, out_dir, monkeypatch):
-    monkeypatch.setattr(server, "TOKEN", "")
+def test_model_file_download(client):
+    _new_model()
+    r = client.get("/files/demo/v1/model.stl")
+    assert r.status_code == 200 and "immutable" in r.headers["cache-control"]
+    assert client.get("/files/demo/v9/model.stl").status_code == 404
+    assert client.get("/files/demo/v1/../model.json").status_code == 404
+    assert client.get("/files/nope/v1/model.stl").status_code == 404
+
+
+def test_api_models_lists_library(client):
+    assert client.get("/api/models").json()["models"] == []
+    _new_model()
+    data = client.get("/api/models").json()
+    m = data["models"][0]
+    assert m["id"] == "demo" and m["versions"] == 1 and m["open_comments"] == 0
+    assert m["parts"]["model"]["url"] == "/files/demo/v1/model.stl"
+    assert data["revision"] == server.store.revision
+
+
+def test_api_model_get_adds_part_urls(client):
+    _new_model()
+    m = client.get("/api/models/demo").json()
+    assert m["versions"][0]["parts"]["model"]["url"] == "/files/demo/v1/model.stl"
+    assert "revision" in m
+    assert client.get("/api/models/nope").status_code == 404
+
+
+def test_api_model_update_and_rename(client):
+    _new_model()
+    r = client.post("/api/models/demo", json={"action": "update", "changes": {"w": 33}})
+    assert r.json() == {"ok": True, "id": "demo"}
+    m = client.get("/api/models/demo").json()
+    assert m["current"] == 2 and m["versions"][-1]["note"] == "from the web UI"
+    client.post("/api/models/demo", json={"action": "rename", "name": "New", "description": "dd"})
+    m = client.get("/api/models/demo").json()
+    assert m["name"] == "New" and m["description"] == "dd"
+
+
+def test_api_model_update_error_is_400(client):
+    _new_model()
+    r = client.post("/api/models/demo", json={"action": "update", "changes": {"/root/shape": "bad"}})
+    assert r.status_code == 400 and "error" in r.json()
+
+
+def test_api_model_set_current_revert_duplicate(client):
+    _new_model()
+    client.post("/api/models/demo", json={"action": "update", "changes": {"w": 33}})
+    client.post("/api/models/demo", json={"action": "set_current", "version": 1})
+    assert client.get("/api/models/demo").json()["current"] == 1
+    client.post("/api/models/demo", json={"action": "revert", "version": 2})
+    assert client.get("/api/models/demo").json()["current"] == 3
+    r = client.post("/api/models/demo", json={"action": "duplicate"})
+    assert r.json()["id"] == "demo-copy"
+    r = client.post("/api/models/demo", json={"action": "duplicate", "name": "Other"})
+    assert r.json()["id"] == "other"
+
+
+def test_api_model_comments(client):
+    run(server.create_enclosure("box", 40, 30, 15))
+    r = client.post("/api/models/box", json={"action": "comment_add", "text": "hole here",
+                                             "point": [10, 10, 10], "normal": [0, 0, 1],
+                                             "part": "body", "version": 1})
+    assert r.status_code == 200
+    c = client.get("/api/models/box").json()["comments"][0]
+    assert c["id"] == "c1" and c["inner_xyz"] == [7.6, 7.6, 7.6]
+    for action, status in (("comment_resolve", "resolved"), ("comment_reopen", "open")):
+        client.post("/api/models/box", json={"action": action, "id": "c1"})
+        assert client.get("/api/models/box").json()["comments"][0]["status"] == status
+    client.post("/api/models/box", json={"action": "comment_reply", "id": "c1", "text": "ok"})
+    assert client.get("/api/models/box").json()["comments"][0]["replies"][0]["author"] == "user"
+    client.post("/api/models/box", json={"action": "comment_delete", "id": "c1"})
+    assert client.get("/api/models/box").json()["comments"] == []
+
+
+def test_api_model_empty_comment_is_400(client):
+    _new_model()
+    r = client.post("/api/models/demo", json={"action": "comment_add", "text": "  "})
+    assert r.status_code == 400
+
+
+def test_api_model_unknown_action_and_delete(client):
+    _new_model()
+    assert client.post("/api/models/demo", json={"action": "nope"}).status_code == 400
+    assert client.delete("/api/models/demo").json() == {"ok": True}
+    assert client.delete("/api/models/demo").status_code == 404
+    assert client.get("/api/models/demo").status_code == 404
+
+
+def test_preview_png_is_rendered_then_cached(client, out_dir):
+    _new_model()
+    r = client.get("/api/models/demo/preview.png")
+    assert r.status_code == 200 and r.content[:4] == b"\x89PNG"
+    assert (out_dir / "models" / "demo" / "v1" / "preview.png").is_file()
+    assert client.get("/api/models/demo/preview.png").content == r.content
+    assert client.get("/api/models/nope/preview.png").status_code == 404
+
+
+def test_api_events_streams_initial_and_changes():
+    class Req:
+        calls = 0
+
+        async def is_disconnected(self):
+            return False
+
+    async def go():
+        resp = await server.api_events(Req())
+        assert resp.media_type == "text/event-stream"
+        first = await resp.body_iterator.__anext__()
+        server.store._bump("zzz")
+        second = await resp.body_iterator.__anext__()
+        await resp.body_iterator.aclose()
+        return first, second
+
+    first, second = run(go())
+    assert json.loads(first.removeprefix("data: ")) == {"revision": server.store.revision - 1}
+    assert json.loads(second.removeprefix("data: ")) == {"revision": server.store.revision, "id": "zzz"}
+
+
+def test_upload_converts_to_stl(client, out_dir):
     obj = trimesh.creation.box().export(file_type="obj")
     r = client.put("/upload/model.obj", content=obj)
     assert r.status_code == 200 and r.json()["file"] == "model.stl"
@@ -249,7 +548,6 @@ def test_upload_converts_to_stl(client, out_dir, monkeypatch):
 
 
 def test_upload_rejects_garbage_and_oversize(client, monkeypatch):
-    monkeypatch.setattr(server, "TOKEN", "")
     assert client.post("/upload/bad.stl", content=b"not a mesh").status_code == 400
     monkeypatch.setattr(server, "MAX_UPLOAD", 10)
     r = client.put("/upload/big.stl", content=b"x" * 100)
