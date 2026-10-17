@@ -197,6 +197,22 @@ Example with templates, a plate with countersunk M3 holes and engraved text:
 ]}}
 ```
 
+### Before and after: adding screws and text
+Start from a plain plate (v1) and let Claude add two countersunk M3 screw holes (v2) and engraved text (v3).
+Every step is a small `update_model` call and shows up in the history in the side panel:
+
+```jsonc
+update_model("name-plate", {"changes": {"/root/children/-": {"shape": "screw_hole", "size": "M3",
+  "head": "countersunk", "h": "=t", "translate": [8, 15, "=t"],
+  "array": {"count": [2, 1, 1], "step": [44, 0, 0]}}}})                       // v2
+update_model("name-plate", {"changes": {"/root/children/-": {"shape": "text", "text": "OK", "size": 8,
+  "h": 1, "halign": "center", "valign": "center", "translate": [30, 15, "=t-0.6"]}}})  // v3
+```
+
+| Before (v1) | After (v3) |
+|---|---|
+| ![Plain plate](docs/img/plate-before.png) | ![Plate with countersunk screw holes and engraved text](docs/img/plate-after.png) |
+
 ## Tinkercad
 Tinkercad has no public API, so exchange happens via files:
 
