@@ -1,11 +1,11 @@
-# Testar och deployar stl-mcp till tilly.se-servern via en self-hosted runner (label "tillyse").
+# Tests and deploys stl-mcp to the tilly.se server via a self-hosted runner (label "tillyse").
 #
-# Engångsinstallation på servern: deploy/setup-runner.sh (se deploy/README.md).
-# Repo-inställningar:
-#   Secrets:   MCP_TOKEN                  (krävs)
-#   Variables: PUBLIC_URL                 t.ex. https://stl.tilly.se
-#              DOMAIN                     t.ex. stl.tilly.se – sätts bara om inbyggd Caddy (HTTPS) ska användas
-#              UI_PUBLIC / FILES_PUBLIC   0/1 (valfria)
+# One-time setup on the server: deploy/setup-runner.sh (see deploy/README.md).
+# Repo settings:
+#   Secrets:   MCP_TOKEN                  (required)
+#   Variables: PUBLIC_URL                 e.g. https://stl.tilly.se
+#              DOMAIN                     e.g. stl.tilly.se – only set if the built-in Caddy (HTTPS) should be used
+#              UI_PUBLIC / FILES_PUBLIC   0/1 (optional)
 name: Deploy
 
 on:
@@ -13,7 +13,7 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Inga pull_request-triggers: self-hosted runnern ska aldrig köra kod från forkar.
+# No pull_request triggers: the self-hosted runner must never run code from forks.
 permissions:
   contents: read
 
@@ -31,7 +31,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
-      - name: Röktest (MCP + webb)
+      - name: Smoke test (MCP + web)
         env:
           MCP_TOKEN: citoken
           STL_DIR: ${{ runner.temp }}/data
@@ -52,7 +52,7 @@ jobs:
       url: ${{ vars.PUBLIC_URL }}
     steps:
       - uses: actions/checkout@v4
-      - name: Deploya
+      - name: Deploy
         env:
           MCP_TOKEN: ${{ secrets.MCP_TOKEN }}
           PUBLIC_URL: ${{ vars.PUBLIC_URL }}

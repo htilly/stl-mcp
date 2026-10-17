@@ -1,4 +1,4 @@
-"""Geometri-hjälpare (mm). Alla former byggs med trimesh + manifold3d."""
+"""Geometry helpers (mm). All shapes are built with trimesh + manifold3d."""
 import io
 import zipfile
 
@@ -43,7 +43,7 @@ def primitive(shape: str, **p) -> trimesh.Trimesh:
         outer = _cyl(radius=p["diameter"] / 2, height=p["height"], sections=64)
         inner = _cyl(radius=p["inner_diameter"] / 2, height=p["height"] + 1, sections=64)
         return diff(outer, [inner])
-    raise ValueError(f"okänd form: {shape} (box, cylinder, sphere, cone, tube)")
+    raise ValueError(f"unknown shape: {shape} (box, cylinder, sphere, cone, tube)")
 
 
 WALLS = ("left", "right", "front", "back")
@@ -52,14 +52,14 @@ WALLS = ("left", "right", "front", "back")
 def enclosure(inner_x, inner_y, inner_z, wall=2.4, floor=2.4, lid_t=2.4,
               screws=True, post_d=7.0, pilot_d=2.6, lid_hole_d=3.4, clearance=0.3,
               standoffs=None, cutouts=None, lid_holes=None, lid_slots=None):
-    """Returnerar (botten, lock).
+    """Returns (body, lid).
 
-    Koordinater: x längs, y på tvären, z uppåt. Invändigt origo = (wall, wall, floor).
-    standoffs : [{x, y, hole_d, height=4, outer_d=5}]  (x,y = hålcentrum, inifrån invändigt hörn)
+    Coordinates: x along, y across, z up. Inner origin = (wall, wall, floor).
+    standoffs : [{x, y, hole_d, height=4, outer_d=5}]  (x,y = hole center, measured from the inner corner)
     cutouts   : [{wall: left|right|front|back, pos, width, height, z=0}]
-                pos = mitten längs väggen, mätt från väggens vänstra (sett utifrån) ände; z = underkant ovanför golv
-    lid_holes : [{x, y, d}]   (invändiga koordinater)
-    lid_slots : [{x, y, w, h}] (rektanglar, x,y = nedre vänstra hörn)
+                pos = center along the wall, measured from the wall's left end (seen from outside); z = bottom edge above the floor
+    lid_holes : [{x, y, d}]   (inner coordinates)
+    lid_slots : [{x, y, w, h}] (rectangles, x,y = lower left corner)
     """
     standoffs = standoffs or []
     cutouts = cutouts or []
@@ -99,7 +99,7 @@ def enclosure(inner_x, inner_y, inner_z, wall=2.4, floor=2.4, lid_t=2.4,
         elif w_ == "back":
             b = blk(cw, t, ch, wall + pos - cw / 2, oy - wall - 1, z0)
         else:
-            raise ValueError(f"wall måste vara en av {WALLS}")
+            raise ValueError(f"wall must be one of {WALLS}")
         body = diff(body, [b])
 
     lid = blk(ox, oy, lid_t, 0, 0, 0)
@@ -121,24 +121,24 @@ def enclosure(inner_x, inner_y, inner_z, wall=2.4, floor=2.4, lid_t=2.4,
     return body, lid
 
 
-# ---------------------------------------------------------------- import / ändring / export
+# ---------------------------------------------------------------- import / modify / export
 
 IMPORT_FORMATS = ("stl", "obj", "glb", "ply", "off")
 
 
 def load_mesh(data: bytes, fmt: str | None = None) -> trimesh.Trimesh:
-    """Läser en mesh ur bytes. Zip (t.ex. Tinkercads OBJ-export) packas upp automatiskt.
-    Scener slås ihop till en mesh; färger/texturer slängs."""
+    """Reads a mesh from bytes. Zip files (e.g. Tinkercad's OBJ export) are unpacked automatically.
+    Scenes are merged into one mesh; colors/textures are discarded."""
     if data[:2] == b"PK":
         with zipfile.ZipFile(io.BytesIO(data)) as z:
             names = [n for n in z.namelist() if n.rsplit(".", 1)[-1].lower() in IMPORT_FORMATS]
             if not names:
-                raise ValueError("zip-filen innehåller ingen stl/obj/glb/ply/off")
+                raise ValueError("the zip file contains no stl/obj/glb/ply/off")
             fmt = names[0].rsplit(".", 1)[-1].lower()
             data = z.read(names[0])
     fmt = (fmt or "stl").lower().lstrip(".")
     if fmt not in IMPORT_FORMATS:
-        raise ValueError(f"format {fmt} stöds inte ({', '.join(IMPORT_FORMATS)})")
+        raise ValueError(f"format {fmt} is not supported ({', '.join(IMPORT_FORMATS)})")
     loaded = trimesh.load(io.BytesIO(data), file_type=fmt)
     if isinstance(loaded, trimesh.Scene):
         meshes = []
@@ -151,7 +151,7 @@ def load_mesh(data: bytes, fmt: str | None = None) -> trimesh.Trimesh:
                 meshes.append(m)
         loaded = trimesh.util.concatenate(meshes) if meshes else None
     if not isinstance(loaded, trimesh.Trimesh) or len(loaded.faces) == 0:
-        raise ValueError("filen innehåller ingen mesh")
+        raise ValueError("the file contains no mesh")
     return trimesh.Trimesh(loaded.vertices, loaded.faces)
 
 
@@ -168,7 +168,7 @@ def repair(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
 
 def shape_at(spec: dict) -> trimesh.Trimesh:
     """{shape, x,y,z | diameter, inner_diameter, height, at=[x,y,z], rotate=[rx,ry,rz]}.
-    at = formens mittpunkt, cylindrar/koner står längs z innan rotation."""
+    at = center of the shape, cylinders/cones are aligned along z before rotation."""
     m = primitive(spec["shape"], x=spec.get("x", 0), y=spec.get("y", 0), z=spec.get("z", 0),
                   diameter=spec.get("diameter", 0), inner_diameter=spec.get("inner_diameter", 0),
                   height=spec.get("height", 0))
@@ -186,12 +186,12 @@ def _rotation(deg) -> np.ndarray:
 
 def modify(mesh: trimesh.Trimesh, scale=None, rotate=None, mirror=None, place_on_bed=True,
            center_xy=False, add=None, subtract=None, do_repair=False) -> trimesh.Trimesh:
-    """Ordning: reparation, skala, rotera (kring boxens mitt), spegla, placering, add, subtract."""
+    """Order: repair, scale, rotate (around the bounding box center), mirror, placement, add, subtract."""
     mesh = repair(mesh) if do_repair else mesh.copy()
     if scale is not None:
         s = np.broadcast_to(np.asarray(scale, dtype=float), 3)
         if np.any(s <= 0):
-            raise ValueError("scale måste vara > 0")
+            raise ValueError("scale must be > 0")
         mesh.apply_transform(np.diag([*s, 1.0]))
     if rotate:
         c = mesh.bounds.mean(axis=0)
@@ -200,7 +200,7 @@ def modify(mesh: trimesh.Trimesh, scale=None, rotate=None, mirror=None, place_on
         mesh.apply_translation(c)
     for axis in (mirror or ""):
         if axis not in "xyz":
-            raise ValueError("mirror får bara innehålla x, y, z")
+            raise ValueError("mirror may only contain x, y, z")
         c = mesh.bounds.mean(axis=0)
         normal = np.eye(3)["xyz".index(axis)]
         mesh.apply_transform(trimesh.transformations.reflection_matrix(c, normal))
@@ -211,7 +211,7 @@ def modify(mesh: trimesh.Trimesh, scale=None, rotate=None, mirror=None, place_on
         mesh.apply_translation([0, 0, -mesh.bounds[0][2]])
     if add or subtract:
         if not mesh.is_volume:
-            raise ValueError("modellen är inte vattentät; prova repair=true innan add/subtract")
+            raise ValueError("the model is not watertight; try repair=true before add/subtract")
         if add:
             mesh = union([mesh] + [shape_at(s) for s in add])
         if subtract:
@@ -224,7 +224,7 @@ def stl_size(mesh: trimesh.Trimesh) -> int:
 
 
 def simplify_to(mesh: trimesh.Trimesh, max_bytes: int) -> trimesh.Trimesh:
-    """Minskar antalet trianglar så att binär STL ryms inom max_bytes."""
+    """Reduces the triangle count so a binary STL fits within max_bytes."""
     faces = int((max_bytes * 0.98 - 84) // 50)
     return mesh.simplify_quadric_decimation(face_count=faces)
 
@@ -240,12 +240,12 @@ PALETTE = ["red", "blue", "yellow", "green", "orange", "purple", "gray", "pink"]
 def _rgb(color: str) -> tuple[float, float, float]:
     h = COLORS.get(color.lower(), color).lstrip("#")
     if not (len(h) == 6 and all(ch in "0123456789abcdefABCDEF" for ch in h)):
-        raise ValueError(f"okänd färg: {color} (namn som red/blue eller #rrggbb)")
+        raise ValueError(f"unknown color: {color} (a name like red/blue or #rrggbb)")
     return tuple(int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
 
 
 def to_obj(parts: list[tuple[str, trimesh.Trimesh, str]], mtl_name: str) -> tuple[str, str]:
-    """parts: [(namn, mesh, färg)] -> (obj-text, mtl-text). Ett objekt + material per del."""
+    """parts: [(name, mesh, color)] -> (obj text, mtl text). One object + material per part."""
     obj = [f"mtllib {mtl_name}"]
     mtl = []
     offset = 1

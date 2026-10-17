@@ -1,4 +1,4 @@
-// Delad hjälpkod för biblioteket och 3D-vyn.
+// Shared helpers for the library and the 3D view.
 
 export async function api(path, opts = {}) {
   const r = await fetch(path, {
@@ -12,7 +12,7 @@ export async function api(path, opts = {}) {
   return data;
 }
 
-// Live-uppdateringar via server-sent events. cb({revision, id}) anropas vid ändring.
+// Live updates via server-sent events. cb({revision, id}) is called on change.
 export function subscribe(cb, statusEl) {
   let es, first = true;
   const connect = () => {
@@ -34,10 +34,10 @@ export function subscribe(cb, statusEl) {
 
 export function ago(ts) {
   const s = Math.max(0, Date.now() / 1000 - ts);
-  if (s < 60) return "nyss";
-  if (s < 3600) return `${Math.floor(s / 60)} min sedan`;
-  if (s < 86400) return `${Math.floor(s / 3600)} h sedan`;
-  return new Date(ts * 1000).toLocaleDateString("sv-SE");
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  return new Date(ts * 1000).toLocaleDateString("en-GB");
 }
 
 export const fmt = (e) => e.map((v) => (+v).toFixed(1).replace(/\.0$/, "")).join(" × ") + " mm";

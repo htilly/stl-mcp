@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Körs av GitHub Actions på servern (self-hosted runner) från repots checkout.
-# Bygger och startar containern, väntar på /health och visar loggar vid fel.
+# Run by GitHub Actions on the server (self-hosted runner) from the repo checkout.
+# Builds and starts the container, waits for /health and shows logs on failure.
 set -euo pipefail
 
-APP_DIR=${APP_DIR:-/opt/stl-mcp}       # beständig plats för data och .env
-: "${MCP_TOKEN:?MCP_TOKEN saknas – lägg till som repo-secret}"
+APP_DIR=${APP_DIR:-/opt/stl-mcp}       # persistent location for data and .env
+: "${MCP_TOKEN:?MCP_TOKEN is missing – add it as a repo secret}"
 
 mkdir -p "$APP_DIR/data"
 umask 077
@@ -20,7 +20,7 @@ EOF
 
 profiles=()
 if [ -n "${DOMAIN:-}" ]; then
-  profiles=(--profile caddy)           # inbyggd HTTPS via Caddy (kräver ledig port 80/443)
+  profiles=(--profile caddy)           # built-in HTTPS via Caddy (requires free port 80/443)
 fi
 
 compose=(docker compose --project-name stl-mcp --env-file "$APP_DIR/.env" "${profiles[@]}")
@@ -28,12 +28,12 @@ compose=(docker compose --project-name stl-mcp --env-file "$APP_DIR/.env" "${pro
 
 for i in $(seq 1 60); do
   if curl -sf http://127.0.0.1:8765/health >/dev/null; then
-    echo "stl-mcp är uppe (${PUBLIC_URL:-http://localhost:8765})"
+    echo "stl-mcp is up (${PUBLIC_URL:-http://localhost:8765})"
     docker image prune -f >/dev/null
     exit 0
   fi
   sleep 1
 done
-echo "::error::stl-mcp svarade inte på /health"
+echo "::error::stl-mcp did not respond on /health"
 "${compose[@]}" logs --tail 100
 exit 1

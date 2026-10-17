@@ -1,6 +1,6 @@
-"""Enkel mjukvarurendering (PIL) så att Claude kan *se* modellen utan GPU.
+"""Simple software rendering (PIL) so Claude can *see* the model without a GPU.
 
-Ortografiska vyer, platt skuggning, målaralgoritm (triangel-sortering på djup).
+Orthographic views, flat shading, painter's algorithm (triangle sorting by depth).
 """
 from __future__ import annotations
 
@@ -16,13 +16,13 @@ PART_COLORS = [(79, 140, 255), (255, 154, 60), (90, 200, 120), (230, 90, 120), (
                (60, 200, 210)]
 BG = (246, 247, 249)
 
-# (namn, azimut, elevation) – azimut 0 = tittar längs +y (framifrån), z uppåt
-VIEWS = {"iso": ("iso", -45, 30), "front": ("fram", 0, 0), "top": ("ovan", 0, 90),
-         "right": ("höger", -90, 0), "back_iso": ("iso bak", 135, 30)}
+# (name, azimuth, elevation) – azimuth 0 = looking along +y (from the front), z up
+VIEWS = {"iso": ("iso", -45, 30), "front": ("front", 0, 0), "top": ("top", 0, 90),
+         "right": ("right", -90, 0), "back_iso": ("iso back", 135, 30)}
 
 
 def layout(parts: dict[str, trimesh.Trimesh], spread: bool = True, gap: float = 10.0):
-    """Lägg delarna bredvid varandra längs x (som i webbvyn). Returnerar [(namn, mesh)]."""
+    """Lay the parts out side by side along x (as in the web view). Returns [(name, mesh)]."""
     out = []
     x = None
     for name, m in parts.items():
@@ -37,7 +37,7 @@ def layout(parts: dict[str, trimesh.Trimesh], spread: bool = True, gap: float = 
 
 
 def _subdivided(m: trimesh.Trimesh, max_edge: float) -> trimesh.Trimesh:
-    """Dela upp stora trianglar så att djupsorteringen (målaralgoritmen) blir korrekt."""
+    """Subdivide large triangles so the depth sorting (painter's algorithm) is correct."""
     if len(m.faces) > 150_000:
         return m
     try:
@@ -48,7 +48,7 @@ def _subdivided(m: trimesh.Trimesh, max_edge: float) -> trimesh.Trimesh:
 
 
 def _sharp_edges(m: trimesh.Trimesh, fwd, deg: float = 25.0):
-    """Synliga skarpa kanter och siluettkanter som (n, 2, 3)-array av ändpunkter."""
+    """Visible sharp edges and silhouette edges as an (n, 2, 3) array of endpoints."""
     adj, edges = m.face_adjacency, m.face_adjacency_edges
     facing = m.face_normals @ fwd < -1e-6
     f1, f2 = facing[adj[:, 0]], facing[adj[:, 1]]
@@ -57,7 +57,7 @@ def _sharp_edges(m: trimesh.Trimesh, fwd, deg: float = 25.0):
 
 
 def _split_segments(seg, max_len):
-    """Dela långa kantsegment så att de sorteras rätt mot de uppdelade trianglarna."""
+    """Split long edge segments so they sort correctly against the subdivided triangles."""
     if len(seg) == 0:
         return seg
     a, b = seg[:, 0], seg[:, 1]
@@ -72,7 +72,7 @@ def _split_segments(seg, max_len):
 
 def _rot(az, el):
     a, e = math.radians(az), math.radians(el)
-    # kamerans högervektor, uppvektor och blickriktning (in i skärmen) i världskoordinater
+    # camera right vector, up vector and view direction (into the screen) in world coordinates
     fwd = np.array([math.sin(a) * math.cos(e), math.cos(a) * math.cos(e), -math.sin(e)])
     right = np.array([math.cos(a), -math.sin(a), 0.0])
     up = np.cross(right, fwd)
@@ -109,22 +109,22 @@ def render_view(meshes, az, el, size=420, label="", ss=2):
         sm = _subdivided(m, max_edge)
         tri = sm.vertices[sm.faces] - center           # (n,3,3)
         n = sm.face_normals
-        facing = n @ fwd < -1e-6                       # bakåtvända (och kantvända) bort
+        facing = n @ fwd < -1e-6                       # discard back-facing (and edge-on) triangles
         tri, n = tri[facing], n[facing]
         shade = 0.35 + 0.65 * np.clip(n @ light, 0, 1)
         base = np.array(PART_COLORS[i % len(PART_COLORS)])
         cols = (base[None, :] * shade[:, None]).clip(0, 255).astype(int)
-        depths += [tri.mean(1) @ fwd, seg.mean(1) @ fwd - max_edge * 0.05]  # kanter lite närmare
+        depths += [tri.mean(1) @ fwd, seg.mean(1) @ fwd - max_edge * 0.05]  # edges slightly closer
         polys += [np.stack([tri @ right, -(tri @ up)], -1).reshape(-1, 6),
                   np.stack([seg @ right, -(seg @ up)], -1).reshape(-1, 4)]
         colors += [cols, None]
     if not depths:
         return img
-    items = []                                          # (djup, typ, index, del)
+    items = []                                          # (depth, type, index, part)
     for j, d in enumerate(depths):
         items.append(np.stack([d, np.full(len(d), j), np.arange(len(d))], 1))
     items = np.concatenate(items)
-    items = items[np.argsort(-items[:, 0], kind="stable")]  # längst bort först
+    items = items[np.argsort(-items[:, 0], kind="stable")]  # farthest first
     polys_px = [(p * scale + W / 2).tolist() for p in polys]
     cols_l = [c.tolist() if c is not None else None for c in colors]
     poly, line = draw.polygon, draw.line
@@ -137,7 +137,7 @@ def render_view(meshes, az, el, size=420, label="", ss=2):
         else:
             line(polys_px[j][k], fill=ecol, width=ss)
 
-    # liten axelindikator
+    # small axis indicator
     o = np.array([28, W - 28]) * 1.0
     for vec, col, txt in (((1, 0, 0), (220, 60, 60), "x"), ((0, 1, 0), (60, 170, 60), "y"),
                           ((0, 0, 1), (60, 90, 230), "z")):
@@ -169,7 +169,7 @@ def render_png(parts: dict[str, trimesh.Trimesh], views=("iso", "front", "top", 
     if footer_text:
         names = ", ".join(n for n, _ in meshes)
         d.text((8, rows * size + 5),
-               f"{ext[0]:.1f} × {ext[1]:.1f} × {ext[2]:.1f} mm   delar: {names}",
+               f"{ext[0]:.1f} × {ext[1]:.1f} × {ext[2]:.1f} mm   parts: {names}",
                fill=(40, 40, 50), font=_font(13))
     buf = io.BytesIO()
     sheet.save(buf, "PNG", optimize=True)

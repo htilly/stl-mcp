@@ -1,38 +1,38 @@
-# Deploy till tilly.se (self-hosted GitHub-runner)
+# Deploy to tilly.se (self-hosted GitHub runner)
 
-Flödet `.github/workflows/deploy.yml` körs vid push till `main` (eller manuellt via *Run workflow*):
+The workflow `.github/workflows/deploy.yml` runs on push to `main` (or manually via *Run workflow*):
 
-1. **test** (GitHub-hostad): installerar beroenden, startar servern och kör `test_client.py`
-   och auth-kontroller.
-2. **deploy** (på servern, runner-label `tillyse`): `deploy/deploy.sh` skriver
-   `/opt/stl-mcp/.env`, kör `docker compose up -d --build` och väntar på `/health`.
-   Data ligger i `/opt/stl-mcp/data` och överlever omdeployer.
+1. **test** (GitHub-hosted): installs dependencies, starts the server and runs `test_client.py`
+   and auth checks.
+2. **deploy** (on the server, runner label `tillyse`): `deploy/deploy.sh` writes
+   `/opt/stl-mcp/.env`, runs `docker compose up -d --build` and waits for `/health`.
+   Data lives in `/opt/stl-mcp/data` and survives redeploys.
 
-## Engångsinstallation
+## One-time setup
 
-1. **Runner-token:** GitHub → repo → Settings → Actions → Runners → *New self-hosted runner*
-   → kopiera strängen efter `--token`. Den gäller i en timme.
-2. **På servern** (som root):
+1. **Runner token:** GitHub → repo → Settings → Actions → Runners → *New self-hosted runner*
+   → copy the string after `--token`. It is valid for one hour.
+2. **On the server** (as root):
    ```
    curl -fsSL https://raw.githubusercontent.com/htilly/stl-mcp/main/deploy/setup-runner.sh -o setup-runner.sh
    sudo bash setup-runner.sh <TOKEN>
    ```
-   Före merge finns skriptet bara på PR-grenen. Byt då `main` mot
-   `feature/web-ui-parametric-models` i URL:en.
-   Skriptet installerar Docker om det saknas, skapar användaren `gh-runner` och registrerar
-   runnern som en systemd-tjänst.
-3. **Repo-inställningar** (Settings → Secrets and variables → Actions):
-   - Secret `MCP_TOKEN`: en lång slumpsträng, t.ex. från `openssl rand -hex 32`
-   - Variable `PUBLIC_URL`: t.ex. `https://stl.tilly.se`
-   - Variable `DOMAIN` (valfri): t.ex. `stl.tilly.se` startar inbyggd Caddy med automatiskt
-     HTTPS. Det kräver att DNS pekar på servern och att portarna 80/443 är lediga.
-   - Variables `UI_PUBLIC`, `FILES_PUBLIC` (valfria): `0`/`1`
-4. **Kör** Actions → Deploy → *Run workflow*, eller pusha till `main`.
+   Before the merge the script only exists on the PR branch. In that case replace `main` with
+   `feature/web-ui-parametric-models` in the URL.
+   The script installs Docker if missing, creates the user `gh-runner` and registers the
+   runner as a systemd service.
+3. **Repo settings** (Settings → Secrets and variables → Actions):
+   - Secret `MCP_TOKEN`: a long random string, e.g. from `openssl rand -hex 32`
+   - Variable `PUBLIC_URL`: e.g. `https://stl.tilly.se`
+   - Variable `DOMAIN` (optional): e.g. `stl.tilly.se` starts the built-in Caddy with automatic
+     HTTPS. This requires DNS pointing at the server and ports 80/443 being free.
+   - Variables `UI_PUBLIC`, `FILES_PUBLIC` (optional): `0`/`1`
+4. **Run** Actions → Deploy → *Run workflow*, or push to `main`.
 
-## HTTPS när port 80/443 redan används (t.ex. av mailservern)
+## HTTPS when ports 80/443 are already in use (e.g. by the mail server)
 
-Låt `DOMAIN` vara tom. Appen lyssnar då bara på `127.0.0.1:8765`. Lägg till en vhost i den
-befintliga webbservern. Nginx:
+Leave `DOMAIN` empty. The app then only listens on `127.0.0.1:8765`. Add a vhost to the
+existing web server. Nginx:
 ```nginx
 server {
     server_name stl.tilly.se;
@@ -40,16 +40,16 @@ server {
         proxy_pass http://127.0.0.1:8765;
         proxy_set_header Host $host;
         proxy_http_version 1.1;
-        proxy_buffering off;          # live-uppdateringar (SSE) och MCP-strömmar
+        proxy_buffering off;          # live updates (SSE) and MCP streams
         proxy_read_timeout 1h;
     }
-    # + certifikat (certbot --nginx -d stl.tilly.se)
+    # + certificate (certbot --nginx -d stl.tilly.se)
 }
 ```
 
-## Säkerhet
-- Flödet triggas bara av push till `main` och manuellt, aldrig av pull requests. Kod från
-  forkar körs alltså inte på servern. Om repot är publikt: ställ ändå in Settings → Actions →
+## Security
+- The workflow is only triggered by push to `main` and manually, never by pull requests. Code from
+  forks is therefore not run on the server. If the repo is public: still set Settings → Actions →
   *Require approval for all outside collaborators*.
-- Runner-användaren är med i `docker`-gruppen, vilket i praktiken ger root på servern. Ge
-  bara betrodda personer skrivrätt till `main`.
+- The runner user is in the `docker` group, which effectively gives root on the server. Only give
+  trusted people write access to `main`.

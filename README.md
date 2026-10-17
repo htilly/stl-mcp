@@ -1,79 +1,86 @@
 # stl-mcp
 
-Självhostad MCP-server där Claude skapar och stegvis justerar 3D-modeller för utskrift (mm),
-med ett webbgränssnitt för att se, rotera och bläddra bland modellerna.
+Self-hosted MCP server where Claude creates and iteratively adjusts 3D models for printing (mm),
+with a web interface for viewing, rotating and browsing the models.
 
-- **MCP** (streamable HTTP) på `/mcp`
-- **Bibliotek** på `/`: alla modeller med förhandsbild, sök, uppdateras live
-- **3D-vy** på `/m/<id>`: rotera/zooma, visa/dölj delar, versionshistorik, redigera parametrar,
-  ladda ner STL. Vyn uppdateras **direkt** när Claude ändrar modellen.
-- **Kommentarer**: klicka på en punkt i modellen och skriv vad som ska ändras. Claude ser
-  punkten och vilken del av receptet som ligger där.
-- **Mallar**: skruvhål (M2–M5, försänkta/cylindriska, mutterficka), värmeinsatser, skruvtorn,
-  snäpplås, gångjärn och text.
+- **MCP** (streamable HTTP) at `/mcp`
+- **Library** at `/`: all models with preview, search, live updates
+- **3D view** at `/m/<id>`: rotate/zoom, show/hide parts, version history, edit parameters,
+  download STL. The view updates **immediately** when Claude changes the model.
+- **Comments**: click a point on the model and write what should change. Claude sees the
+  point and which part of the recipe is located there.
+- **Templates**: screw holes (M2–M5, countersunk/cylindrical, nut trap), heat inserts, screw bosses,
+  snap hooks, hinges and text.
 
-## Idén: modeller är recept, inte filer
+## The idea: models are recipes, not files
 
-Varje modell sparas som ett *recept* (JSON) med versionshistorik. STL-filerna byggs från receptet.
-Därför kan Claude göra små, precisa ändringar (`{"wall": 3}`) i stället för att göra om allt,
-och man kan alltid backa till en tidigare version.
+Each model is stored as a *recipe* (JSON) with version history. The STL files are built from the recipe.
+This lets Claude make small, precise changes (`{"wall": 3}`) instead of redoing everything,
+and you can always go back to an earlier version.
 
-Typiskt arbetsflöde, med 3D-vyn öppen i webbläsaren bredvid chatten:
+Typical workflow, with the 3D view open in the browser next to the chat:
 
-1. *"Gör en pennhållare med tre hål för 12 mm pennor"* → Claude anropar `create_model` och
-   ger dig länken till 3D-vyn.
-2. Claude anropar `render_model` för att själv se resultatet och rätta uppenbara fel.
-3. *"Fyra hål, och lite högre"* → `update_model(id, {"n": 4, "h": 50})` → vyn uppdateras och
-   historiken visar v2.
-4. Du kan också ändra parametrarna direkt i webben. Claude ser ändringen nästa gång den läser
-   modellen med `get_model`.
-5. Eller peka: klicka **💬 Kommentera**, klicka på hålet och skriv *"2 mm större"*. Säg sedan
-   *"titta på kommentarerna"*. Claude får punkten, delen och `near_nodes`, alltså vilken nod i
-   receptet som ligger där (t.ex. `/root/children/1`, ett `screw_hole`). Den ändrar modellen
-   och stänger kommentaren med `update_model(..., resolves=["c1"])`, eller svarar med
+1. *"Make a pen holder with three holes for 12 mm pens"* → Claude calls `create_model` and
+   gives you the link to the 3D view.
+2. Claude calls `render_model` to see the result itself and fix obvious mistakes.
+3. *"Four holes, and a bit taller"* → `update_model(id, {"n": 4, "h": 50})` → the view updates and
+   the history shows v2.
+4. You can also change the parameters directly in the web UI. Claude sees the change the next time it reads
+   the model with `get_model`.
+5. Or point: click **💬 Comment**, click the hole and write *"2 mm larger"*. Then say
+   *"look at the comments"*. Claude gets the point, the part and `near_nodes`, that is, which node in
+   the recipe is located there (e.g. `/root/children/1`, a `screw_hole`). It changes the model
+   and closes the comment with `update_model(..., resolves=["c1"])`, or answers with
    `reply_to_comment`.
 
-## Köra
+## Running
 ```
-cp .env.example .env     # fyll i MCP_TOKEN och PUBLIC_URL
+cp .env.example .env     # fill in MCP_TOKEN and PUBLIC_URL
 docker compose up -d --build
 ```
-Utan Docker: `pip install -r requirements.txt && MCP_TOKEN=... python server.py`
+Without Docker: `pip install -r requirements.txt && MCP_TOKEN=... python server.py`
 
-Containern lyssnar bara på `127.0.0.1:8765`. Sätt `BIND=0.0.0.0` för att exponera porten direkt,
-eller sätt `DOMAIN` och kör `docker compose --profile caddy up -d` för automatiskt HTTPS.
+The container only listens on `127.0.0.1:8765`. Set `BIND=0.0.0.0` to expose the port directly,
+or set `DOMAIN` and run `docker compose --profile caddy up -d` for automatic HTTPS.
 
-**Automatisk deploy** till egen server med en self-hosted GitHub-runner: se
+**Automatic deploy** to your own server with a self-hosted GitHub runner: see
 [`deploy/README.md`](deploy/README.md).
 
-Öppna `http://localhost:8765/` och logga in med token, eller gå till `/?token=<token>`, som
-sätter en cookie.
+Open `http://localhost:8765/` and log in with the token, or go to `/?token=<token>`, which
+sets a cookie.
 
-## Koppla till Claude
-- Claude Desktop/Code: `claude mcp add --transport http stl https://<din-url>/mcp --header "Authorization: Bearer <token>"`
-- claude.ai: Settings → Connectors → Add custom connector → `https://<din-url>/mcp`
-  (claude.ai kan inte skicka egen header. Lägg då servern bakom din reverse proxy/OAuth,
-  eller kör via Claude Desktop/Code.)
+## Tests
+```
+pip install -r requirements.txt -r requirements-dev.txt
+python -m pytest
+```
+`test_client.py` is a manual smoke script against a running server, not part of the suite.
 
-## MCP-verktyg
-| verktyg | |
+## Connecting to Claude
+- Claude Desktop/Code: `claude mcp add --transport http stl https://<your-url>/mcp --header "Authorization: Bearer <token>"`
+- claude.ai: Settings → Connectors → Add custom connector → `https://<your-url>/mcp`
+  (claude.ai cannot send a custom header. Put the server behind your reverse proxy/OAuth,
+  or use Claude Desktop/Code.)
+
+## MCP tools
+| tool | |
 |---|---|
-| `create_model` | ny modell från en CSG-spec (former, booleska operationer, transformer, variabler) |
-| `create_enclosure` | låda + lock med hörnskruvar, distanser, utskärningar och lockhål |
-| `create_from_script` | godtycklig trimesh-Python (kräver `ALLOW_SCRIPT=1`, kör kod på servern!) |
-| `update_model` | ändra variabler/parametrar eller valfritt värde via JSON-pekare → ny version |
-| `get_model` | receptet, mått, historik och öppna kommentarer (med `near_nodes`) |
-| `reply_to_comment` | svara på en kommentar, eventuellt markera den löst |
-| `render_model` | PNG-bild (iso/fram/ovan/höger) så att Claude kan granska modellen visuellt |
+| `create_model` | new model from a CSG spec (shapes, boolean operations, transforms, variables) |
+| `create_enclosure` | box + lid with corner screws, standoffs, cutouts and lid holes |
+| `create_from_script` | arbitrary trimesh Python (requires `ALLOW_SCRIPT=1`, runs code on the server!) |
+| `update_model` | change variables/parameters or any value via JSON pointer → new version |
+| `get_model` | the recipe, dimensions, history and open comments (with `near_nodes`) |
+| `reply_to_comment` | reply to a comment, optionally marking it resolved |
+| `render_model` | PNG image (iso/front/top/right) so Claude can inspect the model visually |
 | `list_models`, `revert_model`, `duplicate_model`, `delete_model` | |
-| `import_file` | tar in STL/OBJ/GLB/PLY/OFF via `url` eller `data_base64` (zip med obj+mtl packas upp) |
-| `file_info` | mått, bounds, volym, antal lösa delar |
-| `modify_file` | skala, rotera, spegla, placera, lägg till/skär bort former (t.ex. skruvhål), laga nät, förenkla |
-| `split_file` | delar upp en fil i sina lösa delar |
-| `export_obj` | slår ihop flera STL (även bibliotekets, `<model_id>/v3/lock.stl`) till en färgad OBJ (+ .mtl och .zip) |
-| `list_files`, `delete_file` | fristående filer (import/export) |
+| `import_file` | imports STL/OBJ/GLB/PLY/OFF via `url` or `data_base64` (zip with obj+mtl is unpacked) |
+| `file_info` | dimensions, bounds, volume, number of loose parts |
+| `modify_file` | scale, rotate, mirror, place, add/subtract shapes (e.g. screw holes), repair mesh, simplify |
+| `split_file` | splits a file into its loose parts |
+| `export_obj` | merges several STLs (including library ones, `<model_id>/v3/lid.stl`) into one colored OBJ (+ .mtl and .zip) |
+| `list_files`, `delete_file` | standalone files (import/export) |
 
-### CSG-spec i korthet
+### The CSG spec in brief
 ```json
 {
   "vars": {"d": 12, "wall": 2, "h": 40, "n": 3},
@@ -84,30 +91,30 @@ sätter en cookie.
   ]}
 }
 ```
-- Former: `box` (med `radius`), `cylinder`, `cone`, `sphere`, `tube`, `torus`, `wedge`,
-  `extrude` (polygon/cirkel/rektangel-profil, `twist`, `scale_top`) och `revolve`
-- Mallar: `screw_hole`, `heat_insert`, `nut_trap` (skärande: ytan vid z=0, går nedåt),
-  `boss`, `snap_hook`, `hinge` (print-in-place eller med separat axel) och `text`
-  (DejaVu Sans, upphöjd eller ingraverad). Mått för M2–M5 finns i `templates.py`.
-- Operationer: `union`, `difference`, `intersection`, `hull`, `minkowski`
-- Alla noder: `translate`, `rotate` (grader), `scale`, `mirror`, `array`, `polar`, `hidden`
-- Flera delar (en STL per del): `{"parts": {"botten": {...}, "lock": {...}}}`
-- Strängar som börjar med `=` är uttryck: `"=w/2+wall"`, `"=max(a,b)"`, `"=cos(30)"`
-  (säker utvärdering, ingen kod körs)
+- Shapes: `box` (with `radius`), `cylinder`, `cone`, `sphere`, `tube`, `torus`, `wedge`,
+  `extrude` (polygon/circle/rectangle profile, `twist`, `scale_top`) and `revolve`
+- Templates: `screw_hole`, `heat_insert`, `nut_trap` (cutting: the surface is at z=0, going downward),
+  `boss`, `snap_hook`, `hinge` (print-in-place or with a separate pin) and `text`
+  (DejaVu Sans, raised or engraved). Dimensions for M2–M5 are in `templates.py`.
+- Operations: `union`, `difference`, `intersection`, `hull`, `minkowski`
+- All nodes: `translate`, `rotate` (degrees), `scale`, `mirror`, `array`, `polar`, `hidden`
+- Multiple parts (one STL per part): `{"parts": {"body": {...}, "lid": {...}}}`
+- Strings starting with `=` are expressions: `"=w/2+wall"`, `"=max(a,b)"`, `"=cos(30)"`
+  (safe evaluation, no code is run)
 
-Fullständig referens finns i `csg.py` (`SPEC_HELP`), och Claude får den i verktygsbeskrivningen.
+The full reference is in `csg.py` (`SPEC_HELP`), and Claude gets it in the tool description.
 
-### Justera med `update_model`
+### Adjusting with `update_model`
 ```jsonc
-{"changes": {"wall": 3}}                          // CSG: variabel; låda: parameter
-{"changes": {"/root/children/1/d": 8}}            // valfritt värde via JSON-pekare
-{"changes": {"/root/children/-": {"shape": ...}}} // lägg till en nod
-{"remove": ["/root/children/2"]}                  // ta bort en nod
-{"params": {...}}                                 // ersätt hela receptet
-{"changes": {...}, "resolves": ["c1"]}            // ...och markera kommentar c1 som åtgärdad
+{"changes": {"wall": 3}}                          // CSG: variable; box: parameter
+{"changes": {"/root/children/1/d": 8}}            // any value via JSON pointer
+{"changes": {"/root/children/-": {"shape": ...}}} // add a node
+{"remove": ["/root/children/2"]}                  // remove a node
+{"params": {...}}                                 // replace the whole recipe
+{"changes": {...}, "resolves": ["c1"]}            // ...and mark comment c1 as resolved
 ```
 
-Exempel med mallar, en platta med försänkta M3-hål och ingraverad text:
+Example with templates, a plate with countersunk M3 holes and engraved text:
 ```json
 {"vars": {"t": 4}, "root": {"op": "difference", "children": [
   {"shape": "box", "size": [60, 30, "=t"], "radius": 3, "round": "vertical"},
@@ -119,31 +126,31 @@ Exempel med mallar, en platta med försänkta M3-hål och ingraverad text:
 ```
 
 ## Tinkercad
-Tinkercad har inget offentligt API, så utbytet går via filer:
+Tinkercad has no public API, so exchange happens via files:
 
-- **Till Tinkercad:** ladda ned `.stl` (en del) eller `export_obj`-resultatet (flera färgade delar) och
-  välj *Import* i Tinkercad. Filer större än `TINKERCAD_MAX_MB` (default 25) får automatiskt en
-  förenklad kopia `<namn>_tinkercad.stl`.
-- **Från Tinkercad:** *Export* → `.STL` eller `.OBJ` (zip). Ladda upp filen till servern:
+- **To Tinkercad:** download the `.stl` (one part) or the `export_obj` result (several colored parts) and
+  choose *Import* in Tinkercad. Files larger than `TINKERCAD_MAX_MB` (default 25) automatically get a
+  simplified copy `<name>_tinkercad.stl`.
+- **From Tinkercad:** *Export* → `.STL` or `.OBJ` (zip). Upload the file to the server:
   ```
-  curl -T modell.stl -H "Authorization: Bearer <token>" https://<din-url>/upload/modell.stl
+  curl -T model.stl -H "Authorization: Bearer <token>" https://<your-url>/upload/model.stl
   ```
-  eller låt Claude hämta den med `import_file` (url). Bygg sedan vidare med `modify_file`.
-  `import_file` hämtar bara från publika adresser om inte `ALLOW_PRIVATE_URLS=1`.
+  or let Claude fetch it with `import_file` (url). Then keep building with `modify_file`.
+  `import_file` only fetches from public addresses unless `ALLOW_PRIVATE_URLS=1`.
 
-Importerade och modifierade filer är fristående filer i `STL_DIR` (`/files/<namn>`). De syns inte
-i webbens bibliotek.
+Imported and modified files are standalone files in `STL_DIR` (`/files/<name>`). They do not show up
+in the web library.
 
-## Lagring
-`STL_DIR/models/<id>/model.json` (recept och historik) och `v<N>/<del>.stl`. De 50 senaste
-versionerna behåller sina filer. Äldre versioner kan återskapas med `revert_model`.
+## Storage
+`STL_DIR/models/<id>/model.json` (recipe and history) and `v<N>/<part>.stl`. The 50 most recent
+versions keep their files. Older versions can be recreated with `revert_model`.
 
-## Säkerhet
-Sätt alltid `MCP_TOKEN` och lägg servern bakom HTTPS. Webbgränssnittet kräver token (cookie)
-om inte `UI_PUBLIC=1`, som gör det läsbart för alla medan ändringar fortfarande kräver token.
-`FILES_PUBLIC=1` gör bara STL-länkarna klickbara utan token (modell-id:n går att gissa). Lämna
-`ALLOW_SCRIPT` av om servern är nåbar utifrån. `/upload/*` kräver alltid token när
-`MCP_TOKEN` är satt. CSG-specen är säker att låta Claude skriva.
+## Security
+Always set `MCP_TOKEN` and put the server behind HTTPS. The web interface requires a token (cookie)
+unless `UI_PUBLIC=1`, which makes it readable by everyone while changes still require a token.
+`FILES_PUBLIC=1` only makes the STL links clickable without a token (model ids are guessable). Keep
+`ALLOW_SCRIPT` off if the server is reachable from outside. `/upload/*` always requires a token when
+`MCP_TOKEN` is set. The CSG spec is safe to let Claude write.
 
-three.js (MIT) levereras lokalt från `web/vendor/three`, så gränssnittet behöver ingen CDN.
-Typsnittet DejaVu Sans (fri licens, se `fonts/LICENSE`) används för text-mallen.
+three.js (MIT) is shipped locally from `web/vendor/three`, so the interface needs no CDN.
+The DejaVu Sans font (free license, see `fonts/LICENSE`) is used for the text template.

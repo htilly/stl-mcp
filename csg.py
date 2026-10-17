@@ -1,9 +1,9 @@
-"""Deklarativ CSG: ett JSON-träd av former, transformer och booleska operationer -> mesh (mm).
+"""Declarative CSG: a JSON tree of shapes, transforms and boolean operations -> mesh (mm).
 
-Byggs med manifold3d. Formatet är tänkt att vara lätt för Claude att skriva OCH att justera
-i efterhand (ändra en variabel eller ett enskilt värde via JSON-pekare).
+Built with manifold3d. The format is meant to be easy for Claude to write AND to adjust
+afterwards (change a variable or a single value via a JSON pointer).
 
-Exempel:
+Example:
 {
   "vars": {"w": 40, "wall": 2},
   "root": {"op": "difference", "children": [
@@ -12,7 +12,7 @@ Exempel:
   ]}
 }
 
-Strängar som börjar med "=" räknas ut som uttryck med variablerna i "vars".
+Strings starting with "=" are evaluated as expressions using the variables in "vars".
 """
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ CS = mf.CrossSection
 
 DEFAULT_SEGMENTS = 64
 
-# ---------------------------------------------------------------- uttryck
+# ---------------------------------------------------------------- expressions
 
 _BIN = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
         ast.Div: operator.truediv, ast.FloorDiv: operator.floordiv, ast.Mod: operator.mod,
@@ -46,7 +46,7 @@ _CONST = {"pi": math.pi}
 
 
 def eval_expr(expr: str, env: dict):
-    """Säker aritmetik: + - * / // % **, jämförelser, a if c else b, min/max/sqrt/sin(grader)..."""
+    """Safe arithmetic: + - * / // % **, comparisons, a if c else b, min/max/sqrt/sin(degrees)..."""
     def ev(n):
         if isinstance(n, ast.Expression):
             return ev(n.body)
@@ -57,11 +57,11 @@ def eval_expr(expr: str, env: dict):
                 return env[n.id]
             if n.id in _CONST:
                 return _CONST[n.id]
-            raise ValueError(f"okänd variabel '{n.id}' i uttrycket '{expr}'")
+            raise ValueError(f"unknown variable '{n.id}' in the expression '{expr}'")
         if isinstance(n, ast.BinOp) and type(n.op) in _BIN:
             l, r = ev(n.left), ev(n.right)
             if isinstance(n.op, ast.Pow) and abs(r) > 16:
-                raise ValueError("för stor exponent")
+                raise ValueError("exponent too large")
             return _BIN[type(n.op)](l, r)
         if isinstance(n, ast.UnaryOp) and type(n.op) in _UN:
             return _UN[type(n.op)](ev(n.operand))
@@ -72,12 +72,12 @@ def eval_expr(expr: str, env: dict):
         if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in _FUNCS \
                 and not n.keywords:
             return _FUNCS[n.func.id](*[ev(a) for a in n.args])
-        raise ValueError(f"otillåtet uttryck: '{expr}'")
+        raise ValueError(f"disallowed expression: '{expr}'")
     return ev(ast.parse(expr, mode="eval"))
 
 
 def resolve(value, env: dict):
-    """Ersätt alla "=uttryck" rekursivt."""
+    """Replace all "=expression" values recursively."""
     if isinstance(value, str) and value.startswith("="):
         return eval_expr(value[1:], env)
     if isinstance(value, list):
@@ -88,20 +88,20 @@ def resolve(value, env: dict):
 
 
 def resolve_vars(vars_: dict) -> dict:
-    """Variabler får referera till tidigare variabler (i ordning)."""
+    """Variables may refer to earlier variables (in order)."""
     env: dict = {}
     for k, v in (vars_ or {}).items():
         env[k] = resolve(v, env)
     return env
 
 
-# ---------------------------------------------------------------- former
+# ---------------------------------------------------------------- shapes
 
-def _vec3(v, name="vektor"):
+def _vec3(v, name="vector"):
     if isinstance(v, (int, float)):
         return (float(v),) * 3
     if not isinstance(v, (list, tuple)) or len(v) != 3:
-        raise ValueError(f"{name} måste vara [x, y, z]")
+        raise ValueError(f"{name} must be [x, y, z]")
     return tuple(float(x) for x in v)
 
 
@@ -115,7 +115,7 @@ def _radius(n, key_d="d", key_r="r"):
         return float(n[key_r])
     if key_d in n:
         return float(n[key_d]) / 2
-    raise ValueError(f"{n.get('shape')} kräver '{key_d}' (diameter) eller '{key_r}' (radie)")
+    raise ValueError(f"{n.get('shape')} requires '{key_d}' (diameter) or '{key_r}' (radius)")
 
 
 def _rounded_box(size, r, segs):
@@ -130,7 +130,7 @@ def _rounded_box(size, r, segs):
 
 
 def _rounded_rect_box(size, r, segs):
-    """Box med rundade vertikala kanter (bara i xy) – vanligast för utskrifter."""
+    """Box with rounded vertical edges (xy only) – most common for prints."""
     x, y, z = size
     r = min(r, x / 2, y / 2)
     if r <= 0:
@@ -143,13 +143,13 @@ def _rounded_rect_box(size, r, segs):
 def _polygon(n):
     pts = n.get("points")
     if not pts or len(pts) < 3:
-        raise ValueError("polygon kräver 'points': [[x,y], ...] (minst 3)")
+        raise ValueError("polygon requires 'points': [[x,y], ...] (at least 3)")
     contours = [pts] + list(n.get("holes", []))
     return CS(contours, mf.FillRule.EvenOdd)
 
 
 def _profile(n):
-    """2D-profil för extrude/revolve: polygon, circle, rect eller text-fri enkel form."""
+    """2D profile for extrude/revolve: polygon, circle, rect or another simple text-free shape."""
     p = n.get("profile")
     if p is None:
         return _polygon(n)
@@ -166,7 +166,7 @@ def _profile(n):
             r = float(p["radius"])
             cs = cs.offset(-r, mf.JoinType.Miter).offset(r, mf.JoinType.Round, circular_segments=segs)
     else:
-        raise ValueError(f"okänd profil '{kind}' (polygon, circle, rect)")
+        raise ValueError(f"unknown profile '{kind}' (polygon, circle, rect)")
     if p.get("offset"):
         cs = cs.offset(float(p["offset"]), mf.JoinType.Round, circular_segments=segs)
     return cs
@@ -203,11 +203,11 @@ def _shape(n) -> M:
         ro = _radius(n)
         ri = _radius(n, "inner_d", "inner_r")
         if ri >= ro:
-            raise ValueError("tube: inner_d måste vara mindre än d")
+            raise ValueError("tube: inner_d must be smaller than d")
         m = M.cylinder(h, ro, ro, segs) - M.cylinder(h + 2, ri, ri, segs).translate((0, 0, -1))
         return m.translate((0, 0, -h / 2)) if center else m
     if kind == "torus":
-        R = _radius(n, "d", "r")           # huvudradie (till rörets mitt)
+        R = _radius(n, "d", "r")           # major radius (to the center of the tube)
         rt = _radius(n, "tube_d", "tube_r")
         return CS.circle(rt, max(16, segs // 2)).translate((R, 0)).revolve(segs)
     if kind == "wedge":
@@ -221,12 +221,12 @@ def _shape(n) -> M:
         return _profile(n).revolve(segs, float(n.get("degrees", 360)))
     if kind in TEMPLATES:
         return TEMPLATES[kind](n)
-    raise ValueError(f"okänd form '{kind}'. Tillgängliga: box, cylinder, cone, sphere, tube, torus, "
+    raise ValueError(f"unknown shape '{kind}'. Available: box, cylinder, cone, sphere, tube, torus, "
                      f"wedge, extrude, revolve, {', '.join(TEMPLATES)}")
 
 
 def _transform(m: M, n: dict) -> M:
-    # ordning: scale -> rotate -> mirror -> translate (som man brukar tänka)
+    # order: scale -> rotate -> mirror -> translate (the way one usually thinks)
     if "scale" in n:
         m = m.scale(_vec3(n["scale"], "scale"))
     if "rotate" in n:
@@ -239,7 +239,7 @@ def _transform(m: M, n: dict) -> M:
 
 
 def _array(m: M, n: dict) -> M:
-    """Upprepning: "array": {"count": [nx, ny, nz], "step": [dx, dy, dz]} eller
+    """Repetition: "array": {"count": [nx, ny, nz], "step": [dx, dy, dz]} or
     "polar": {"count": n, "degrees": 360}."""
     if "array" in n:
         a = n["array"]
@@ -247,7 +247,7 @@ def _array(m: M, n: dict) -> M:
         cnt = [int(c) for c in (cnt if isinstance(cnt, list) else [cnt, 1, 1])]
         step = _vec3(a.get("step", [0, 0, 0]), "array.step")
         if cnt[0] * cnt[1] * cnt[2] > 2000:
-            raise ValueError("array: för många kopior (max 2000)")
+            raise ValueError("array: too many copies (max 2000)")
         m = M.batch_boolean([m.translate((i * step[0], j * step[1], k * step[2]))
                              for i in range(cnt[0]) for j in range(cnt[1]) for k in range(cnt[2])],
                             mf.OpType.Add)
@@ -255,7 +255,7 @@ def _array(m: M, n: dict) -> M:
         p = n["polar"]
         c = int(p["count"])
         if c > 720:
-            raise ValueError("polar: för många kopior (max 720)")
+            raise ValueError("polar: too many copies (max 720)")
         deg = float(p.get("degrees", 360))
         stepd = deg / c if abs(deg - 360) < 1e-9 else (deg / (c - 1) if c > 1 else 0)
         m = M.batch_boolean([m.rotate((0, 0, i * stepd)) for i in range(c)], mf.OpType.Add)
@@ -264,9 +264,9 @@ def _array(m: M, n: dict) -> M:
 
 def build_node(node, env: dict, depth: int = 0) -> M:
     if depth > 64:
-        raise ValueError("för djupt träd")
+        raise ValueError("tree too deep")
     if not isinstance(node, dict):
-        raise ValueError(f"nod måste vara ett objekt, fick {type(node).__name__}")
+        raise ValueError(f"node must be an object, got {type(node).__name__}")
     if node.get("hidden"):
         return M()
     n = resolve(node, env)
@@ -276,7 +276,7 @@ def build_node(node, env: dict, depth: int = 0) -> M:
         op = n["op"]
         kids = [build_node(c, env, depth + 1) for c in node.get("children", [])]
         if not kids:
-            raise ValueError(f"op '{op}' kräver 'children'")
+            raise ValueError(f"op '{op}' requires 'children'")
         if op in ("union", "group"):
             m = M.batch_boolean(kids, mf.OpType.Add)
         elif op == "difference":
@@ -290,9 +290,9 @@ def build_node(node, env: dict, depth: int = 0) -> M:
             for k in kids[1:]:
                 m = m.minkowski_sum(k)
         else:
-            raise ValueError(f"okänd op '{op}' (union, difference, intersection, hull, minkowski)")
+            raise ValueError(f"unknown op '{op}' (union, difference, intersection, hull, minkowski)")
     else:
-        raise ValueError("nod måste ha 'shape' eller 'op'")
+        raise ValueError("node must have 'shape' or 'op'")
     m = _array(m, n)
     return _transform(m, n)
 
@@ -305,31 +305,31 @@ def to_trimesh(m: M) -> trimesh.Trimesh:
 
 
 def build(spec: dict) -> dict[str, trimesh.Trimesh]:
-    """spec: {"vars": {...}, "root": node} eller {"vars": {...}, "parts": {"namn": node, ...}}.
-    Returnerar {delnamn: trimesh}."""
+    """spec: {"vars": {...}, "root": node} or {"vars": {...}, "parts": {"name": node, ...}}.
+    Returns {part name: trimesh}."""
     if not isinstance(spec, dict):
-        raise ValueError("spec måste vara ett objekt")
+        raise ValueError("spec must be an object")
     env = resolve_vars(spec.get("vars", {}))
     if "parts" in spec:
         parts = spec["parts"]
         if not isinstance(parts, dict) or not parts:
-            raise ValueError("'parts' måste vara {namn: nod}")
+            raise ValueError("'parts' must be {name: node}")
     elif "root" in spec:
         parts = {"model": spec["root"]}
     else:
-        raise ValueError("spec kräver 'root' (en nod) eller 'parts' ({namn: nod})")
+        raise ValueError("spec requires 'root' (a node) or 'parts' ({name: node})")
     out = {}
     for name, node in parts.items():
         m = build_node(node, env)
         if m.is_empty():
-            raise ValueError(f"del '{name}' blev tom – kontrollera mått och booleska operationer")
+            raise ValueError(f"part '{name}' came out empty – check dimensions and boolean operations")
         out[name] = to_trimesh(m)
     return out
 
 
 def locate(spec: dict, part: str | None, point, limit: int = 4) -> list[dict]:
-    """Hitta de noder (former) i specen som ligger närmast en punkt – används för att koppla en
-    kommentar i webben till rätt del av receptet. Returnerar [{pointer, shape, name?, distance_mm}]."""
+    """Find the nodes (shapes) in the spec that are closest to a point – used to link a
+    comment in the web UI to the right part of the recipe. Returns [{pointer, shape, name?, distance_mm}]."""
     env = resolve_vars(spec.get("vars", {}))
     if "parts" in spec:
         roots = {k: (f"/parts/{k}", v) for k, v in spec["parts"].items()}
@@ -353,9 +353,9 @@ def locate(spec: dict, part: str | None, point, limit: int = 4) -> list[dict]:
             return
         try:
             m = build_node(node, env)
-            for a in ancestors:                               # inifrån och ut
+            for a in ancestors:                               # from the inside out
                 m = _transform(_array(m, a), a)
-        except Exception:  # noqa: BLE001 – en trasig nod ska inte stoppa sökningen
+        except Exception:  # noqa: BLE001 – a broken node must not stop the search
             return
         if m.is_empty():
             return
@@ -377,27 +377,27 @@ def locate(spec: dict, part: str | None, point, limit: int = 4) -> list[dict]:
 
 
 SPEC_HELP = """\
-CSG-spec (mm, z uppåt, byggplatta z=0):
-{"vars": {"w": 40}, "root": <nod>}            – en del
-{"vars": {...}, "parts": {"botten": <nod>, "lock": <nod>}}   – flera delar (en STL per del)
+CSG spec (mm, z up, build plate at z=0):
+{"vars": {"w": 40}, "root": <node>}            – one part
+{"vars": {...}, "parts": {"body": <node>, "lid": <node>}}   – several parts (one STL per part)
 
-Former ("shape"):
+Shapes ("shape"):
   box      size:[x,y,z]  radius?  round?:"all"|"vertical"  center?
-  cylinder h, d|r  (d2|r2 för avsmalnande)  center?
+  cylinder h, d|r  (d2|r2 for tapered)  center?
   cone     h, d|r  (d2|r2, default 0)
   sphere   d|r
   tube     h, d, inner_d
-  torus    d (huvuddiameter), tube_d
-  wedge    size:[x,y,z]  (rät triangel-prisma)
+  torus    d (major diameter), tube_d
+  wedge    size:[x,y,z]  (right triangular prism)
   extrude  h, profile, twist?, scale_top?:[sx,sy]
-  revolve  profile (i xz-planet: x=radie), degrees?
+  revolve  profile (in the xz plane: x=radius), degrees?
   profile: {"shape":"polygon","points":[[x,y],...],"holes":[[...]]} | {"shape":"circle","d":..}
            | {"shape":"rect","size":[x,y],"radius"?, "center"?}   (+ "offset"?)
-Operationer ("op") med "children":[...]: union, difference (första minus resten), intersection,
+Operations ("op") with "children":[...]: union, difference (first minus the rest), intersection,
   hull, minkowski
-Alla noder: translate:[x,y,z], rotate:[rx,ry,rz] (grader), scale, mirror:[nx,ny,nz],
+All nodes: translate:[x,y,z], rotate:[rx,ry,rz] (degrees), scale, mirror:[nx,ny,nz],
   array:{count:[nx,ny,nz], step:[dx,dy,dz]}, polar:{count, degrees?}, segments, hidden:true,
-  name:"valfri etikett"
-Värden kan vara uttryck: "=w/2+wall", "=max(a,b)", "=sqrt(x)", "=cos(30)" (grader).
+  name:"optional label"
+Values can be expressions: "=w/2+wall", "=max(a,b)", "=sqrt(x)", "=cos(30)" (degrees).
 
 """ + TEMPLATE_HELP

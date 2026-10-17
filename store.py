@@ -1,11 +1,11 @@
-"""Modellbibliotek på disk med versionshistorik.
+"""On-disk model library with version history.
 
-En *modell* är ett recept (kind + params) – inte bara en STL. Varje ändring blir en ny version
-som byggs om från receptet, så Claude kan justera stegvis och man kan backa.
+A *model* is a recipe (kind + params) – not just an STL. Every change becomes a new version
+that is rebuilt from the recipe, so Claude can adjust step by step and you can roll back.
 
 Layout:
   <STL_DIR>/models/<id>/model.json
-  <STL_DIR>/models/<id>/v<N>/<del>.stl
+  <STL_DIR>/models/<id>/v<N>/<part>.stl
 """
 from __future__ import annotations
 
@@ -25,10 +25,10 @@ import trimesh
 import csg
 import geometry as g
 
-MAX_VERSIONS = 50  # äldre versioners STL-filer rensas (receptet behålls)
+MAX_VERSIONS = 50  # older versions' STL files are pruned (the recipe is kept)
 
 
-# ---------------------------------------------------------------- byggare per kind
+# ---------------------------------------------------------------- builders per kind
 
 def _build_csg(p):
     return csg.build(p)
@@ -40,7 +40,7 @@ def _build_enclosure(p):
         p.pop("inner_x"), p.pop("inner_y"), p.pop("inner_z"),
         wall=p.pop("wall", 2.4), floor=p.pop("floor", 2.4), lid_t=p.pop("lid_thickness", 2.4),
         screws=p.pop("corner_screws", True), **p)
-    return {"botten": body, "lock": lid}
+    return {"body": body, "lid": lid}
 
 
 def _build_primitive(p):
@@ -52,7 +52,7 @@ def _build_primitive(p):
 
 def _build_script(p, allow: bool):
     if not allow:
-        raise PermissionError("script-modeller är avstängda (sätt ALLOW_SCRIPT=1 på servern)")
+        raise PermissionError("script models are disabled (set ALLOW_SCRIPT=1 on the server)")
     code = p["code"]
     with tempfile.TemporaryDirectory() as td:
         script = Path(td) / "s.py"
@@ -70,11 +70,11 @@ def _build_script(p, allow: bool):
         return {f.stem[4:]: trimesh.load(f) for f in sorted(Path(td).glob("out_*.stl"))}
 
 
-# ---------------------------------------------------------------- JSON-pekare
+# ---------------------------------------------------------------- JSON pointers
 
 def _ptr_parts(ptr: str) -> list:
     if not ptr.startswith("/"):
-        raise ValueError(f"JSON-pekare måste börja med '/': {ptr}")
+        raise ValueError(f"JSON pointer must start with '/': {ptr}")
     return [p.replace("~1", "/").replace("~0", "~") for p in ptr[1:].split("/")]
 
 
@@ -85,10 +85,10 @@ def _walk(doc, parts):
             cur = cur[int(p)]
         elif isinstance(cur, dict):
             if p not in cur:
-                raise KeyError(f"saknas: '{p}'")
+                raise KeyError(f"missing: '{p}'")
             cur = cur[p]
         else:
-            raise KeyError(f"kan inte gå in i {type(cur).__name__} med '{p}'")
+            raise KeyError(f"cannot descend into {type(cur).__name__} with '{p}'")
     return cur
 
 
@@ -104,7 +104,7 @@ def ptr_set(doc, ptr: str, value):
     elif isinstance(parent, dict):
         parent[key] = value
     else:
-        raise KeyError(f"{ptr}: föräldern är inte objekt/lista")
+        raise KeyError(f"{ptr}: parent is not an object/list")
 
 
 def ptr_remove(doc, ptr: str):
@@ -118,8 +118,8 @@ def ptr_remove(doc, ptr: str):
 
 
 def apply_changes(kind: str, params: dict, changes: dict | None, remove: list[str] | None) -> dict:
-    """changes: {"/json/pekare": värde} eller {"nyckel": värde}.
-    Nyckel utan '/' : för csg -> vars[nyckel], annars -> params[nyckel]."""
+    """changes: {"/json/pointer": value} or {"key": value}.
+    A key without '/': for csg -> vars[key], otherwise -> params[key]."""
     p = copy.deepcopy(params)
     for k, v in (changes or {}).items():
         if k.startswith("/"):
@@ -140,7 +140,7 @@ def slug(name: str) -> str:
     for a, b in (("å", "a"), ("ä", "a"), ("ö", "o"), ("é", "e"), ("ü", "u")):
         s = s.replace(a, b)
     s = re.sub(r"[^a-z0-9_-]+", "-", s).strip("-_")
-    return s[:50] or "modell"
+    return s[:50] or "model"
 
 
 def _stats(mesh: trimesh.Trimesh) -> dict:
@@ -159,19 +159,19 @@ class Store:
         self.dir.mkdir(parents=True, exist_ok=True)
         self.allow_script = allow_script
         self.lock = threading.RLock()
-        self.revision = 0          # ökas vid varje ändring (webb-UI pollar via SSE)
+        self.revision = 0          # incremented on every change (the web UI polls via SSE)
         self.last_changed: str | None = None
 
     # -- intern
     def _path(self, mid: str) -> Path:
         if not re.fullmatch(r"[a-z0-9_-]{1,60}", mid or ""):
-            raise KeyError(f"ogiltigt modell-id: {mid}")
+            raise KeyError(f"invalid model id: {mid}")
         return self.dir / mid
 
     def _read(self, mid: str) -> dict:
         f = self._path(mid) / "model.json"
         if not f.is_file():
-            raise KeyError(f"modellen '{mid}' finns inte")
+            raise KeyError(f"model '{mid}' does not exist")
         return json.loads(f.read_text())
 
     def _write(self, m: dict):
@@ -195,13 +195,13 @@ class Store:
             return _build_primitive(params)
         if kind == "script":
             return _build_script(params, self.allow_script)
-        raise ValueError(f"okänd kind '{kind}'")
+        raise ValueError(f"unknown kind '{kind}'")
 
     def _new_version(self, m: dict, kind: str, params: dict, note: str) -> dict:
         t0 = time.time()
-        parts = self.build(kind, params)          # kastar vid fel -> inget sparas
+        parts = self.build(kind, params)          # raises on error -> nothing is saved
         if not parts:
-            raise ValueError("bygget gav inga delar")
+            raise ValueError("the build produced no parts")
         ver = (m["versions"][-1]["version"] + 1) if m["versions"] else 1
         vdir = self._path(m["id"]) / f"v{ver}"
         vdir.mkdir(parents=True, exist_ok=True)
@@ -215,7 +215,7 @@ class Store:
         m["versions"].append(v)
         m["current"] = ver
         m["updated"] = v["created"]
-        # rensa gamla STL:er (receptet finns kvar så de kan återskapas med revert)
+        # prune old STLs (the recipe remains so they can be recreated with revert)
         for old in m["versions"][:-MAX_VERSIONS]:
             if not old.get("pruned"):
                 shutil.rmtree(self._path(m["id"]) / f"v{old['version']}", ignore_errors=True)
@@ -234,7 +234,7 @@ class Store:
             m = {"id": mid, "name": name, "description": description, "created": time.time(),
                  "updated": time.time(), "current": 0, "versions": []}
             try:
-                self._new_version(m, kind, params, note or "skapad")
+                self._new_version(m, kind, params, note or "created")
             except Exception:
                 shutil.rmtree(self._path(mid), ignore_errors=True)
                 raise
@@ -249,19 +249,19 @@ class Store:
             cur = self.current(m)
             kind = cur["kind"]
             for cid in resolves or []:
-                self._comment(m, cid)                          # validera innan bygget
+                self._comment(m, cid)                          # validate before the build
             if params is not None or changes or remove:
                 base = params if params is not None else cur["params"]
                 newp = apply_changes(kind, base, changes, remove)
                 if not note:
                     bits = [f"{k}={json.dumps(v, ensure_ascii=False)[:30]}" for k, v in (changes or {}).items()]
                     bits += [f"-{r}" for r in remove or []]
-                    note = ", ".join(bits) or "nytt recept"
+                    note = ", ".join(bits) or "new recipe"
                 self._new_version(m, kind, newp, note)
             for cid in resolves or []:
                 c = self._comment(m, cid)
                 c["status"] = "resolved"
-                msg = f"Åtgärdat i v{m['current']}" + (f": {note}" if note else "")
+                msg = f"Addressed in v{m['current']}" + (f": {note}" if note else "")
                 c["replies"].append({"author": "claude", "text": msg, "at": time.time(),
                                      "version": m["current"]})
             if name is not None:
@@ -277,17 +277,17 @@ class Store:
             m = self._read(mid)
             src = self.version(m, version)
             self._new_version(m, src["kind"], copy.deepcopy(src["params"]),
-                              f"återställd från v{version}")
+                              f"reverted from v{version}")
             self._write(m)
             return m
 
     def set_current(self, mid: str, version: int) -> dict:
-        """Peka om 'current' utan att skapa ny version (används av webb-UI:t)."""
+        """Repoint 'current' without creating a new version (used by the web UI)."""
         with self.lock:
             m = self._read(mid)
             v = self.version(m, version)
             if v.get("pruned"):
-                raise ValueError("versionens filer är rensade – använd revert")
+                raise ValueError("the version's files have been pruned – use revert")
             m["current"] = version
             self._write(m)
             return m
@@ -296,18 +296,18 @@ class Store:
         m = self._read(mid)
         cur = self.current(m)
         return self.create(name, cur["kind"], copy.deepcopy(cur["params"]), m.get("description", ""),
-                           f"kopia av {mid} v{cur['version']}")
+                           f"copy of {mid} v{cur['version']}")
 
-    # -- kommentarer (pekas ut i webbens 3D-vy, läses och besvaras av Claude)
+    # -- comments (pointed out in the web 3D view, read and answered by Claude)
     @staticmethod
     def _comment(m: dict, cid: str) -> dict:
         for c in m.get("comments", []):
             if c["id"] == cid:
                 return c
-        raise KeyError(f"kommentaren '{cid}' finns inte på '{m['id']}'")
+        raise KeyError(f"comment '{cid}' does not exist on '{m['id']}'")
 
     def _hints(self, m: dict, version: int, part: str | None, point) -> dict:
-        """Koppla en punkt till receptet: närmaste CSG-noder, eller invändiga koordinater för lådor."""
+        """Link a point to the recipe: nearest CSG nodes, or inner coordinates for enclosures."""
         v = self.version(m, version)
         try:
             if v["kind"] == "csg":
@@ -316,10 +316,10 @@ class Store:
                 p = v["params"]
                 w, fl = p.get("wall", 2.4), p.get("floor", 2.4)
                 inner = [round(point[0] - w, 2), round(point[1] - w, 2)]
-                if part == "botten":
+                if part == "body":
                     inner.append(round(point[2] - fl, 2))
-                return {"inner_xy" if part != "botten" else "inner_xyz": inner}
-        except Exception:  # noqa: BLE001 – ledtrådar är best effort
+                return {"inner_xy" if part != "body" else "inner_xyz": inner}
+        except Exception:  # noqa: BLE001 – hints are best effort
             pass
         return {}
 
@@ -327,7 +327,7 @@ class Store:
                     version: int | None = None, author: str = "user") -> dict:
         text = (text or "").strip()
         if not text:
-            raise ValueError("kommentaren är tom")
+            raise ValueError("the comment is empty")
         with self.lock:
             m = self._read(mid)
             comments = m.setdefault("comments", [])
@@ -363,7 +363,7 @@ class Store:
             elif action == "reopen":
                 c["status"] = "open"
             elif action != "reply":
-                raise ValueError(f"okänd kommentarsåtgärd '{action}'")
+                raise ValueError(f"unknown comment action '{action}'")
             self._write(m)
             return m
 
@@ -371,7 +371,7 @@ class Store:
         with self.lock:
             p = self._path(mid)
             if not p.is_dir():
-                raise KeyError(f"modellen '{mid}' finns inte")
+                raise KeyError(f"model '{mid}' does not exist")
             shutil.rmtree(p)
             self._bump(mid)
 
@@ -390,7 +390,7 @@ class Store:
     def file(self, mid: str, rel: str) -> Path:
         p = (self._path(mid) / rel).resolve()
         if self._path(mid).resolve() not in p.parents or p.suffix != ".stl" or not p.is_file():
-            raise KeyError("filen finns inte")
+            raise KeyError("the file does not exist")
         return p
 
     @staticmethod
@@ -402,4 +402,4 @@ class Store:
         for v in m["versions"]:
             if v["version"] == version:
                 return v
-        raise KeyError(f"version {version} finns inte för '{m['id']}'")
+        raise KeyError(f"version {version} does not exist for '{m['id']}'")

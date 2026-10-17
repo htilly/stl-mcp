@@ -1,30 +1,30 @@
 #!/usr/bin/env bash
-# Engångsinstallation på servern (Debian/Ubuntu), körs som root:
+# One-time setup on the server (Debian/Ubuntu), run as root:
 #
 #   curl -fsSL https://raw.githubusercontent.com/htilly/stl-mcp/main/deploy/setup-runner.sh -o setup-runner.sh
-#   sudo bash setup-runner.sh <REGISTRERINGSTOKEN>
+#   sudo bash setup-runner.sh <REGISTRATION_TOKEN>
 #
-# Token hämtas på GitHub: repo → Settings → Actions → Runners → New self-hosted runner
-# (strängen efter --token, giltig i en timme).
+# Get the token on GitHub: repo → Settings → Actions → Runners → New self-hosted runner
+# (the string after --token, valid for one hour).
 #
-# Installerar Docker (om det saknas), skapar användaren gh-runner (medlem i docker-gruppen)
-# och registrerar en GitHub Actions-runner med label "tillyse" som systemd-tjänst.
+# Installs Docker (if missing), creates the user gh-runner (member of the docker group)
+# and registers a GitHub Actions runner with label "tillyse" as a systemd service.
 set -euo pipefail
 
-TOKEN=${1:?användning: setup-runner.sh <registreringstoken> [repo-url]}
+TOKEN=${1:?usage: setup-runner.sh <registration-token> [repo-url]}
 REPO_URL=${2:-https://github.com/htilly/stl-mcp}
 RUNNER_USER=gh-runner
 RUNNER_DIR=/opt/actions-runner
 APP_DIR=/opt/stl-mcp
 LABELS=tillyse
 
-[ "$(id -u)" = 0 ] || { echo "kör som root (sudo)"; exit 1; }
+[ "$(id -u)" = 0 ] || { echo "run as root (sudo)"; exit 1; }
 
 apt-get update -qq
 apt-get install -y -qq curl tar jq ca-certificates >/dev/null
 
 if ! command -v docker >/dev/null || ! docker compose version >/dev/null 2>&1; then
-  echo "Installerar Docker…"
+  echo "Installing Docker…"
   curl -fsSL https://get.docker.com | sh
 fi
 systemctl enable --now docker
@@ -37,11 +37,11 @@ chown -R "$RUNNER_USER:$RUNNER_USER" "$RUNNER_DIR" "$APP_DIR"
 case "$(uname -m)" in
   x86_64) ARCH=x64 ;;
   aarch64) ARCH=arm64 ;;
-  *) echo "okänd arkitektur $(uname -m)"; exit 1 ;;
+  *) echo "unknown architecture $(uname -m)"; exit 1 ;;
 esac
 VERSION=$(curl -fsSL https://api.github.com/repos/actions/runner/releases/latest | jq -r .tag_name | sed 's/^v//')
 if [ ! -x "$RUNNER_DIR/config.sh" ]; then
-  echo "Hämtar actions-runner $VERSION ($ARCH)…"
+  echo "Downloading actions-runner $VERSION ($ARCH)…"
   curl -fsSL "https://github.com/actions/runner/releases/download/v$VERSION/actions-runner-linux-$ARCH-$VERSION.tar.gz" \
     | sudo -u "$RUNNER_USER" tar xz -C "$RUNNER_DIR"
   "$RUNNER_DIR/bin/installdependencies.sh" >/dev/null
@@ -56,5 +56,5 @@ sudo -u "$RUNNER_USER" ./config.sh --unattended --replace \
 ./svc.sh start
 
 echo
-echo "Klart. Runnern '$(hostname -s)-stl' (label: $LABELS) är registrerad och körs som tjänst."
-echo "Nästa steg: lägg in secret MCP_TOKEN och variabeln PUBLIC_URL i repot, kör sedan Deploy-flödet."
+echo "Done. The runner '$(hostname -s)-stl' (label: $LABELS) is registered and running as a service."
+echo "Next step: add the secret MCP_TOKEN and the variable PUBLIC_URL to the repo, then run the Deploy workflow."

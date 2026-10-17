@@ -1,11 +1,11 @@
 <!doctype html>
-<html lang="sv">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Modell</title>
+<title>Model</title>
 <link rel="stylesheet" href="/static/style.css">
-<!-- three.js r169 (MIT) levereras lokalt från web/vendor/three -->
+<!-- three.js r169 (MIT) is served locally from web/vendor/three -->
 <script type="importmap">
 { "imports": {
   "three": "/static/vendor/three/three.module.min.js"
@@ -14,95 +14,95 @@
 </head>
 <body>
 <header class="top">
-  <a href="/">← Bibliotek</a>
+  <a href="/">← Library</a>
   <div class="grow"></div>
-  <span class="live" id="live" title="Vyn uppdateras automatiskt när Claude ändrar modellen"><span class="dot"></span>live</span>
+  <span class="live" id="live" title="The view updates automatically when Claude changes the model"><span class="dot"></span>live</span>
 </header>
 <div class="viewer-layout">
   <div id="stage">
     <div class="toolbar">
-      <button data-view="iso" title="Isometrisk">Iso</button>
-      <button data-view="front">Fram</button>
-      <button data-view="top">Ovan</button>
-      <button data-view="right">Höger</button>
-      <button id="fit" title="Zooma till modellen">Anpassa</button>
-      <button id="spread" class="on" title="Visa delarna bredvid varandra eller som de är placerade">Sprid delar</button>
-      <button id="edges" class="on">Kanter</button>
-      <button id="wire">Trådnät</button>
-      <button id="rotate">Snurra</button>
-      <button id="commentmode" title="Klicka sedan på modellen för att lämna en kommentar till Claude">💬 Kommentera</button>
+      <button data-view="iso" title="Isometric">Iso</button>
+      <button data-view="front">Front</button>
+      <button data-view="top">Top</button>
+      <button data-view="right">Right</button>
+      <button id="fit" title="Zoom to fit the model">Fit</button>
+      <button id="spread" class="on" title="Show the parts side by side or as they are placed">Spread parts</button>
+      <button id="edges" class="on">Edges</button>
+      <button id="wire">Wireframe</button>
+      <button id="rotate">Spin</button>
+      <button id="commentmode" title="Then click the model to leave a comment for Claude">💬 Comment</button>
     </div>
     <div id="pins"></div>
     <form class="cpop" id="cpop" hidden>
-      <textarea id="ctext" rows="3" placeholder="T.ex. ”hålet här ska vara 2 mm större”"></textarea>
+      <textarea id="ctext" rows="3" placeholder="E.g. “this hole should be 2 mm larger”"></textarea>
       <div class="row">
-        <button class="primary" type="submit">Spara</button>
-        <button type="button" id="ccancel">Avbryt</button>
+        <button class="primary" type="submit">Save</button>
+        <button type="button" id="ccancel">Cancel</button>
         <span class="hint">Ctrl+Enter</span>
       </div>
     </form>
-    <div class="loading" id="loading">Laddar…</div>
+    <div class="loading" id="loading">Loading…</div>
     <div class="hud" id="hud"></div>
     <div class="toast" id="toast"></div>
   </div>
   <aside class="side">
     <div class="sec">
-      <input class="title-input" id="title" aria-label="Namn">
-      <textarea class="desc-input" id="desc" rows="1" placeholder="Beskrivning…" aria-label="Beskrivning"></textarea>
+      <input class="title-input" id="title" aria-label="Name">
+      <textarea class="desc-input" id="desc" rows="1" placeholder="Description…" aria-label="Description"></textarea>
       <div class="row hint">
         <span>id: <span class="mono" id="mid"></span></span>
-        <button id="copyid" title="Kopiera id – referera till modellen när du pratar med Claude">Kopiera</button>
+        <button id="copyid" title="Copy id – refer to the model when talking to Claude">Copy</button>
       </div>
     </div>
     <div class="sec">
-      <h2>Delar <span id="vlabel" class="pill"></span></h2>
+      <h2>Parts <span id="vlabel" class="pill"></span></h2>
       <div id="parts"></div>
     </div>
     <div class="sec">
-      <h2>Kommentarer <span class="pill" id="ccount"></span></h2>
+      <h2>Comments <span class="pill" id="ccount"></span></h2>
       <div id="comments"></div>
       <div class="row hint" style="margin-top:6px">
-        <label><input type="checkbox" id="showresolved"> Visa lösta</label>
+        <label><input type="checkbox" id="showresolved"> Show resolved</label>
       </div>
-      <p class="hint" id="chint">Klicka <b>💬 Kommentera</b> och sedan på modellen. Säg till Claude
-        ”titta på kommentarerna” så ser den exakt vilken del du menar.</p>
+      <p class="hint" id="chint">Click <b>💬 Comment</b> and then the model. Tell Claude
+        “look at the comments” and it sees exactly which part you mean.</p>
     </div>
     <div class="sec" id="paramsec" hidden>
-      <h2>Parametrar</h2>
+      <h2>Parameters</h2>
       <div class="params" id="params"></div>
       <div class="row" style="margin-top:10px">
-        <button class="primary" id="apply" disabled>Bygg om</button>
+        <button class="primary" id="apply" disabled>Rebuild</button>
         <span class="hint" id="paramhint"></span>
       </div>
     </div>
     <div class="sec">
-      <h2>Historik</h2>
+      <h2>History</h2>
       <ul class="versions" id="versions"></ul>
       <div class="row" style="margin-top:8px" id="veractions" hidden>
-        <button id="revert">Återställ till denna version</button>
+        <button id="revert">Restore this version</button>
       </div>
     </div>
     <div class="sec">
-      <h2>Recept</h2>
+      <h2>Recipe</h2>
       <details id="recipebox">
-        <summary>Visa JSON (det Claude justerar)</summary>
+        <summary>Show JSON (what Claude adjusts)</summary>
         <div class="row" style="margin:8px 0">
-          <button id="copyrecipe">Kopiera</button>
-          <button id="editrecipe">Redigera</button>
+          <button id="copyrecipe">Copy</button>
+          <button id="editrecipe">Edit</button>
         </div>
         <pre class="recipe" id="recipe"></pre>
         <div id="recipeedit" hidden>
           <textarea class="recipe" id="recipetext" spellcheck="false"></textarea>
           <div class="row" style="margin-top:6px">
-            <button class="primary" id="saverecipe">Spara som ny version</button>
-            <button id="cancelrecipe">Avbryt</button>
+            <button class="primary" id="saverecipe">Save as new version</button>
+            <button id="cancelrecipe">Cancel</button>
           </div>
         </div>
       </details>
     </div>
     <div class="sec row">
-      <button id="dup">Duplicera</button>
-      <button class="danger" id="del">Radera modell</button>
+      <button id="dup">Duplicate</button>
+      <button class="danger" id="del">Delete model</button>
     </div>
   </aside>
 </div>
@@ -115,9 +115,9 @@ import { api, subscribe, ago, fmt, esc, PART_COLORS } from "/static/common.js";
 
 const id = decodeURIComponent(location.pathname.split("/").pop());
 const $ = (s) => document.getElementById(s);
-let model = null;          // senaste model.json
-let viewVersion = null;    // versionen som visas
-let followCurrent = true;  // hoppa automatiskt till nya versioner
+let model = null;          // latest model.json
+let viewVersion = null;    // version being shown
+let followCurrent = true;  // jump automatically to new versions
 const hidden = new Set();
 let spread = true, showEdges = true, wire = false;
 
@@ -240,11 +240,11 @@ async function showVersion(v, refit) {
     const entries = Object.entries(ver.parts);
     const seq = ++loadSeq;
     const geoms = await Promise.all(entries.map(([, p]) => loadGeometry(p.url)));
-    if (seq !== loadSeq) return;  // en annan version valdes under tiden
+    if (seq !== loadSeq) return;  // another version was selected in the meantime
     const prevR = group.children.length ? bbox().getBoundingSphere(new THREE.Sphere()).radius : 0;
     group.children.forEach((o) => o.children.forEach((c) => {
       c.material.dispose();
-      if (c.isLineSegments) c.geometry.dispose();  // mesh-geometrin ligger kvar i cachen
+      if (c.isLineSegments) c.geometry.dispose();  // the mesh geometry stays in the cache
     }));
     group.clear();
     entries.forEach(([name], i) => {
@@ -263,13 +263,13 @@ async function showVersion(v, refit) {
     layoutParts();
     const r = bbox().getBoundingSphere(new THREE.Sphere()).radius;
     if (refit) setView("iso");
-    else if (prevR > 0 && (r / prevR > 1.25 || r / prevR < 0.6)) setView("keep");  // stor storleksändring
+    else if (prevR > 0 && (r / prevR > 1.25 || r / prevR < 0.6)) setView("keep");  // big size change
   } finally {
     $("loading").hidden = true;
   }
 }
 
-// ------------------------------------------------------------ sidopanel
+// ------------------------------------------------------------ side panel
 function renderSide() {
   const cur = model.versions.find((x) => x.version === model.current);
   const ver = model.versions.find((x) => x.version === viewVersion) || cur;
@@ -277,15 +277,15 @@ function renderSide() {
   if (document.activeElement !== $("title")) $("title").value = model.name;
   if (document.activeElement !== $("desc")) $("desc").value = model.description || "";
   $("mid").textContent = model.id;
-  $("vlabel").textContent = `v${ver.version}${ver.version === model.current ? "" : " (äldre)"}`;
+  $("vlabel").textContent = `v${ver.version}${ver.version === model.current ? "" : " (older)"}`;
 
   $("parts").innerHTML = Object.entries(ver.parts).map(([name, p], i) => `
     <div class="part">
-      <span class="swatch${hidden.has(name) ? " off" : ""}" data-part="${esc(name)}" title="Visa/dölj"
+      <span class="swatch${hidden.has(name) ? " off" : ""}" data-part="${esc(name)}" title="Show/hide"
             style="background:${PART_COLORS[i % PART_COLORS.length]}"></span>
       <div><div>${esc(name)}</div>
         <div class="dims">${fmt(p.extents_mm)} · ${p.volume_cm3} cm³</div>
-        ${p.watertight ? "" : '<div class="warn">⚠ inte vattentät – kan ge problem i slicern</div>'}</div>
+        ${p.watertight ? "" : '<div class="warn">⚠ not watertight – may cause problems in the slicer</div>'}</div>
       <a class="btn" href="${p.url}" download>STL</a>
     </div>`).join("");
   document.querySelectorAll(".swatch").forEach((s) => s.onclick = () => {
@@ -298,7 +298,7 @@ function renderSide() {
 
   $("versions").innerHTML = [...model.versions].reverse().map((v) => `
     <li data-v="${v.version}" class="${v.version === viewVersion ? "sel" : ""} ${v.version === model.current ? "cur" : ""}"
-        title="${new Date(v.created * 1000).toLocaleString("sv-SE")}${v.pruned ? " – filer rensade" : ""}"
+        title="${new Date(v.created * 1000).toLocaleString("en-GB")}${v.pruned ? " – files pruned" : ""}"
         style="${v.pruned ? "opacity:.5" : ""}">
       <span class="v">v${v.version}</span>
       <span class="note">${esc(v.note || "—")}</span>
@@ -319,7 +319,7 @@ function renderSide() {
   renderPins();
 }
 
-// Redigerbara parametrar: vars för CSG, toppnivåvärden för övriga.
+// Editable parameters: vars for CSG, top-level values for the rest.
 function editableParams(ver) {
   const src = ver.kind === "csg" ? (ver.params.vars || {}) : ver.params;
   return Object.entries(src).filter(([, v]) =>
@@ -337,7 +337,7 @@ function renderParams(ver) {
                value="${esc(v)}" class="${typeof v === "string" ? "expr" : ""}" ${isCur ? "" : "disabled"}>`;
     return `<label title="${esc(k)}">${esc(k)}</label>${input}`;
   }).join("");
-  $("paramhint").textContent = isCur ? "" : "Visar äldre version";
+  $("paramhint").textContent = isCur ? "" : "Showing an older version";
   $("apply").disabled = true;
   document.querySelectorAll("#params input").forEach((inp) => {
     inp.oninput = inp.onchange = () => { inp.classList.add("dirty"); $("apply").disabled = false; };
@@ -352,13 +352,13 @@ $("apply").onclick = async () => {
     changes[k] = inp.type === "checkbox" ? inp.checked : inp.type === "number" ? +inp.value : inp.value;
   });
   if (!Object.keys(changes).length) return;
-  const note = "webb: " + Object.entries(changes).map(([k, v]) => `${k}=${v}`).join(", ");
+  const note = "web: " + Object.entries(changes).map(([k, v]) => `${k}=${v}`).join(", ");
   $("apply").disabled = true;
   try { await api(`/api/models/${encodeURIComponent(id)}`, { method: "POST", body: { action: "update", changes, note } }); }
   catch (e) { toast(e.message, true); $("apply").disabled = false; }
 };
 
-// ------------------------------------------------------------ kommentarer
+// ------------------------------------------------------------ comments
 let commentMode = false, showResolved = false, pending = null, focusId = null;
 const raycaster = new THREE.Raycaster();
 const pinsEl = $("pins");
@@ -413,19 +413,19 @@ function focusComment(id, moveCamera) {
 function renderComments() {
   const all = model.comments || [];
   const open = all.filter((c) => c.status === "open").length;
-  $("ccount").textContent = all.length ? `${open} öppna` : "";
+  $("ccount").textContent = all.length ? `${open} open` : "";
   const list = visibleComments();
   $("comments").innerHTML = list.length ? list.map((c) => `
     <div class="cmt${c.status !== "open" ? " done" : ""}${c.id === focusId ? " focus" : ""}" data-id="${c.id}">
       <span class="badge">${c.id.slice(1)}</span>
       <div>
         <div class="ctext">${esc(c.text)}</div>
-        <div class="hint">v${c.version}${c.part ? " · " + esc(c.part) : ""} · ${ago(c.created)}${c.point ? "" : " · utan punkt"}</div>
-        ${(c.replies || []).map((r) => `<div class="reply ${r.author}"><b>${r.author === "claude" ? "Claude" : "Du"}:</b> ${esc(r.text)}</div>`).join("")}
+        <div class="hint">v${c.version}${c.part ? " · " + esc(c.part) : ""} · ${ago(c.created)}${c.point ? "" : " · no point"}</div>
+        ${(c.replies || []).map((r) => `<div class="reply ${r.author}"><b>${r.author === "claude" ? "Claude" : "You"}:</b> ${esc(r.text)}</div>`).join("")}
         <div class="row cact">
-          ${c.status === "open" ? `<button data-a="resolve">Markera löst</button>` : `<button data-a="reopen">Öppna igen</button>`}
-          <button data-a="reply">Svara</button>
-          <button data-a="delete" class="danger">Radera</button>
+          ${c.status === "open" ? `<button data-a="resolve">Mark resolved</button>` : `<button data-a="reopen">Reopen</button>`}
+          <button data-a="reply">Reply</button>
+          <button data-a="delete" class="danger">Delete</button>
         </div>
       </div>
     </div>`).join("") : "";
@@ -435,8 +435,8 @@ function renderComments() {
     el.querySelectorAll("button[data-a]").forEach((b) => b.onclick = async () => {
       const a = b.dataset.a;
       let text = "";
-      if (a === "reply" && !(text = prompt("Svar:") || "")) return;
-      if (a === "delete" && !confirm("Radera kommentaren?")) return;
+      if (a === "reply" && !(text = prompt("Reply:") || "")) return;
+      if (a === "delete" && !confirm("Delete the comment?")) return;
       await post({ action: "comment_" + a, id, text });
     });
   });
@@ -490,8 +490,8 @@ $("cpop").onsubmit = async (e) => {
   try {
     await post({ action: "comment_add", text, point, normal, part, version: viewVersion });
     closePopup();
-    toast("Kommentar sparad – be Claude titta på den");
-  } catch { /* toast visas av post */ }
+    toast("Comment saved – ask Claude to look at it");
+  } catch { /* post shows the toast */ }
 };
 $("ctext").onkeydown = (e) => {
   if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) $("cpop").requestSubmit();
@@ -502,7 +502,7 @@ $("commentmode").onclick = () => setCommentMode(!commentMode);
 $("showresolved").onchange = (e) => { showResolved = e.target.checked; renderComments(); renderPins(); };
 addEventListener("keydown", (e) => { if (e.key === "Escape" && commentMode && $("cpop").hidden) setCommentMode(false); });
 
-// ------------------------------------------------------------ händelser
+// ------------------------------------------------------------ events
 function toast(msg, err = false) {
   const t = $("toast");
   t.textContent = msg; t.classList.toggle("err", err); t.classList.add("show");
@@ -516,15 +516,15 @@ async function post(body) {
 
 $("title").onchange = () => post({ action: "rename", name: $("title").value.trim() || model.name });
 $("desc").onchange = () => post({ action: "rename", description: $("desc").value });
-$("copyid").onclick = () => { navigator.clipboard.writeText(model.id); toast("id kopierat"); };
-$("copyrecipe").onclick = () => { navigator.clipboard.writeText($("recipe").textContent); toast("recept kopierat"); };
+$("copyid").onclick = () => { navigator.clipboard.writeText(model.id); toast("id copied"); };
+$("copyrecipe").onclick = () => { navigator.clipboard.writeText($("recipe").textContent); toast("recipe copied"); };
 $("revert").onclick = () => { followCurrent = true; post({ action: "revert", version: viewVersion }); };
 $("dup").onclick = async () => {
-  const name = prompt("Namn på kopian:", model.name + " kopia");
+  const name = prompt("Name of the copy:", model.name + " copy");
   if (name) { const r = await post({ action: "duplicate", name }); location.href = `/m/${encodeURIComponent(r.id)}`; }
 };
 $("del").onclick = async () => {
-  if (!confirm(`Radera ”${model.name}” och hela historiken?`)) return;
+  if (!confirm(`Delete “${model.name}” and its entire history?`)) return;
   try { await api(`/api/models/${encodeURIComponent(id)}`, { method: "DELETE" }); location.href = "/"; }
   catch (e) { toast(e.message, true); }
 };
@@ -535,9 +535,9 @@ $("editrecipe").onclick = () => {
 $("cancelrecipe").onclick = () => { $("recipe").hidden = false; $("recipeedit").hidden = true; };
 $("saverecipe").onclick = async () => {
   let params;
-  try { params = JSON.parse($("recipetext").value); } catch (e) { return toast("Ogiltig JSON: " + e.message, true); }
+  try { params = JSON.parse($("recipetext").value); } catch (e) { return toast("Invalid JSON: " + e.message, true); }
   followCurrent = true;
-  await post({ action: "update", params, note: "webb: recept redigerat" });
+  await post({ action: "update", params, note: "web: recipe edited" });
   $("cancelrecipe").click();
 };
 
@@ -553,7 +553,7 @@ async function refresh(first) {
   try { m = await api(`/api/models/${encodeURIComponent(id)}`); }
   catch (e) {
     $("loading").hidden = false;
-    $("loading").textContent = first ? `Kunde inte ladda modellen: ${e.message}` : "Modellen har raderats.";
+    $("loading").textContent = first ? `Could not load the model: ${e.message}` : "The model has been deleted.";
     return;
   }
   const prevCurrent = model?.current;
@@ -564,7 +564,7 @@ async function refresh(first) {
     if (changed || first) await showVersion(viewVersion, first);
     if (!first && prevCurrent !== m.current) {
       const v = m.versions.find((x) => x.version === m.current);
-      toast(`v${v.version}: ${v.note || "uppdaterad"}`);
+      toast(`v${v.version}: ${v.note || "updated"}`);
     }
   }
   renderSide();
