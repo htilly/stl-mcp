@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Modell</title>
+<link rel="stylesheet" href="/static/style.css">
+<!-- three.js r169 (MIT) levereras lokalt från web/vendor/three -->
+<script type="importmap">
+{ "imports": {
+  "three": "/static/vendor/three/three.module.min.js"
+} }
+</script>
+</head>
+<body>
+<header class="top">
+  <a href="/">← Bibliotek</a>
+  <div class="grow"></div>
+  <span class="live" id="live" title="Vyn uppdateras automatiskt när Claude ändrar modellen"><span class="dot"></span>live</span>
+</header>
+<div class="viewer-layout">
+  <div id="stage">
+    <div class="toolbar">
+      <button data-view="iso" title="Isometrisk">Iso</button>
+      <button data-view="front">Fram</button>
+      <button data-view="top">Ovan</button>
+      <button data-view="right">Höger</button>
+      <button id="fit" title="Zooma till modellen">Anpassa</button>
+      <button id="spread" class="on" title="Visa delarna bredvid varandra eller som de är placerade">Sprid delar</button>
+      <button id="edges" class="on">Kanter</button>
+      <button id="wire">Trådnät</button>
+      <button id="rotate">Snurra</button>
+    </div>
+    <div class="loading" id="loading">Laddar…</div>
+    <div class="hud" id="hud"></div>
+    <div class="toast" id="toast"></div>
+  </div>
+  <aside class="side">
+    <div class="sec">
+      <input class="title-input" id="title" aria-label="Namn">
+      <textarea class="desc-input" id="desc" rows="1" placeholder="Beskrivning…" aria-label="Beskrivning"></textarea>
+      <div class="row hint">
+        <span>id: <span class="mono" id="mid"></span></span>
+        <button id="copyid" title="Kopiera id – referera till modellen när du pratar med Claude">Kopiera</button>
+      </div>
+    </div>
+    <div class="sec">
+      <h2>Delar <span id="vlabel" class="pill"></span></h2>
+      <div id="parts"></div>
+    </div>
+    <div class="sec" id="paramsec" hidden>
+      <h2>Parametrar</h2>
+      <div class="params" id="params"></div>
+      <div class="row" style="margin-top:10px">
+        <button class="primary" id="apply" disabled>Bygg om</button>
+        <span class="hint" id="paramhint"></span>
+      </div>
+    </div>
+    <div class="sec">
+      <h2>Historik</h2>
+      <ul class="versions" id="versions"></ul>
+      <div class="row" style="margin-top:8px" id="veractions" hidden>
+        <button id="revert">Återställ till denna version</button>
+      </div>
+    </div>
+    <div class="sec">
+      <h2>Recept</h2>
+      <details id="recipebox">
+        <summary>Visa JSON (det Claude justerar)</summary>
+        <div class="row" style="margin:8px 0">
+          <button id="copyrecipe">Kopiera</button>
+          <button id="editrecipe">Redigera</button>
+        </div>
+        <pre class="recipe" id="recipe"></pre>
+        <div id="recipeedit" hidden>
+          <textarea class="recipe" id="recipetext" spellcheck="false"></textarea>
+          <div class="row" style="margin-top:6px">
+            <button class="primary" id="saverecipe">Spara som ny version</button>
+            <button id="cancelrecipe">Avbryt</button>
+          </div>
+        </div>
+      </details>
+    </div>
+    <div class="sec row">
+      <button id="dup">Duplicera</button>
+      <button class="danger" id="del">Radera modell</button>
+    </div>
+  </aside>
+</div>
+
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "/static/vendor/three/OrbitControls.js";
+import { STLLoader } from "/static/vendor/three/STLLoader.js";
+import { api, subscribe, ago, fmt, esc, PART_COLORS } from "/static/common.js";
+
+const id = decodeURIComponent(location.pathname.split("/").pop());
+const $ = (s) => document.getElementById(s);
+let model = null;          // senaste model.json
+let viewVersion = null;    // versionen som visas
+let followCurrent = true;  // hoppa automatiskt till nya versioner
+const hidden = new Set();
+let spread = true, showEdges = true, wire = false;
+
+// ------------------------------------------------------------ three.js
+const stage = $("stage");
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+stage.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100000);
+camera.up.set(0, 0, 1);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.12;
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8890a0, 1.6));
+const key = new THREE.DirectionalLight(0xffffff, 1.8);
+camera.add(key); key.position.set(0.5, 1, 0.4);
+scene.add(camera);
+
+const group = new THREE.Group();
+scene.add(group);
+let grid = null;
+const loader = new STLLoader();
+const geomCache = new Map();
+let loadSeq = 0;
+
+function themeColors() {
+  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  scene.background = new THREE.Color(dark ? 0x181a20 : 0xeceef2);
+  return dark;
+}
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { themeColors(); buildGrid(); });
+
+function resize() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(stage);
+
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+
+function bbox() {
+  const b = new THREE.Box3();
+  group.children.forEach((o) => { if (o.visible) b.expandByObject(o); });
+  if (b.isEmpty()) group.children.forEach((o) => b.expandByObject(o));
+  return b;
+}
+
+function buildGrid() {
+  if (grid) { scene.remove(grid); grid.geometry.dispose(); }
+  const b = bbox();
+  if (b.isEmpty()) return;
+  const size = b.getSize(new THREE.Vector3());
+  const span = Math.max(size.x, size.y) * 1.6 + 20;
+  const step = span > 600 ? 50 : span > 200 ? 20 : 10;
+  const n = Math.ceil(span / step);
+  const dark = themeColors();
+  grid = new THREE.GridHelper(n * step, n, dark ? 0x3a404c : 0xb9bfcb, dark ? 0x262a33 : 0xd8dce4);
+  grid.rotation.x = Math.PI / 2;
+  const c = b.getCenter(new THREE.Vector3());
+  grid.position.set(Math.round(c.x / step) * step, Math.round(c.y / step) * step, 0);
+  scene.add(grid);
+}
+
+function setView(kind) {
+  const b = bbox();
+  if (b.isEmpty()) return;
+  const c = b.getCenter(new THREE.Vector3());
+  const r = b.getBoundingSphere(new THREE.Sphere()).radius || 10;
+  const d = r / Math.sin((camera.fov * Math.PI) / 360) * 1.15;
+  const dirs = { iso: [1, -1.2, 0.9], front: [0, -1, 0.0001], top: [0, -0.0001, 1], right: [1, 0, 0.0001] };
+  const dir = kind === "keep" ? camera.position.clone().sub(controls.target) : new THREE.Vector3(...dirs[kind] || dirs.iso);
+  const v = dir.normalize().multiplyScalar(d);
+  camera.position.copy(c).add(v);
+  camera.near = d / 100; camera.far = d * 100; camera.updateProjectionMatrix();
+  controls.target.copy(c);
+  controls.update();
+}
+
+function layoutParts() {
+  let x = null;
+  for (const obj of group.children) {
+    obj.position.set(0, 0, 0);
+    if (!spread || group.children.length < 2) continue;
+    const b = new THREE.Box3().setFromObject(obj);
+    if (x === null) x = b.min.x;
+    obj.position.x = x - b.min.x;
+    x += b.max.x - b.min.x + 10;
+  }
+  const b = bbox();
+  if (!b.isEmpty()) {
+    const s = b.getSize(new THREE.Vector3());
+    $("hud").textContent = `${fmt([s.x, s.y, s.z])}`;
+  }
+  buildGrid();
+}
+
+async function loadGeometry(url) {
+  if (!geomCache.has(url)) geomCache.set(url, loader.loadAsync(url));
+  return geomCache.get(url);
+}
+
+function applyMaterials() {
+  group.children.forEach((obj) => {
+    const mesh = obj.children[0], edges = obj.children[1];
+    mesh.material.wireframe = wire;
+    edges.visible = showEdges && !wire;
+    obj.visible = !hidden.has(obj.name);
+  });
+}
+
+async function showVersion(v, refit) {
+  const ver = model.versions.find((x) => x.version === v);
+  if (!ver || ver.pruned) return;
+  $("loading").hidden = false;
+  try {
+    const entries = Object.entries(ver.parts);
+    const seq = ++loadSeq;
+    const geoms = await Promise.all(entries.map(([, p]) => loadGeometry(p.url)));
+    if (seq !== loadSeq) return;  // en annan version valdes under tiden
+    const prevR = group.children.length ? bbox().getBoundingSphere(new THREE.Sphere()).radius : 0;
+    group.children.forEach((o) => o.children.forEach((c) => {
+      c.material.dispose();
+      if (c.isLineSegments) c.geometry.dispose();  // mesh-geometrin ligger kvar i cachen
+    }));
+    group.clear();
+    entries.forEach(([name], i) => {
+      const color = PART_COLORS[i % PART_COLORS.length];
+      const mat = new THREE.MeshStandardMaterial({ color, metalness: 0.05, roughness: 0.55,
+        polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
+      const mesh = new THREE.Mesh(geoms[i], mat);
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geoms[i], 25),
+        new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35 }));
+      const obj = new THREE.Group();
+      obj.name = name;
+      obj.add(mesh, edges);
+      group.add(obj);
+    });
+    applyMaterials();
+    layoutParts();
+    const r = bbox().getBoundingSphere(new THREE.Sphere()).radius;
+    if (refit) setView("iso");
+    else if (prevR > 0 && (r / prevR > 1.25 || r / prevR < 0.6)) setView("keep");  // stor storleksändring
+  } finally {
+    $("loading").hidden = true;
+  }
+}
+
+// ------------------------------------------------------------ sidopanel
+function renderSide() {
+  const cur = model.versions.find((x) => x.version === model.current);
+  const ver = model.versions.find((x) => x.version === viewVersion) || cur;
+  document.title = model.name;
+  if (document.activeElement !== $("title")) $("title").value = model.name;
+  if (document.activeElement !== $("desc")) $("desc").value = model.description || "";
+  $("mid").textContent = model.id;
+  $("vlabel").textContent = `v${ver.version}${ver.version === model.current ? "" : " (äldre)"}`;
+
+  $("parts").innerHTML = Object.entries(ver.parts).map(([name, p], i) => `
+    <div class="part">
+      <span class="swatch${hidden.has(name) ? " off" : ""}" data-part="${esc(name)}" title="Visa/dölj"
+            style="background:${PART_COLORS[i % PART_COLORS.length]}"></span>
+      <div><div>${esc(name)}</div>
+        <div class="dims">${fmt(p.extents_mm)} · ${p.volume_cm3} cm³</div>
+        ${p.watertight ? "" : '<div class="warn">⚠ inte vattentät – kan ge problem i slicern</div>'}</div>
+      <a class="btn" href="${p.url}" download>STL</a>
+    </div>`).join("");
+  document.querySelectorAll(".swatch").forEach((s) => s.onclick = () => {
+    const n = s.dataset.part;
+    hidden.has(n) ? hidden.delete(n) : hidden.add(n);
+    applyMaterials(); renderSide();
+  });
+
+  renderParams(ver);
+
+  $("versions").innerHTML = [...model.versions].reverse().map((v) => `
+    <li data-v="${v.version}" class="${v.version === viewVersion ? "sel" : ""} ${v.version === model.current ? "cur" : ""}"
+        title="${new Date(v.created * 1000).toLocaleString("sv-SE")}${v.pruned ? " – filer rensade" : ""}"
+        style="${v.pruned ? "opacity:.5" : ""}">
+      <span class="v">v${v.version}</span>
+      <span class="note">${esc(v.note || "—")}</span>
+      <span class="t">${ago(v.created)}</span>
+    </li>`).join("");
+  document.querySelectorAll(".versions li").forEach((li) => li.onclick = () => {
+    const v = +li.dataset.v;
+    const ver = model.versions.find((x) => x.version === v);
+    viewVersion = v;
+    followCurrent = v === model.current;
+    if (!ver.pruned) showVersion(v, false);
+    renderSide();
+  });
+  $("veractions").hidden = viewVersion === model.current;
+
+  $("recipe").textContent = JSON.stringify(ver.params, null, 2);
+}
+
+// Redigerbara parametrar: vars för CSG, toppnivåvärden för övriga.
+function editableParams(ver) {
+  const src = ver.kind === "csg" ? (ver.params.vars || {}) : ver.params;
+  return Object.entries(src).filter(([, v]) =>
+    typeof v === "number" || typeof v === "boolean" || (typeof v === "string" && v.startsWith("=")));
+}
+
+function renderParams(ver) {
+  const list = editableParams(ver);
+  $("paramsec").hidden = list.length === 0;
+  const isCur = ver.version === model.current;
+  $("params").innerHTML = list.map(([k, v]) => {
+    const input = typeof v === "boolean"
+      ? `<input type="checkbox" data-k="${esc(k)}" ${v ? "checked" : ""} ${isCur ? "" : "disabled"}>`
+      : `<input type="${typeof v === "number" ? "number" : "text"}" step="any" data-k="${esc(k)}"
+               value="${esc(v)}" class="${typeof v === "string" ? "expr" : ""}" ${isCur ? "" : "disabled"}>`;
+    return `<label title="${esc(k)}">${esc(k)}</label>${input}`;
+  }).join("");
+  $("paramhint").textContent = isCur ? "" : "Visar äldre version";
+  $("apply").disabled = true;
+  document.querySelectorAll("#params input").forEach((inp) => {
+    inp.oninput = inp.onchange = () => { inp.classList.add("dirty"); $("apply").disabled = false; };
+    inp.onkeydown = (e) => { if (e.key === "Enter") $("apply").click(); };
+  });
+}
+
+$("apply").onclick = async () => {
+  const changes = {};
+  document.querySelectorAll("#params input.dirty").forEach((inp) => {
+    const k = inp.dataset.k;
+    changes[k] = inp.type === "checkbox" ? inp.checked : inp.type === "number" ? +inp.value : inp.value;
+  });
+  if (!Object.keys(changes).length) return;
+  const note = "webb: " + Object.entries(changes).map(([k, v]) => `${k}=${v}`).join(", ");
+  $("apply").disabled = true;
+  try { await api(`/api/models/${encodeURIComponent(id)}`, { method: "POST", body: { action: "update", changes, note } }); }
+  catch (e) { toast(e.message, true); $("apply").disabled = false; }
+};
+
+// ------------------------------------------------------------ händelser
+function toast(msg, err = false) {
+  const t = $("toast");
+  t.textContent = msg; t.classList.toggle("err", err); t.classList.add("show");
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), err ? 6000 : 2600);
+}
+
+async function post(body) {
+  try { return await api(`/api/models/${encodeURIComponent(id)}`, { method: "POST", body }); }
+  catch (e) { toast(e.message, true); throw e; }
+}
+
+$("title").onchange = () => post({ action: "rename", name: $("title").value.trim() || model.name });
+$("desc").onchange = () => post({ action: "rename", description: $("desc").value });
+$("copyid").onclick = () => { navigator.clipboard.writeText(model.id); toast("id kopierat"); };
+$("copyrecipe").onclick = () => { navigator.clipboard.writeText($("recipe").textContent); toast("recept kopierat"); };
+$("revert").onclick = () => { followCurrent = true; post({ action: "revert", version: viewVersion }); };
+$("dup").onclick = async () => {
+  const name = prompt("Namn på kopian:", model.name + " kopia");
+  if (name) { const r = await post({ action: "duplicate", name }); location.href = `/m/${encodeURIComponent(r.id)}`; }
+};
+$("del").onclick = async () => {
+  if (!confirm(`Radera ”${model.name}” och hela historiken?`)) return;
+  try { await api(`/api/models/${encodeURIComponent(id)}`, { method: "DELETE" }); location.href = "/"; }
+  catch (e) { toast(e.message, true); }
+};
+$("editrecipe").onclick = () => {
+  $("recipetext").value = $("recipe").textContent;
+  $("recipe").hidden = true; $("recipeedit").hidden = false;
+};
+$("cancelrecipe").onclick = () => { $("recipe").hidden = false; $("recipeedit").hidden = true; };
+$("saverecipe").onclick = async () => {
+  let params;
+  try { params = JSON.parse($("recipetext").value); } catch (e) { return toast("Ogiltig JSON: " + e.message, true); }
+  followCurrent = true;
+  await post({ action: "update", params, note: "webb: recept redigerat" });
+  $("cancelrecipe").click();
+};
+
+document.querySelectorAll("[data-view]").forEach((b) => b.onclick = () => setView(b.dataset.view));
+$("fit").onclick = () => setView("iso");
+$("spread").onclick = (e) => { spread = !spread; e.target.classList.toggle("on", spread); layoutParts(); };
+$("edges").onclick = (e) => { showEdges = !showEdges; e.target.classList.toggle("on", showEdges); applyMaterials(); };
+$("wire").onclick = (e) => { wire = !wire; e.target.classList.toggle("on", wire); applyMaterials(); };
+$("rotate").onclick = (e) => { controls.autoRotate = !controls.autoRotate; e.target.classList.toggle("on", controls.autoRotate); };
+
+async function refresh(first) {
+  let m;
+  try { m = await api(`/api/models/${encodeURIComponent(id)}`); }
+  catch (e) {
+    $("loading").hidden = false;
+    $("loading").textContent = first ? `Kunde inte ladda modellen: ${e.message}` : "Modellen har raderats.";
+    return;
+  }
+  const prevCurrent = model?.current;
+  model = m;
+  if (first || followCurrent) {
+    const changed = viewVersion !== m.current;
+    viewVersion = m.current;
+    if (changed || first) await showVersion(viewVersion, first);
+    if (!first && prevCurrent !== m.current) {
+      const v = m.versions.find((x) => x.version === m.current);
+      toast(`v${v.version}: ${v.note || "uppdaterad"}`);
+    }
+  }
+  renderSide();
+}
+
+subscribe((d) => { if (d.id === id) refresh(false); }, $("live"));
+resize();
+refresh(true);
+</script>
+</body>
+</html>

@@ -8,4 +8,5 @@ services:
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8765}
       ALLOW_SCRIPT: ${ALLOW_SCRIPT:-0}
       FILES_PUBLIC: ${FILES_PUBLIC:-0}
+      UI_PUBLIC: ${UI_PUBLIC:-0}
     volumes: ["./data:/data"]

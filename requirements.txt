@@ -4,3 +4,4 @@ manifold3d
 numpy
 uvicorn
 starlette
+pillow

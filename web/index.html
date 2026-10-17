@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>STL-bibliotek</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <h1>STL-bibliotek</h1>
+  <span class="pill" id="count"></span>
+  <div class="grow"></div>
+  <input type="search" id="q" placeholder="Sök modell…" autocomplete="off">
+  <span class="live" id="live" title="Uppdateras automatiskt när Claude ändrar något"><span class="dot"></span>live</span>
+</header>
+<main class="lib">
+  <div class="grid" id="grid"></div>
+  <div class="empty" id="empty" hidden>
+    <h2>Inga modeller än</h2>
+    <p>Be Claude skapa något, t.ex. <em>”Gör en låda 80×50×25 mm med lock och ett USB-C-hål på kortsidan”</em>.
+       Modellen dyker upp här direkt.</p>
+  </div>
+</main>
+<script type="module">
+import { api, subscribe, ago, fmt, esc } from "/static/common.js";
+
+const grid = document.getElementById("grid");
+const q = document.getElementById("q");
+let models = [];
+
+function render(flashId) {
+  const term = q.value.trim().toLowerCase();
+  const list = models.filter((m) => !term || (m.name + " " + m.id + " " + m.description).toLowerCase().includes(term));
+  document.getElementById("count").textContent = `${models.length} modeller`;
+  document.getElementById("empty").hidden = models.length > 0;
+  grid.innerHTML = list.map((m) => {
+    const parts = Object.values(m.parts);
+    const dims = parts.length === 1 ? fmt(parts[0].extents_mm) : `${parts.length} delar`;
+    return `<a class="card${m.id === flashId ? " flash" : ""}" href="/m/${encodeURIComponent(m.id)}">
+      <div class="thumb"><img loading="lazy" alt="" src="/api/models/${encodeURIComponent(m.id)}/preview.png?v=${m.version}"></div>
+      <div class="meta">
+        <div class="name" title="${esc(m.name)}">${esc(m.name)}</div>
+        <div class="sub"><span>${dims}</span><span>v${m.version}</span><span>${ago(m.updated)}</span></div>
+      </div></a>`;
+  }).join("");
+}
+
+async function load(flashId) {
+  models = (await api("/api/models")).models;
+  render(flashId);
+}
+
+q.addEventListener("input", () => render());
+subscribe((d) => load(d.id), document.getElementById("live"));
+load();
+setInterval(() => render(), 60000);  // uppdatera "x min sedan"
+</script>
+</body>
+</html>
