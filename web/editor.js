@@ -12,7 +12,7 @@ const SOLID = 0x4f8cff, HOLE = 0xff9a3c, LOCKED = 0x9aa4b2;
 let model = null, baseVersion = null;
 let objects = [];           // editor objects (see spec.js); .mesh is the three.js mesh
 let vars = {};
-let selected = null;
+let sel = [];               // selected editor objects (shift/⌘-click adds more)
 let dirty = false;
 const undoStack = [], redoStack = [];
 
@@ -58,9 +58,30 @@ renderer.setAnimationLoop(() => { orbit.update(); renderer.render(scene, camera)
 
 const tc = new TransformControls(camera, renderer.domElement);
 tc.addEventListener("dragging-changed", (e) => { orbit.enabled = !e.value; });
-tc.addEventListener("objectChange", () => { if (selected) { syncFromMesh(selected); fillInspector(); } });
-tc.addEventListener("mouseDown", () => pushUndo());
-tc.addEventListener("mouseUp", () => { snapSizes(); markDirty(); });
+// With several shapes selected the gizmo sits on a pivot at their centre; moving or rotating the pivot
+// moves/rotates them all as a rigid group (each keeps its offset from the pivot).
+const pivot = new THREE.Object3D();
+scene.add(pivot);
+const rel = new Map();
+tc.addEventListener("objectChange", () => {
+  if (tc.object === pivot) {
+    pivot.updateMatrixWorld();
+    sel.forEach((o) => {
+      new THREE.Matrix4().multiplyMatrices(pivot.matrixWorld, rel.get(o)).decompose(o.mesh.position, o.mesh.quaternion, o.mesh.scale);
+      syncFromMesh(o);
+    });
+    fillInspector();
+  } else if (single()) { syncFromMesh(sel[0]); fillInspector(); }
+});
+tc.addEventListener("mouseDown", () => {
+  pushUndo();
+  if (tc.object === pivot) {
+    pivot.updateMatrixWorld();
+    const inv = pivot.matrixWorld.clone().invert();
+    sel.forEach((o) => { o.mesh.updateMatrixWorld(); rel.set(o, inv.clone().multiply(o.mesh.matrixWorld)); });
+  }
+});
+tc.addEventListener("mouseUp", () => { snapSizes(); markDirty(); if (sel.length > 1) placePivot(); });
 scene.add(tc.getHelper ? tc.getHelper() : tc);
 
 // ------------------------------------------------------------ objects <-> meshes
@@ -109,9 +130,10 @@ function syncFromMesh(o) {
 function snapStep() { return +$("snap").value; }
 function snapSizes() {
   const s = snapStep();
-  if (!selected || !s || tc.mode !== "scale") return;
-  selected.size = selected.size.map((v) => Math.max(s, Math.round(v / s) * s));
-  syncToMesh(selected);
+  const o = single();
+  if (!o || !s || tc.mode !== "scale") return;
+  o.size = o.size.map((v) => Math.max(s, Math.round(v / s) * s));
+  syncToMesh(o);
   fillInspector();
 }
 
@@ -144,12 +166,12 @@ function pushUndo() {
 }
 async function restore(json, lockedMeshes) {
   const list = JSON.parse(json);
-  const keep = selected ? objects.indexOf(selected) : -1;
+  const keep = sel.map((o) => objects.indexOf(o)).filter((i) => i >= 0);
   objects.forEach(disposeMesh);
   objects = list;
   objects.forEach(makeMesh);
   if (lockedMeshes) await fillLocked();
-  select(keep >= 0 ? objects[keep] ?? null : null);
+  setSelection(keep.map((i) => objects[i]).filter(Boolean));
   markDirty();
 }
 function undo() {
@@ -164,59 +186,107 @@ function redo() {
 }
 
 // ------------------------------------------------------------ selection + inspector
-function select(o) {
-  selected = o && objects.includes(o) ? o : null;
+const editable = () => sel.filter((o) => o.shape !== "locked");
+const single = () => (sel.length === 1 && sel[0].shape !== "locked" ? sel[0] : null);
+
+function placePivot() {
+  const c = new THREE.Vector3();
+  sel.forEach((o) => c.add(o.mesh.position));
+  pivot.position.copy(c.divideScalar(sel.length));
+  pivot.rotation.set(0, 0, 0);
+  pivot.scale.set(1, 1, 1);
+  pivot.updateMatrixWorld();
+}
+
+// The gizmo follows the selection: on the shape itself, or on the pivot for a group (no resizing a group).
+function attachGizmo() {
   tc.detach();
-  if (selected && selected.shape !== "locked") tc.attach(selected.mesh);
+  if (single()) tc.attach(sel[0].mesh);
+  else if (sel.length > 1 && tc.mode !== "scale") { placePivot(); tc.attach(pivot); }
+}
+
+function setSelection(list) {
+  sel = list.filter((o, i) => objects.includes(o) && list.indexOf(o) === i);
+  attachGizmo();
   objects.forEach((x) => {
     const edges = x.mesh.children[0];
-    if (edges) edges.material.color.set(x === selected ? 0xffffff : 0x1b2a41);
+    if (edges) edges.material.color.set(sel.includes(x) ? 0xffffff : 0x1b2a41);
   });
-  $("nosel").hidden = !!selected;
-  $("sel").hidden = !selected || selected.shape === "locked";
-  $("lockednote").hidden = !selected || selected.shape !== "locked";
+  const lockedOnly = sel.length === 1 && sel[0].shape === "locked";
+  $("nosel").hidden = sel.length > 0;
+  $("sel").hidden = !sel.length || lockedOnly;
+  $("lockednote").hidden = !lockedOnly;
+  $("seltitle").textContent = sel.length > 1 ? `Selected (${sel.length})` : "Selected";
+  $("multinote").hidden = sel.length < 2;
   fillInspector();
   refreshButtons();
 }
 
+// Plain click selects one shape; shift/⌘/ctrl-click adds it to or removes it from the selection.
+function select(o, toggle = false) {
+  if (!o) return setSelection([]);
+  if (!toggle) return setSelection([o]);
+  if (o.shape === "locked") return;
+  const cur = editable();
+  setSelection(cur.includes(o) ? cur.filter((x) => x !== o) : [...cur, o]);
+}
+
 function fillInspector() {
-  if (!selected || selected.shape === "locked") return;
-  document.querySelectorAll("#sel input[data-f]").forEach((el) => { el.value = selected[el.dataset.f][+el.dataset.i]; });
-  $("name").value = selected.name || "";
-  $("hole").checked = selected.hole;
+  const ed = editable();
+  if (!ed.length) return;
+  document.querySelectorAll("#sel input[data-f]").forEach((el) => {
+    const vals = ed.map((o) => o[el.dataset.f][+el.dataset.i]);
+    const same = vals.every((v) => v === vals[0]);
+    el.value = same ? vals[0] : "";
+    el.placeholder = same ? "" : "—";
+  });
+  $("name").value = ed.length === 1 ? ed[0].name || "" : "";
+  $("name").disabled = ed.length > 1;
+  $("name").placeholder = ed.length > 1 ? "Several shapes" : "Name";
+  const holes = ed.filter((o) => o.hole).length;
+  $("hole").checked = holes === ed.length;
+  $("hole").indeterminate = holes > 0 && holes < ed.length;
 }
 
 document.querySelectorAll("#sel input[data-f]").forEach((el) => {
   el.onchange = () => {
-    if (!selected) return;
-    pushUndo();
+    const ed = editable();
     const v = parseFloat(el.value);
-    if (Number.isFinite(v)) selected[el.dataset.f][+el.dataset.i] = el.dataset.f === "size" ? Math.max(0.1, v) : v;
-    syncToMesh(selected);
+    if (!ed.length || !Number.isFinite(v)) { fillInspector(); return; }
+    pushUndo();
+    ed.forEach((o) => {
+      o[el.dataset.f][+el.dataset.i] = el.dataset.f === "size" ? Math.max(0.1, v) : v;
+      syncToMesh(o);
+    });
+    if (sel.length > 1) placePivot();
     fillInspector();
     markDirty();
   };
 });
-$("name").onchange = () => { if (selected) { pushUndo(); selected.name = $("name").value.trim(); markDirty(); } };
+$("name").onchange = () => { const o = single(); if (o) { pushUndo(); o.name = $("name").value.trim(); markDirty(); } };
 $("hole").onchange = () => setHole($("hole").checked);
 
 function setHole(v) {
-  if (!selected || selected.shape === "locked") return;
+  const ed = editable();
+  if (!ed.length) return;
   pushUndo();
-  selected.hole = v;
-  selected.mesh.material.dispose();
-  selected.mesh.material = materialFor(selected);
+  ed.forEach((o) => {
+    o.hole = v;
+    o.mesh.material.dispose();
+    o.mesh.material = materialFor(o);
+  });
   fillInspector();
   markDirty();
 }
+const toggleHole = () => setHole(!editable().every((o) => o.hole));
 
 function refreshButtons() {
   $("undo").disabled = !undoStack.length;
   $("redo").disabled = !redoStack.length;
-  const editable = selected && selected.shape !== "locked";
-  ["holebtn", "drop", "dup"].forEach((b) => { $(b).disabled = !editable; });
-  $("del").disabled = !selected;
-  $("holebtn").classList.toggle("on", !!editable && selected.hole);
+  const ed = editable();
+  ["holebtn", "drop", "dup"].forEach((b) => { $(b).disabled = !ed.length; });
+  $("del").disabled = !sel.length;
+  $("holebtn").classList.toggle("on", !!ed.length && ed.every((o) => o.hole));
 }
 
 // ------------------------------------------------------------ add / delete / duplicate
@@ -233,34 +303,42 @@ function addShape(shape, at) {
 }
 
 function removeSelected() {
-  if (!selected) return;
+  if (!sel.length) return;
   pushUndo();
-  const o = selected;
+  const gone = sel;
   select(null);
-  objects.splice(objects.indexOf(o), 1);
-  disposeMesh(o);
+  gone.forEach((o) => { objects.splice(objects.indexOf(o), 1); disposeMesh(o); });
   markDirty();
 }
 
 function duplicateSelected() {
-  if (!selected || selected.shape === "locked") return;
+  const ed = editable();
+  if (!ed.length) return;
   pushUndo();
-  const { mesh, ...rest } = selected;
-  const o = JSON.parse(JSON.stringify(rest));
   const step = snapStep() || 5;
-  o.pos[0] += step * 2;
-  objects.push(o);
-  makeMesh(o);
-  select(o);
+  const copies = ed.map((src) => {
+    const { mesh, ...rest } = src;
+    const o = JSON.parse(JSON.stringify(rest));
+    o.pos[0] += step * 2;
+    objects.push(o);
+    makeMesh(o);
+    return o;
+  });
+  setSelection(copies);
   markDirty();
 }
 
 function dropSelected() {
-  if (!selected || selected.shape === "locked") return;
+  const ed = editable();
+  if (!ed.length) return;
   pushUndo();
-  const b = new THREE.Box3().setFromObject(selected.mesh);
-  selected.pos[2] = r2(selected.pos[2] - b.min.z);
-  syncToMesh(selected);
+  ed.forEach((o) => {
+    o.mesh.updateMatrixWorld();
+    const b = new THREE.Box3().setFromObject(o.mesh);
+    o.pos[2] = r2(o.pos[2] - b.min.z);
+    syncToMesh(o);
+  });
+  if (sel.length > 1) placePivot();
   fillInspector();
   markDirty();
 }
@@ -290,19 +368,22 @@ renderer.domElement.addEventListener("pointerup", (e) => {
   const r = renderer.domElement.getBoundingClientRect();
   rc.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
   const hit = rc.intersectObjects(objects.map((o) => o.mesh), false)[0];
-  select(hit ? hit.object.userData.obj : null);
+  const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+  if (hit) select(hit.object.userData.obj, additive);
+  else if (!additive) select(null);
 });
 
 // ------------------------------------------------------------ toolbar
 function setMode(m) {
   tc.setMode(m);
+  attachGizmo();
   document.querySelectorAll("[data-mode]").forEach((b) => b.classList.toggle("on", b.dataset.mode === m));
 }
 document.querySelectorAll("[data-mode]").forEach((b) => { b.onclick = () => setMode(b.dataset.mode); });
 $("snap").onchange = applySnap;
 $("undo").onclick = undo;
 $("redo").onclick = redo;
-$("holebtn").onclick = () => selected && setHole(!selected.hole);
+$("holebtn").onclick = toggleHole;
 $("drop").onclick = dropSelected;
 $("dup").onclick = duplicateSelected;
 $("del").onclick = removeSelected;
@@ -327,11 +408,12 @@ addEventListener("keydown", (e) => {
   const mod = e.metaKey || e.ctrlKey;
   if (mod && e.key.toLowerCase() === "s") { e.preventDefault(); save(); }
   else if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+  else if (mod && e.key.toLowerCase() === "a") { e.preventDefault(); setSelection(editable().length === objects.filter((o) => o.shape !== "locked").length ? sel : objects.filter((o) => o.shape !== "locked")); }
   else if (mod && e.key.toLowerCase() === "d") { e.preventDefault(); duplicateSelected(); }
   else if (!mod && e.key === "w") setMode("translate");
   else if (!mod && e.key === "e") setMode("rotate");
   else if (!mod && e.key === "r") setMode("scale");
-  else if (!mod && e.key === "h") selected && setHole(!selected.hole);
+  else if (!mod && e.key === "h") toggleHole();
   else if (!mod && e.key === "d") dropSelected();
   else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); removeSelected(); }
   else if (e.key === "Escape") select(null);
