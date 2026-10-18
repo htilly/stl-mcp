@@ -19,7 +19,8 @@ def shape(name, **kw):
 # ---------------------------------------------------------------- sizes
 
 def test_sizes_table_is_complete():
-    keys = {"clear", "tap", "head_cs", "head_cb", "head_h", "nut_af", "nut_h", "ins_d", "ins_l"}
+    keys = {"clear", "tap", "head_cs", "head_cb", "head_h", "nut_af", "nut_h", "ins_d", "ins_l",
+            "pitch", "key", "key_cs"}
     for name, s in t.SIZES.items():
         assert set(s) == keys, name
 
@@ -35,8 +36,8 @@ def test_unknown_size():
 
 
 def test_templates_registry_and_help():
-    assert set(t.TEMPLATES) == {"screw_hole", "heat_insert", "nut_trap", "boss", "snap_hook",
-                                "hinge", "text"}
+    assert set(t.TEMPLATES) == {"screw_hole", "heat_insert", "nut_trap", "threaded_hole", "boss",
+                                "snap_hook", "hinge", "screw", "nut", "text"}
     for name in t.TEMPLATES:
         assert name in t.HELP
 
@@ -336,3 +337,75 @@ def test_text_engraves_into_plate():
     label = {"shape": "text", "text": "Hi", "size": 8, "h": 2, "translate": [3, 5, 2]}
     m = csg.build_node({"op": "difference", "children": [plate, label]}, {})
     assert m.volume() < 2400
+
+
+# ---------------------------------------------------------------- threads
+
+@pytest.mark.parametrize("size", list(t.SIZES))
+@pytest.mark.parametrize("head", ["socket", "countersunk", "button", "hex", "none"])
+def test_screw_is_a_clean_solid_for_every_size_and_head(size, head):
+    m = shape("screw", size=size, length=10, head=head)
+    assert m.status() == t.mf.Error.NoError and m.genus() == 0
+    lo, hi = bb(m)
+    assert lo[2] == pytest.approx(0, abs=1e-6)
+
+
+def test_screw_length_is_nominal():
+    # countersunk: length includes the head; socket: length is under the head (head height = d)
+    assert bb(shape("screw", size="M3", length=8, head="countersunk"))[1][2] == pytest.approx(8)
+    assert bb(shape("screw", size="M3", length=8))[1][2] == pytest.approx(11)
+
+
+def test_screw_thread_is_inside_the_nominal_diameter():
+    lo, hi = bb(shape("screw", size="M5", length=10, head="none"))
+    assert hi[0] == pytest.approx(2.5 - 0.1, abs=0.02)
+    assert hi[0] > 2.5 - 0.1 - 0.01
+
+
+def test_screw_drive_removes_material():
+    plain = shape("screw", size="M4", drive="none").volume()
+    assert shape("screw", size="M4", drive="hex").volume() < plain
+    assert shape("screw", size="M4", drive="slot").volume() < plain
+
+
+def test_screw_rejects_bad_options():
+    with pytest.raises(ValueError, match="head must be"):
+        shape("screw", head="torx")
+    with pytest.raises(ValueError, match="drive must be"):
+        shape("screw", drive="torx")
+    with pytest.raises(ValueError, match="too short"):
+        shape("screw", size="M8", length=1, head="countersunk")
+    with pytest.raises(ValueError, match="pitch"):
+        shape("screw", pitch=0.05)
+
+
+def test_nut_mates_with_screw_only_in_phase_and_same_hand():
+    rod = shape("screw", size="M8", length=20, head="none", drive="none")
+    pitch = t.SIZES["M8"]["pitch"]
+    in_phase = shape("nut", size="M8", translate=[0, 0, 6 * pitch])
+    assert (rod ^ in_phase).volume() < 0.05
+    half_turn = shape("nut", size="M8", translate=[0, 0, 6.5 * pitch])
+    assert (rod ^ half_turn).volume() > 1
+    left = shape("nut", size="M8", left=True, translate=[0, 0, 6 * pitch])
+    assert (rod ^ left).volume() > 1
+
+
+def test_nut_is_hex_with_through_hole():
+    m = shape("nut", size="M3")
+    assert m.genus() == 1
+    lo, hi = bb(m)
+    assert hi[0] - lo[0] == pytest.approx(5.5) and hi[2] == pytest.approx(2.4)
+
+
+def test_threaded_hole_goes_down_and_flip_keeps_handedness():
+    down = shape("threaded_hole", size="M5", h=8)
+    lo, hi = bb(down)
+    assert lo[2] == pytest.approx(-8) and hi[2] == pytest.approx(0.5)
+    up = shape("threaded_hole", size="M5", h=8, flip=True)
+    assert bb(up)[1][2] == pytest.approx(8)
+    # a real-hand screw shifted by whole pitches screws into the printed thread without touching it
+    plate = shape("box", size=[12, 12, 8], center=True, translate=[0, 0, -4]) - down
+    pitch = t.SIZES["M5"]["pitch"]
+    rod = shape("screw", size="M5", length=10, head="none", drive="none", translate=[0, 0, -10 * pitch])
+    assert (plate ^ rod).volume() < 0.05
+    assert (plate ^ rod.translate((0, 0, pitch / 2))).volume() > 1
