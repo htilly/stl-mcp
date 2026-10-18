@@ -339,7 +339,7 @@ and as a badge in the library.
 | check | warns when |
 |---|---|
 | watertight | open edges/holes, or inverted normals (critical) |
-| disconnected shells | one part consists of several unconnected pieces |
+| floating shells | a piece floats in mid air; pieces on the bed (the floor) or resting on a grounded piece are fine |
 | thin walls | material thinner than the minimum wall thickness over a noticeable area |
 | overhangs | too large a share of the surface overhangs more than the maximum angle |
 | build volume | the part does not fit the printer bed |

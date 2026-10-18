@@ -1,7 +1,7 @@
 """Print checks (warnings only, never blocking) and the admin-editable settings that drive them.
 
 Every built part is checked for things that make a print fail even though the geometry is valid:
-not watertight / inverted, disconnected shells, walls thinner than the nozzle can print,
+not watertight / inverted, shells floating in mid air, walls thinner than the nozzle can print,
 overhangs that need support, and a size that does not fit the printer bed.
 
 The checks are approximate and fast (surface sampling, no ray tracing). Thresholds live in
@@ -28,8 +28,8 @@ SCHEMA: dict[str, dict] = {
         "type": "bool", "default": True, "group": "Mesh integrity", "label": "Check watertightness",
         "help": "Warn when the mesh has holes, open edges or inverted normals (cracks in the slicer)."},
     "check_shells": {
-        "type": "bool", "default": True, "group": "Mesh integrity", "label": "Check disconnected shells",
-        "help": "Warn when one part consists of several unconnected pieces (floating geometry)."},
+        "type": "bool", "default": True, "group": "Mesh integrity", "label": "Check floating shells",
+        "help": "Warn when a piece of a part floats in the air. Pieces on the bed (the floor) or resting on a grounded piece are fine."},
     "check_thin_walls": {
         "type": "bool", "default": True, "group": "Thin walls", "label": "Check thin walls",
         "help": "Warn about wall sections thinner than the minimum wall thickness."},
@@ -191,6 +191,66 @@ def _thin_walls(mesh: trimesh.Trimesh, min_wall: float, min_area: float) -> dict
             "near_mm": [round(float(c), 1) for c in center]}
 
 
+GROUND_TOL_MM = 0.05
+
+
+def _floating_shells(shells: list[trimesh.Trimesh], floor: float) -> list[list[float]]:
+    """Centers of the shells that float. The floor (the part's lowest point = the bed) is ground;
+    a shell is grounded when it touches the floor, or rests with its underside on a grounded shell."""
+    grounded = [sh.bounds[0][2] <= floor + GROUND_TOL_MM for sh in shells]
+    changed = True
+    while changed and not all(grounded):
+        changed = False
+        for i, sh in enumerate(shells):
+            if grounded[i]:
+                continue
+            z = sh.bounds[0][2]
+            under = _flat_faces(sh, z, up=False)
+            for j, base in enumerate(shells):
+                if grounded[j] and _overlap_xy(under, _flat_faces(base, z, up=True)):
+                    grounded[i] = changed = True
+                    break
+    return [[round(float(c), 1) for c in sh.bounds.mean(axis=0)]
+            for sh, g in zip(shells, grounded) if not g]
+
+
+def _flat_faces(mesh: trimesh.Trimesh, z: float, up: bool) -> np.ndarray:
+    """XY triangles (n, 3, 2) of the faces lying flat at height z, facing up or down."""
+    tri = mesh.triangles
+    facing = mesh.face_normals[:, 2] > 0.99 if up else mesh.face_normals[:, 2] < -0.99
+    at_z = (np.abs(tri[:, :, 2] - z) <= GROUND_TOL_MM).all(axis=1)
+    return tri[facing & at_z][:, :, :2]
+
+
+def _overlap_xy(a: np.ndarray, b: np.ndarray) -> bool:
+    """Whether two sets of XY triangles overlap: a corner or center of one lies inside the other.
+    Checked both ways, so a wide lid on a thin post and a small cube on a big block both count."""
+    if not len(a) or not len(b):
+        return False
+    return _points_in(_probe_points(a), b) or _points_in(_probe_points(b), a)
+
+
+def _probe_points(tri: np.ndarray) -> np.ndarray:
+    return np.vstack([tri.reshape(-1, 2), tri.mean(axis=1)])
+
+
+def _points_in(pts: np.ndarray, tri: np.ndarray) -> bool:
+    """Whether any point lies inside (or on the edge of) any triangle, vectorised in chunks."""
+    a, b, c = tri[:, 0], tri[:, 1], tri[:, 2]
+    v0, v1 = b - a, c - a
+    den = v0[:, 0] * v1[:, 1] - v1[:, 0] * v0[:, 1]
+    keep = np.abs(den) > 1e-12                                 # skip degenerate slivers
+    a, v0, v1, den = a[keep], v0[keep], v1[keep], den[keep]
+    eps = 1e-6
+    for chunk in np.array_split(pts, max(1, len(pts) * len(a) // 2_000_000 + 1)):
+        d = chunk[:, None, :] - a[None]
+        u = (d[..., 0] * v1[:, 1] - v1[:, 0] * d[..., 1]) / den
+        v = (v0[:, 0] * d[..., 1] - d[..., 0] * v0[:, 1]) / den
+        if ((u >= -eps) & (v >= -eps) & (u + v <= 1 + eps)).any():
+            return True
+    return False
+
+
 # ---------------------------------------------------------------- the check
 
 def _warn(code: str, severity: str, message: str, **detail) -> dict:
@@ -217,11 +277,13 @@ def check(mesh: trimesh.Trimesh, settings: dict | None = None) -> list[dict]:
                 out.append(_warn("inverted_normals", "critical",
                                  "faces point inward (negative volume) - the slicer may treat it as a hole"))
         if s["check_shells"]:
-            n = len(mesh.split(only_watertight=False))
-            if n > 1:
+            shells = mesh.split(only_watertight=False)
+            floating = _floating_shells(shells, mesh.bounds[0][2]) if len(shells) > 1 else []
+            if floating:
                 out.append(_warn("disconnected_shells", "warning",
-                                 f"{n} unconnected shells in one part - some may float in the air",
-                                 shells=n))
+                                 f"{len(floating)} of {len(shells)} shells float in the air "
+                                 f"(not resting on the bed or on another part), around {floating[0]}",
+                                 shells=len(shells), floating=len(floating), near_mm=floating))
         if s["check_thin_walls"] and len(mesh.faces) and mesh.area > 0:
             tw = _thin_walls(mesh, float(s["min_wall_mm"]), float(s["thin_wall_min_area_mm2"]))
             if tw:

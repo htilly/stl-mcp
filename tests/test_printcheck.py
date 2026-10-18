@@ -43,10 +43,25 @@ def test_inverted_mesh_is_reported():
     assert "inverted_normals" in codes(b)
 
 
-def test_disconnected_shells():
+def test_separate_shells_on_the_floor_are_grounded():
     two = trimesh.util.concatenate([box((10, 10, 10)), box((10, 10, 10), (30, 0, 0))])
+    assert "disconnected_shells" not in codes(two)
+
+
+def test_shell_in_mid_air_is_flagged():
+    two = trimesh.util.concatenate([box((10, 10, 10)), box((10, 10, 10), (30, 0, 20))])
     w = [x for x in pc.check(two) if x["code"] == "disconnected_shells"]
-    assert w and w[0]["detail"]["shells"] == 2
+    assert w and w[0]["detail"]["shells"] == 2 and w[0]["detail"]["floating"] == 1
+    assert w[0]["detail"]["near_mm"] == [[30.0, 0.0, 20.0]]
+
+
+def test_shell_resting_on_a_grounded_shell_is_grounded():
+    # a wide lid sitting on a narrow post, which stands on the floor
+    stack = trimesh.util.concatenate([box((4, 4, 10)), box((20, 20, 2), (0, 0, 6))])
+    assert "disconnected_shells" not in codes(stack)
+    # and a small cube sitting on top of a big block
+    stack = trimesh.util.concatenate([box((20, 20, 10)), box((4, 4, 4), (0, 0, 7))])
+    assert "disconnected_shells" not in codes(stack)
 
 
 def test_thin_plate_is_flagged_with_thickness_and_location():
