@@ -28,8 +28,8 @@ from pathlib import Path
 import trimesh
 from psycopg.types.json import Jsonb
 
+import buildworker
 import csg
-import geometry as g
 import openscad
 import printcheck
 
@@ -37,26 +37,6 @@ MAX_VERSIONS = 50  # older versions' STL files are pruned (the recipe is kept)
 
 
 # ---------------------------------------------------------------- builders per kind
-
-def _build_csg(p):
-    return csg.build(p)
-
-
-def _build_enclosure(p):
-    p = dict(p)
-    body, lid = g.enclosure(
-        p.pop("inner_x"), p.pop("inner_y"), p.pop("inner_z"),
-        wall=p.pop("wall", 2.4), floor=p.pop("floor", 2.4), lid_t=p.pop("lid_thickness", 2.4),
-        screws=p.pop("corner_screws", True), **p)
-    return {"body": body, "lid": lid}
-
-
-def _build_primitive(p):
-    p = dict(p)
-    mesh = g.primitive(p.pop("shape"), **p)
-    mesh.apply_translation([0, 0, -mesh.bounds[0][2]])
-    return {"model": mesh}
-
 
 def _build_script(p, allow: bool):
     if not allow:
@@ -231,21 +211,25 @@ class Store:
         return StoreView(self, user)
 
     def build(self, kind: str, params: dict) -> dict:
-        if kind == "csg":
-            return _build_csg(params)
-        if kind == "enclosure":
-            return _build_enclosure(params)
-        if kind == "primitive":
-            return _build_primitive(params)
+        if kind in buildworker.KINDS:      # in a sandboxed worker process, see buildworker.py
+            return buildworker.build(kind, params)
         if kind == "script":
             return _build_script(params, self.allow_script)
         if kind == "openscad":
             return _build_openscad(params, self.allow_openscad)
         raise ValueError(f"unknown kind '{kind}'")
 
-    def _new_version(self, m: dict, kind: str, params: dict, note: str) -> dict:
+    def _built(self, kind: str, params: dict) -> tuple[dict, float]:
+        """Builds outside self.lock, so a slow build does not hold up everyone else's changes."""
         t0 = time.time()
-        parts = self.build(kind, params)          # raises on error -> nothing is saved
+        return self.build(kind, params), time.time() - t0
+
+    def _new_version(self, m: dict, kind: str, params: dict, note: str,
+                     built: tuple[dict, float] | None = None) -> dict:
+        t0 = time.time()
+        if built is None:
+            built = self._built(kind, params)        # raises on error -> nothing is saved
+        parts, seconds = built
         if not parts:
             raise ValueError("the build produced no parts")
         ver = (m["versions"][-1]["version"] + 1) if m["versions"] else 1
@@ -258,7 +242,8 @@ class Store:
             pinfo[pname] = {"file": f"v{ver}/{fname}", **_stats(mesh),
                             "warnings": printcheck.check(mesh, self.settings.get())}
         v = {"version": ver, "kind": kind, "params": params, "note": note or "",
-             "created": time.time(), "build_seconds": round(time.time() - t0, 2), "parts": pinfo}
+             "created": time.time(), "build_seconds": round(seconds + time.time() - t0, 2),
+             "parts": pinfo}
         m["versions"].append(v)
         m["current"] = ver
         m["updated"] = v["created"]
@@ -272,6 +257,7 @@ class Store:
     # -- publikt
     def create(self, name: str, kind: str, params: dict, description: str = "",
                note: str = "", owner: str | None = None) -> dict:
+        built = self._built(kind, params)
         with self.lock:
             base = slug(name)
             mid, i = base, 2
@@ -281,7 +267,7 @@ class Store:
             m = {"id": mid, "owner": owner, "name": name, "description": description,
                  "created": time.time(), "updated": time.time(), "current": 0, "versions": []}
             try:
-                self._new_version(m, kind, params, note or "created")
+                self._new_version(m, kind, params, note or "created", built)
             except Exception:
                 shutil.rmtree(self._path(mid), ignore_errors=True)
                 raise
@@ -291,20 +277,35 @@ class Store:
     def update(self, mid: str, *, params: dict | None = None, changes: dict | None = None,
                remove: list[str] | None = None, note: str = "", name: str | None = None,
                description: str | None = None, resolves: list[str] | None = None) -> dict:
-        with self.lock:
-            m = self._read(mid)
+        rebuild = params is not None or changes or remove
+
+        def recipe(m):
             cur = self.current(m)
-            kind = cur["kind"]
             for cid in resolves or []:
                 self._comment(m, cid)                          # validate before the build
-            if params is not None or changes or remove:
-                base = params if params is not None else cur["params"]
-                newp = apply_changes(kind, base, changes, remove)
+            base = params if params is not None else cur["params"]
+            return cur["kind"], apply_changes(cur["kind"], base, changes, remove)
+
+        def head(m):
+            return m["current"], len(m["versions"]), m["versions"][-1]["version"]
+
+        if rebuild:                                            # build outside the lock ...
+            m = self._read(mid)
+            before, (kind, newp) = head(m), recipe(m)
+            built = self._built(kind, newp)
+        with self.lock:
+            m = self._read(mid)
+            for cid in resolves or []:
+                self._comment(m, cid)
+            if rebuild:
+                if head(m) != before:                         # ... unless it changed meanwhile
+                    kind, newp = recipe(m)
+                    built = None
                 if not note:
                     bits = [f"{k}={json.dumps(v, ensure_ascii=False)[:30]}" for k, v in (changes or {}).items()]
                     bits += [f"-{r}" for r in remove or []]
                     note = ", ".join(bits) or "new recipe"
-                self._new_version(m, kind, newp, note)
+                self._new_version(m, kind, newp, note, built)
             for cid in resolves or []:
                 c = self._comment(m, cid)
                 c["status"] = "resolved"
@@ -338,11 +339,13 @@ class Store:
         return n
 
     def revert(self, mid: str, version: int) -> dict:
+        src = self.version(self._read(mid), version)          # versions never change
+        built = self._built(src["kind"], src["params"])
         with self.lock:
             m = self._read(mid)
             src = self.version(m, version)
             self._new_version(m, src["kind"], copy.deepcopy(src["params"]),
-                              f"reverted from v{version}")
+                              f"reverted from v{version}", built)
             self._write(m)
             return m
 
