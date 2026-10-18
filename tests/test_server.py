@@ -389,8 +389,9 @@ def test_token_query_sets_cookie_and_redirects(client, out_dir, monkeypatch):
     _write_box(out_dir)
     r = client.get("/files/box.stl?token=secret")
     assert r.status_code == 303 and r.headers["location"] == "/files/box.stl"
-    assert "stl_token=secret" in r.headers["set-cookie"]
-    client.cookies.set("stl_token", "secret")
+    assert "stl_session=s1." in r.headers["set-cookie"]
+    assert "stl_token=secret" not in r.headers["set-cookie"]  # the raw token is never a cookie
+    client.cookies.set("stl_session", r.cookies["stl_session"])
     assert client.get("/files/box.stl").status_code == 200
 
 

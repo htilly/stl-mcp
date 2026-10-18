@@ -119,7 +119,9 @@ or set `DOMAIN` and run `docker compose --profile caddy up -d` for automatic HTT
 [`deploy/README.md`](deploy/README.md).
 
 Open `http://localhost:8765/` and log in with the token, or go to `/?token=<token>`, which
-sets a cookie.
+sets a session cookie. Then add a passkey (the banner in the library, or 🔑 in the header):
+from then on, logging in is one tap with Face ID, Touch ID or your password manager. Passkeys
+are bound to the host name in `PUBLIC_URL`.
 
 ## Tests
 ```
@@ -130,9 +132,11 @@ python -m pytest
 
 ## Connecting to Claude
 - Claude Desktop/Code: `claude mcp add --transport http stl https://<your-url>/mcp --header "Authorization: Bearer <token>"`
-- claude.ai: Settings → Connectors → Add custom connector → `https://<your-url>/mcp`
-  (claude.ai cannot send a custom header. Put the server behind your reverse proxy/OAuth,
-  or use Claude Desktop/Code.)
+- claude.ai (and the Claude apps): Settings → Connectors → Add custom connector →
+  `https://<your-url>/mcp`, then Connect. The server is its own OAuth authorization server: you
+  log in to the web UI (passkey or token) and approve the connection. Connected apps are listed
+  under 🔑 in the library, where they can be disconnected. Requires `PUBLIC_URL` on https (or
+  localhost); `OAUTH=0` turns it off.
 
 ## MCP tools
 | tool | |
@@ -255,11 +259,17 @@ The thin-wall and overhang checks are sampling-based estimates, not a slicer.
 versions keep their files. Older versions can be recreated with `revert_model`.
 
 ## Security
-Always set `MCP_TOKEN` and put the server behind HTTPS. The web interface requires a token (cookie)
-unless `UI_PUBLIC=1`, which makes it readable by everyone while changes still require a token.
+Always set `MCP_TOKEN` and put the server behind HTTPS. The web interface requires a login
+(passkey or token, kept as a signed session cookie for 90 days) unless `UI_PUBLIC=1`, which makes it readable by everyone while changes still require a token.
 `FILES_PUBLIC=1` only makes the STL links clickable without a token (model ids are guessable). Keep
 `ALLOW_SCRIPT` off if the server is reachable from outside. `/upload/*` always requires a token when
 `MCP_TOKEN` is set. The CSG spec is safe to let Claude write.
+
+Sessions are signed with a key derived from `MCP_TOKEN`, so rotating the token logs every browser
+out. OAuth access tokens live 24 h and refresh tokens 90 days (rotated on every use); only their
+sha256 hashes are stored, together with the passkeys' public keys, in `STL_DIR/auth.json`.
+Client registration is open (as MCP requires), but nothing gets a token without your approval
+on the consent page, which shows where the app will be sent back to.
 
 three.js (MIT) is shipped locally from `web/vendor/three`, so the interface needs no CDN.
 The DejaVu Sans font (free license, see `fonts/LICENSE`) is used for the text template.

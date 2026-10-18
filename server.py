@@ -6,7 +6,9 @@ models via MCP; the web UI shows the library and a 3D view that updates live.
 Environment variables:
   STL_DIR        data directory                   (default ./out)
   PUBLIC_URL     base URL used in links           (default http://localhost:8765)
-  MCP_TOKEN      bearer token; required if set (strongly recommended)
+  MCP_TOKEN      bearer token; required if set (strongly recommended). Also signs web UI sessions
+  OAUTH          0 = disable the OAuth server for MCP clients like claude.ai (default on;
+                 needs PUBLIC_URL on https or localhost)
   UI_PUBLIC      1 = web UI + files readable without a token (changes require a token)
   FILES_PUBLIC   1 = only /files/* without a token (download links are clickable)
   ALLOW_SCRIPT   1 = enable script models (runs arbitrary Python!)
@@ -21,18 +23,25 @@ served at /files/<name>; the model library lives in STL_DIR/models and is served
 import asyncio
 import base64
 import hmac
+import html
 import ipaddress
 import json
 import os
 import re
+import secrets
 import socket
 import zipfile
 from pathlib import Path
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlencode, urljoin, urlparse
 
 import anyio
 import httpx
 import uvicorn
+import webauthn
+from mcp.server.auth.provider import AuthorizeError
+from mcp.server.auth.routes import (build_resource_metadata_url, create_auth_routes,
+                                    create_protected_resource_routes)
+from mcp.server.auth.settings import ClientRegistrationOptions, RevocationOptions
 from mcp.server.fastmcp import FastMCP, Image
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
@@ -40,12 +49,18 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import (FileResponse, HTMLResponse, JSONResponse, PlainTextResponse,
                                  RedirectResponse, Response, StreamingResponse)
 from starlette.routing import Mount, Route
+from pydantic import AnyHttpUrl
 from starlette.staticfiles import StaticFiles
+from webauthn.helpers import bytes_to_base64url
+from webauthn.helpers.structs import (AuthenticatorSelectionCriteria, PublicKeyCredentialDescriptor,
+                                      ResidentKeyRequirement, UserVerificationRequirement)
 
 import csg
 import geometry as g
 import printcheck
 import render
+from auth import (CHALLENGE_TTL, SCOPE, SESSION_TTL, AuthState, Expiring, OAuthProvider,
+                  check_session, make_session)
 from store import Store
 
 DATA = Path(os.environ.get("STL_DIR", "./out")).resolve()
@@ -60,6 +75,7 @@ OUT = DATA  # standalone files
 TINKERCAD_MAX = int(float(os.environ.get("TINKERCAD_MAX_MB", "25")) * 1_000_000)
 MAX_UPLOAD = int(float(os.environ.get("MAX_UPLOAD_MB", "100")) * 1_000_000)
 ALLOW_PRIVATE_URLS = os.environ.get("ALLOW_PRIVATE_URLS") == "1"
+OAUTH = os.environ.get("OAUTH", "1") != "0"
 FILE_TYPES = {".stl": "model/stl", ".obj": "model/obj", ".mtl": "text/plain", ".zip": "application/zip"}
 
 store = Store(DATA, allow_script=ALLOW_SCRIPT)
@@ -480,12 +496,74 @@ def delete_file(file: str) -> str:
 
 
 # ---------------------------------------------------------------- auth
+#
+# Ways in: Authorization: Bearer <MCP_TOKEN or an OAuth access token>, ?token=<MCP_TOKEN> (sets a
+# session cookie) or the session cookie set after a passkey login. See auth.py for the OAuth flow.
+
+oauth = OAuthProvider(AuthState(DATA / "auth.json"))
+challenges = Expiring(CHALLENGE_TTL)  # WebAuthn challenges per login/registration attempt
+SESSION_COOKIE = "stl_session"
+PASSKEY_LOGIN_PATHS = ("/auth/passkey/login/options", "/auth/passkey/login/verify")
+OAUTH_PATHS = ("/authorize", "/token", "/register", "/revoke")
+
+
+def _oauth_routes() -> list:
+    if not OAUTH:
+        return []
+    try:
+        issuer = AnyHttpUrl(PUBLIC_URL)
+        routes = create_auth_routes(
+            oauth, issuer_url=issuer,
+            client_registration_options=ClientRegistrationOptions(
+                enabled=True, valid_scopes=[SCOPE], default_scopes=[SCOPE]),
+            revocation_options=RevocationOptions(enabled=True))
+    except ValueError as e:
+        print(f"OAuth disabled: {e} (PUBLIC_URL={PUBLIC_URL})", flush=True)
+        return []
+    prm = create_protected_resource_routes(AnyHttpUrl(f"{PUBLIC_URL}/mcp"), [issuer],
+                                           scopes_supported=[SCOPE], resource_name="STL library")
+    # Some clients look for the resource metadata at the root instead of under /mcp.
+    root_prm = Route("/.well-known/oauth-protected-resource", prm[0].endpoint, methods=["GET", "OPTIONS"])
+    return routes + prm + [root_prm]
+
+
+OAUTH_ROUTES = _oauth_routes()
+RESOURCE_METADATA_URL = str(build_resource_metadata_url(AnyHttpUrl(f"{PUBLIC_URL}/mcp")))
+
+
+def _eq(a: str, b: str) -> bool:
+    return bool(a) and bool(b) and hmac.compare_digest(a.encode(), b.encode())
+
+
+def _bearer(request) -> str:
+    h = request.headers.get("authorization", "")
+    return h[7:].strip() if h[:7].lower() == "bearer " else ""
+
 
 def _token_ok(request) -> bool:
-    supplied = (request.headers.get("authorization", "").removeprefix("Bearer ").strip()
-                or request.query_params.get("token", "")
-                or request.cookies.get("stl_token", ""))
-    return bool(supplied) and hmac.compare_digest(supplied, TOKEN)
+    bearer = _bearer(request)
+    if _eq(bearer, TOKEN) or (bearer and OAUTH_ROUTES and oauth.access_token_ok(bearer)):
+        return True
+    return (_eq(request.query_params.get("token", ""), TOKEN)
+            or check_session(TOKEN, request.cookies.get(SESSION_COOKIE, "")))
+
+
+def _set_session(resp: Response) -> Response:
+    resp.set_cookie(SESSION_COOKIE, make_session(TOKEN), max_age=SESSION_TTL, httponly=True,
+                    samesite="lax", secure=PUBLIC_URL.startswith("https"))
+    resp.delete_cookie("stl_token")  # the old cookie held the raw token
+    return resp
+
+
+def _public_path(path: str, read: bool) -> bool:
+    if path == "/admin" or path.startswith("/api/settings") or path == "/api/recheck":
+        return False  # admin is never public, not even with UI_PUBLIC
+    return (path == "/health" or path.startswith("/static/") or path in PASSKEY_LOGIN_PATHS
+            or (bool(OAUTH_ROUTES) and (path in OAUTH_PATHS or path.startswith("/.well-known/oauth-")))
+            or (FILES_PUBLIC and read and path.startswith("/files/"))
+            or (UI_PUBLIC and read and (path == "/" or path.startswith("/m/")
+                                        or (path.startswith("/api/")
+                                            and not path.startswith("/api/auth")))))
 
 
 class Auth(BaseHTTPMiddleware):
@@ -495,22 +573,168 @@ class Auth(BaseHTTPMiddleware):
         path, method = request.url.path, request.method
         ok = _token_ok(request)
         read = method in ("GET", "HEAD")
-        admin = path == "/admin" or path.startswith("/api/settings") or path == "/api/recheck"
-        public = not admin and (path == "/health" or path.startswith("/static/")
-                                or (FILES_PUBLIC and read and path.startswith("/files/"))
-                                or (UI_PUBLIC and read and (path == "/" or path.startswith("/m/")
-                                                            or path.startswith("/api/"))))
-        if not ok and not public:
+        if not ok and not _public_path(path, read):
             if read and "text/html" in request.headers.get("accept", ""):
-                return HTMLResponse((WEB / "login.html").read_text(), status_code=401)
-            return JSONResponse({"error": "unauthorized"}, status_code=401)
-        if ok and read and request.query_params.get("token") and "/mcp" not in path:
-            # login via ?token= : set a cookie and remove the token from the URL
-            resp = RedirectResponse(path, status_code=303)
-            resp.set_cookie("stl_token", TOKEN, max_age=60 * 60 * 24 * 90, httponly=True,
-                            samesite="lax", secure=PUBLIC_URL.startswith("https"))
-            return resp
+                return HTMLResponse((WEB / "login.html").read_text(), status_code=401,
+                                    headers={"Cache-Control": "no-store"})
+            headers = {}
+            if OAUTH_ROUTES and path.startswith("/mcp"):
+                # Tells OAuth-capable MCP clients (claude.ai) where to start the login.
+                headers["WWW-Authenticate"] = f'Bearer resource_metadata="{RESOURCE_METADATA_URL}"'
+            return JSONResponse({"error": "unauthorized"}, status_code=401, headers=headers)
+        if ok and read and request.query_params.get("token") and not path.startswith("/mcp"):
+            # login via ?token= : set a session cookie and remove the token from the URL
+            rest = urlencode([(k, v) for k, v in request.query_params.multi_items() if k != "token"])
+            return _set_session(RedirectResponse(path + (f"?{rest}" if rest else ""), status_code=303))
         return await call_next(request)
+
+
+# ---- passkeys (WebAuthn)
+
+def _rp() -> tuple[str, str]:
+    """(relying party id, expected origin) - both follow PUBLIC_URL."""
+    u = urlparse(PUBLIC_URL)
+    return u.hostname or "localhost", f"{u.scheme}://{u.netloc}"
+
+
+def _passkey_view(p: dict) -> dict:
+    return {k: p.get(k) for k in ("id", "name", "created", "last_used")}
+
+
+def _options(purpose: str, opts) -> JSONResponse:
+    flow = challenges.put(secrets.token_urlsafe(16), (purpose, opts.challenge))
+    return JSONResponse({"flow": flow, "options": json.loads(webauthn.options_to_json(opts))})
+
+
+async def _flow(request, purpose: str) -> tuple[dict, bytes | None]:
+    body = await request.json()
+    entry = challenges.pop(str(body.get("flow", "")))
+    return body, entry[1] if entry and entry[0] == purpose else None
+
+
+async def passkey_login_options(_):
+    return _options("login", webauthn.generate_authentication_options(
+        rp_id=_rp()[0], user_verification=UserVerificationRequirement.PREFERRED))
+
+
+async def passkey_login_verify(request):
+    body, challenge = await _flow(request, "login")
+    cred = body.get("credential") or {}
+    pk = oauth.state.passkey(str(cred.get("id", ""))) if isinstance(cred, dict) else None
+    if not challenge or not pk:
+        return JSONResponse({"error": "unknown passkey or expired attempt - try again"}, status_code=400)
+    rp_id, origin = _rp()
+    try:
+        v = webauthn.verify_authentication_response(
+            credential=cred, expected_challenge=challenge, expected_rp_id=rp_id,
+            expected_origin=origin, credential_public_key=webauthn.base64url_to_bytes(pk["public_key"]),
+            credential_current_sign_count=pk["sign_count"])
+    except Exception as e:  # noqa: BLE001 – the reason is shown on the login page
+        return JSONResponse({"error": f"passkey verification failed: {e}"}, status_code=400)
+    oauth.state.touch_passkey(pk["id"], v.new_sign_count)
+    return _set_session(JSONResponse({"ok": True}))
+
+
+async def passkey_register_options(_):
+    rp_id, _origin = _rp()
+    existing = [PublicKeyCredentialDescriptor(id=webauthn.base64url_to_bytes(p["id"]))
+                for p in oauth.state.passkeys()]
+    return _options("register", webauthn.generate_registration_options(
+        rp_id=rp_id, rp_name="STL library", user_id=b"stl-mcp-owner", user_name="owner",
+        user_display_name="STL library", exclude_credentials=existing,
+        authenticator_selection=AuthenticatorSelectionCriteria(
+            resident_key=ResidentKeyRequirement.REQUIRED,
+            user_verification=UserVerificationRequirement.PREFERRED)))
+
+
+async def passkey_register_verify(request):
+    body, challenge = await _flow(request, "register")
+    if not challenge:
+        return JSONResponse({"error": "the attempt expired - try again"}, status_code=400)
+    rp_id, origin = _rp()
+    try:
+        v = webauthn.verify_registration_response(
+            credential=body.get("credential"), expected_challenge=challenge,
+            expected_rp_id=rp_id, expected_origin=origin)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"error": f"passkey registration failed: {e}"}, status_code=400)
+    pk = oauth.state.add_passkey(bytes_to_base64url(v.credential_id),
+                                 bytes_to_base64url(v.credential_public_key), v.sign_count,
+                                 str(body.get("name") or ""))
+    return JSONResponse({"ok": True, "passkey": _passkey_view(pk)})
+
+
+async def logout(_):
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(SESSION_COOKIE)
+    resp.delete_cookie("stl_token")
+    return resp
+
+
+async def api_auth(_):
+    return JSONResponse({"passkeys": [_passkey_view(p) for p in oauth.state.passkeys()],
+                         "clients": oauth.state.clients() if OAUTH_ROUTES else [],
+                         "oauth": bool(OAUTH_ROUTES), "mcp_url": f"{PUBLIC_URL}/mcp",
+                         "login_required": bool(TOKEN)})
+
+
+async def api_auth_passkey(request):
+    if not oauth.state.delete_passkey(request.path_params["id"]):
+        return JSONResponse({"error": "no such passkey"}, status_code=404)
+    return JSONResponse({"ok": True})
+
+
+async def api_auth_client(request):
+    if not oauth.state.revoke_client(request.path_params["id"]):
+        return JSONResponse({"error": "no such app"}, status_code=404)
+    return JSONResponse({"ok": True})
+
+
+# ---- OAuth consent (the user is logged in to the web UI by the time this runs)
+
+def _consent_page(body: str, status: int = 200) -> HTMLResponse:
+    page = (WEB / "consent.html").read_text().replace("{{body}}", body)
+    return HTMLResponse(page, status_code=status, headers={
+        "Cache-Control": "no-store", "X-Frame-Options": "DENY",
+        "Content-Security-Policy": "frame-ancestors 'none'"})
+
+
+EXPIRED = "<h2>The request has expired</h2><p>Start the connection again from the app.</p>"
+
+
+async def oauth_consent(request):
+    if request.method == "GET":
+        req = request.query_params.get("req", "")
+        p = oauth.pending_request(req)
+        if not p:
+            return _consent_page(EXPIRED, 400)
+        dest = urlparse(p["params"]["redirect_uri"])
+        e = html.escape
+        return _consent_page(
+            f"<h2>Connect {e(p['client_name'])}?</h2>"
+            f"<p>It will be able to read, create and change the models in this STL library.</p>"
+            f"<p class=\"hint\">After approving you are sent back to "
+            f"<strong>{e(dest.scheme)}://{e(dest.netloc)}</strong>. Only approve if you just "
+            f"started this from that app.</p>"
+            f"<form method=\"post\" class=\"row\" style=\"justify-content:center\">"
+            f"<input type=\"hidden\" name=\"req\" value=\"{e(req)}\">"
+            f"<button class=\"primary\" name=\"decision\" value=\"allow\">Allow</button>"
+            f"<button name=\"decision\" value=\"deny\">Deny</button></form>")
+    origin = request.headers.get("origin")
+    if origin and origin != _rp()[1]:
+        return JSONResponse({"error": "cross-origin request refused"}, status_code=403)
+    form = await request.form()
+    req = str(form.get("req", ""))
+    if form.get("decision") == "allow":
+        try:
+            url = oauth.approve(req)
+        except AuthorizeError:
+            return _consent_page(EXPIRED, 400)
+    else:
+        url = oauth.deny(req)
+        if not url:
+            return _consent_page(EXPIRED, 400)
+    return RedirectResponse(url, status_code=303)
 
 
 # ---------------------------------------------------------------- web
@@ -698,6 +922,16 @@ app = Starlette(
         Route("/files/{id}/{rel:path}", files),
         Route("/upload/{name}", upload, methods=["PUT", "POST"]),
         Route("/health", health),
+        Route("/auth/passkey/login/options", passkey_login_options, methods=["POST"]),
+        Route("/auth/passkey/login/verify", passkey_login_verify, methods=["POST"]),
+        Route("/auth/passkey/register/options", passkey_register_options, methods=["POST"]),
+        Route("/auth/passkey/register/verify", passkey_register_verify, methods=["POST"]),
+        Route("/auth/logout", logout, methods=["POST"]),
+        Route("/api/auth", api_auth),
+        Route("/api/auth/passkeys/{id}", api_auth_passkey, methods=["DELETE"]),
+        Route("/api/auth/clients/{id}", api_auth_client, methods=["DELETE"]),
+        Route("/oauth/consent", oauth_consent, methods=["GET", "POST"]),
+        *OAUTH_ROUTES,
         Mount("/static", app=StaticFiles(directory=WEB)),
         Mount("/", app=mcp_app),
     ],

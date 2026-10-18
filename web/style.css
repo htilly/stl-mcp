@@ -188,3 +188,21 @@ details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 .admin .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .admin .msg { font-size: 13px; color: var(--muted); }
 .admin .msg.err { color: var(--warn); }
+
+/* login and security */
+.login { padding-top: 12vh; }
+.login h2 { color: var(--ink); }
+.login form { margin-top: 18px; }
+button.big { padding: 10px 20px; font-size: 15px; }
+.banner { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; padding: 10px 14px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel)); border: 1px solid var(--accent); border-radius: var(--radius); }
+.banner span { flex: 1; min-width: 200px; }
+dialog { background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 0; width: min(520px, calc(100vw - 32px)); }
+dialog::backdrop { background: rgba(0,0,0,.35); }
+dialog .sec:last-child { border-bottom: 0; }
+dialog .grow { flex: 1; }
+ul.plain { list-style: none; margin: 0 0 10px; padding: 0; }
+ul.plain li { display: flex; gap: 8px; align-items: center; justify-content: space-between; padding: 6px 0; }
+ul.plain li + li { border-top: 1px dashed var(--line); }
+ul.plain li > span { overflow-wrap: anywhere; }
