@@ -240,3 +240,27 @@ def test_to_obj_structure():
     assert "newmtl m0_a" in mtl and "newmtl m1_b" in mtl
     # second part's face indices are offset past the first part's vertices
     assert f"f {1 + 8} " in obj or any(l.startswith("f 9") or " 9 " in l for l in obj.splitlines())
+
+
+def test_default_lid_has_no_thin_walls():
+    import printcheck
+    _, lid = g.enclosure(60, 40, 20)
+    assert lid.is_watertight
+    assert not [w for w in printcheck.check(lid) if w["code"] == "thin_walls"]
+
+
+def _removed_volume(**kw):
+    _, lid = g.enclosure(60, 40, 20, **kw)
+    _, plain = g.enclosure(60, 40, 20, screws=False, **kw)
+    return plain.volume - lid.volume
+
+
+def test_lid_counterbore_keeps_floor_and_removes_expected_volume():
+    lid_t, hole_r, cb_r, depth = 2.4, 1.7, 3.2, 1.2     # depth = lid_t - 1.2 mm floor
+    expected = 4 * (np.pi * hole_r ** 2 * lid_t + np.pi * (cb_r ** 2 - hole_r ** 2) * depth)
+    assert _removed_volume() == pytest.approx(expected, rel=0.03)
+
+
+def test_thin_lid_skips_counterbore():
+    expected = 4 * np.pi * 1.7 ** 2 * 1.6
+    assert _removed_volume(lid_t=1.6) == pytest.approx(expected, rel=0.03)
