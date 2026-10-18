@@ -257,6 +257,31 @@ def test_sweep_errors():
         mesh({"shape": "sweep", "profile": circ, "path": [[0, 0, 0], [0, 0, 0]]})
 
 
+@pytest.mark.parametrize("path", [
+    {"type": "helix", "r": 10, "pitch": 5, "turns": 1e9},
+    {"type": "helix", "r": 10, "pitch": 5, "turns": float("inf")},
+    {"type": "arc", "r": 10, "degrees": 3.6e11},
+    {"type": "spline", "points": [[0, 0, 0], [10, 0, 0], [10, 10, 0]] * 200, "steps": 1000},
+    {"type": "bezier", "points": [[0, 0, 0], [5, 5, 0], [10, 5, 0], [15, 0, 0]] * 300 + [[0, 0, 0]],
+     "steps": 1000},
+])
+def test_sweep_rejects_huge_paths_before_building_them(path):
+    """A sweep path is checked against the triangle budget before its points are allocated, so an
+    absurd helix fails at once instead of tying up the server for minutes (and gigabytes)."""
+    import time
+    t = time.monotonic()
+    with pytest.raises(ValueError, match="too detailed|turns > 0|finite"):
+        csg.build_node({"shape": "sweep", "profile": {"shape": "circle", "d": 1}, "path": path}, {})
+    assert time.monotonic() - t < 1
+
+
+@pytest.mark.parametrize("steps", [0, -5, 10_000, "16", True])
+def test_sweep_steps_must_be_sane(steps):
+    with pytest.raises(ValueError, match="steps"):
+        csg.build_node({"shape": "sweep", "profile": {"shape": "circle", "d": 1},
+                        "path": {"type": "spline", "points": [[0, 0, 0], [10, 0, 0]], "steps": steps}}, {})
+
+
 # ---------------------------------------------------------------- loft
 
 SECTIONS = [

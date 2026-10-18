@@ -10,8 +10,11 @@ On top of that each build runs:
   - in a fresh, empty temp dir as cwd (and HOME), with OPENSCADPATH pointing only at the bundled
     read-only libraries dir, so a relative include can only find those;
   - as its own process group with a timeout (the whole group is killed when it runs out);
-  - with rlimits on Linux: address space, CPU seconds, file size (caps the STL and the logs),
-    open files;
+  - with rlimits: address space, CPU seconds, file size (caps the STL and the logs), open files
+    (on Linux all are enforced; other systems apply the ones they support, macOS ignores the
+    address-space limit);
+  - at most OPENSCAD_CONCURRENCY builds at a time across the server, so parallel requests cannot
+    multiply the memory limit;
   - with stdout/stderr going to files whose tail is read back, so a chatty echo() loop cannot
     fill the server's memory.
 
@@ -22,10 +25,13 @@ Environment:
   OPENSCAD_BIN      the binary (default: `openscad` on PATH)
   OPENSCAD_LIBS     the libraries dir (default /opt/openscad-libs, else ./openscad-libs)
   OPENSCAD_TIMEOUT  seconds per build, all parts together (default 60)
-  OPENSCAD_MEM_MB   address-space limit per process on Linux (default 2048)
+  OPENSCAD_MEM_MB   address-space limit per process (default 2048)
+  OPENSCAD_CONCURRENCY  builds running at the same time, server-wide (default 2); a build that
+                    cannot start within OPENSCAD_TIMEOUT fails with "busy"
 """
 from __future__ import annotations
 
+import functools
 import os
 import re
 import shutil
@@ -33,6 +39,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -44,12 +51,16 @@ LIBS = Path(os.environ.get("OPENSCAD_LIBS") or
             (_default_libs if _default_libs.is_dir() else Path(__file__).parent / "openscad-libs"))
 TIMEOUT = float(os.environ.get("OPENSCAD_TIMEOUT", "60"))
 MEM_MB = int(os.environ.get("OPENSCAD_MEM_MB", "2048"))
-MAX_OUTPUT = 200_000_000   # bytes, per written file (STL or log)
+CONCURRENCY = max(1, int(os.environ.get("OPENSCAD_CONCURRENCY", "2")))
+MAX_OUTPUT = 50_000_000    # bytes, per written file (STL or log); ~1M triangles of binary STL
+MAX_TOTAL_STL = 150_000_000  # bytes of STL over all parts, loaded into the server's memory
 MAX_CODE = 200_000         # characters of source
 LOG_TAIL = 2000            # characters of OpenSCAD's messages returned on errors
 
 # functions/modules that read files from disk
 FORBIDDEN = {"import", "surface", "dxf_dim", "dxf_cross"}
+# plus every library module/function that (directly or through others) calls one of them, e.g.
+# BOSL2's builtins.scad `_surface(file)` – found by scanning LIBS, see _forbidden()
 # include <...> / use <...>: only files inside a bundled library
 LIBRARY_PATH = re.compile(r"(BOSL2)/[A-Za-z0-9_][A-Za-z0-9_./-]*\.scad")
 NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
@@ -65,12 +76,70 @@ class OpenSCADError(ValueError):
 
 # ---------------------------------------------------------------- source check
 
+_SKIP = re.compile(r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"', re.S)   # comments and strings
+_TOKEN = re.compile(r"[A-Za-z0-9_$]+|==|!=|<=|>=|[=(){}\[\];]")
+_OPEN, _CLOSE = "([{", ")]}"
+
+
+def _definitions(src: str):
+    """(name, names it calls) for each module, function and function literal (`f = function`)
+    in OpenSCAD source. Over-approximates on purpose (a nested definition's calls count for the
+    outer one too): a false positive only blocks a name, a miss would let a file read through."""
+    t = _TOKEN.findall(_SKIP.sub(" ", src))
+    for i, w in enumerate(t):
+        if w in ("module", "function") and i + 2 < len(t) and NAME.fullmatch(t[i + 1]) and t[i + 2] == "(":
+            name, j = t[i + 1], i + 2
+        elif w == "=" and i > 0 and NAME.fullmatch(t[i - 1]) and t[i + 1:i + 2] == ["function"]:
+            name, j = t[i - 1], i + 1
+        else:
+            continue
+        # the body runs to the ';' (or the closing brace of a { } body) at its own nesting level,
+        # continuing through `else`; it also ends where an enclosing bracket closes
+        depth, body = 0, []
+        while j < len(t):
+            tok = t[j]
+            body.append(tok)
+            if tok in _OPEN:
+                depth += 1
+            elif tok in _CLOSE:
+                depth -= 1
+                if depth < 0:
+                    break
+            if depth == 0 and (tok == ";" or (tok == "}" and w == "module")) \
+                    and not (j + 1 < len(t) and t[j + 1] == "else"):
+                break
+            j += 1
+        yield name, {a for a, b in zip(body, body[1:]) if b == "("}
+
+
+@functools.lru_cache(maxsize=4)
+def _forbidden(libs: Path) -> frozenset:
+    """FORBIDDEN plus every name the bundled libraries define on top of them, transitively."""
+    defs: dict[str, set] = {}
+    if libs.is_dir():
+        files = (Path(d) / f for d, _, fs in os.walk(libs, followlinks=True) for f in fs)
+        for f in sorted(f for f in files if f.suffix == ".scad"):
+            try:
+                src = f.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for name, words in _definitions(src):
+                defs.setdefault(name, set()).update(words)
+    bad = set(FORBIDDEN)
+    while True:
+        more = {name for name, words in defs.items() if name not in bad and words & bad}
+        if not more:
+            return frozenset(bad)
+        bad |= more
+
+
 def check(code: str) -> list[str]:
     """Rejects code that could read files. Returns the include/use paths it found."""
     if len(code) > MAX_CODE:
         raise OpenSCADError(f"the code is too long (max {MAX_CODE} characters)")
     if "\0" in code:
         raise OpenSCADError("the code contains a NUL character")
+    forbidden = _forbidden(LIBS)
     paths, i, n = [], 0, len(code)
     while i < n:
         c = code[i]
@@ -95,7 +164,7 @@ def check(code: str) -> list[str]:
         elif c.isalpha() or c in "_$":
             m = re.compile(r"[A-Za-z0-9_$]+").match(code, i)
             word, i = m.group(), m.end()
-            if word in FORBIDDEN:
+            if word in forbidden:
                 raise OpenSCADError(f"{word}() is not allowed (it reads files from the server)")
             if word in ("include", "use"):
                 # OpenSCAD's lexer: include[ \t\r\n>]*<path>
@@ -152,7 +221,11 @@ def _limits(cpu: int):
         for lim, val in ((resource.RLIMIT_AS, mem), (resource.RLIMIT_CPU, cpu),
                          (resource.RLIMIT_FSIZE, MAX_OUTPUT), (resource.RLIMIT_NOFILE, 256),
                          (resource.RLIMIT_CORE, 0)):
-            resource.setrlimit(lim, (val, val))
+            try:
+                resource.setrlimit(lim, (val, val))
+            except (ValueError, OSError):
+                if sys.platform == "linux":   # Linux supports them all: a failure is a real error
+                    raise
     return apply
 
 
@@ -163,7 +236,7 @@ def _run(argv: list[str], cwd: Path, timeout: float) -> tuple[int, str]:
     with open(log, "wb") as out:
         p = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=out,
                              stderr=subprocess.STDOUT, start_new_session=True,
-                             preexec_fn=_limits(int(timeout) + 5) if sys.platform == "linux" else None)
+                             preexec_fn=_limits(int(timeout) + 5) if os.name == "posix" else None)
         try:
             rc = p.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -202,8 +275,19 @@ def build(params: dict) -> dict:
         raise OpenSCADError("parts must be a list of names (letters, digits, _)")
     if len(set(parts)) != len(parts) or len(parts) > 20:
         raise OpenSCADError("parts must be unique (max 20)")
-    deadline = time.monotonic() + TIMEOUT
-    out = {}
+    if not _slots.acquire(timeout=TIMEOUT):
+        raise OpenSCADError("the server is busy with other OpenSCAD builds – try again in a minute")
+    try:
+        return _build(code, overrides, parts, time.monotonic() + TIMEOUT)
+    finally:
+        _slots.release()
+
+
+_slots = threading.BoundedSemaphore(CONCURRENCY)
+
+
+def _build(code: str, overrides: list[str], parts: list[str], deadline: float) -> dict:
+    out, total = {}, 0
     with tempfile.TemporaryDirectory(prefix="scad-") as td:
         tdir = Path(td)
         src = tdir / "model.scad"
@@ -221,6 +305,11 @@ def build(params: dict) -> dict:
                 if "Current top level object is empty" in log or "not 3D" in log:
                     msg += "\n(the code produced no 3D object" + (f" for PART == \"{part}\"" if parts else "") + ")"
                 raise OpenSCADError(msg[-LOG_TAIL:])
+            size = stl.stat().st_size
+            total += size
+            if size > MAX_OUTPUT or total > MAX_TOTAL_STL:
+                raise OpenSCADError(f"the model is too detailed (STL over {MAX_OUTPUT // 1_000_000} MB "
+                                    f"per part or {MAX_TOTAL_STL // 1_000_000} MB in all) – lower $fn")
             mesh = trimesh.load(stl, force="mesh")
             if mesh.is_empty:
                 raise OpenSCADError(f"part '{part}' is empty")
