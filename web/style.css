@@ -418,6 +418,11 @@ textarea.recipe { font-family: var(--mono); font-size: 11.5px; width: 100%; min-
 .gate details form { display: flex; gap: var(--s2); }
 .gate details input { flex: 1; min-width: 0; }
 .gate .tb { background: var(--inset); }
+.gate .panel.wide { width: min(1100px, 100%); }
+.gate video.demo {
+  display: block; width: 100%; height: auto; margin: var(--s4) 0; background: #000;
+  border: 1px solid var(--rule); border-radius: var(--r-panel);
+}
 .gate .actions { display: flex; gap: var(--s2); margin-top: var(--s5); }
 .gate .actions button { flex: 1; }
 .gate strong { color: var(--graphite); }

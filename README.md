@@ -12,9 +12,10 @@ Every change is a small, versioned edit, and you download an STL when you are ha
 
 ## See it in action
 
-[![Claude designing an ESP32 box in autosmith: click to play the video](docs/img/demo-poster.png)](docs/img/demo.mp4)
+[![Claude designing an ESP32 box in autosmith: click to watch the video](docs/img/demo-poster.png)](https://stl.tilly.se/demo)
 
-*A real session, sped up 4× (about one minute, [play the video](docs/img/demo.mp4)).* Claude on claude.ai
+*A real session, sped up 4× (about one minute): [**▶ watch it on stl.tilly.se/demo**](https://stl.tilly.se/demo)
+(or [the mp4 in the repo](web/demo.mp4)).* Claude on claude.ai
 on the right, the live 3D view on the left. A handful of short messages take an ESP32 dev board box from
 nothing to printable:
 
@@ -65,6 +66,8 @@ Every step shows up in the 3D view as soon as Claude makes it, and each one is a
   claude.ai can connect with one click ([details](#accounts-and-signup)).
 - **Tinkercad exchange** via STL/OBJ files, and import of STL/OBJ/GLB/PLY/OFF files to keep working on
   ([details](#tinkercad)).
+- **Demo** at `/demo`: the video above on a public page (no login), to share with people who
+  haven't tried autosmith yet. The mp4 is served from `/static/demo.mp4` and can be seeked.
 - **Design system**: colours, type, icons and components are documented in
   [`docs/DESIGN.md`](docs/DESIGN.md) and shown live in the admin section at `/admin/design`.
 

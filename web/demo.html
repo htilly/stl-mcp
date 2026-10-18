@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Demo · autosmith</title>
+<meta name="description" content="Watch Claude design a printable ESP32 box in autosmith, one short message at a time.">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/static/favicon.ico" sizes="48x48">
+<link rel="apple-touch-icon" href="/static/brand/apple-touch-icon.png">
+<link rel="manifest" href="/static/brand/site.webmanifest">
+<meta name="theme-color" content="#0f172a">
+<meta property="og:site_name" content="autosmith.eu">
+<meta property="og:title" content="autosmith in action: an ESP32 box, made by AI">
+<meta property="og:description" content="Watch Claude design a printable ESP32 box, one short message at a time.">
+<meta property="og:image" content="/static/demo-poster.jpg">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main class="gate"><div class="panel wide"><div class="body prose">
+  <div class="wordmark"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-mark"/></svg><span>auto<b>smith</b></span></div>
+  <h2>See it in action</h2>
+  <p>A real session, sped up 4×: Claude on claude.ai on the right, the live 3D view on the left.
+    A handful of short messages take an ESP32 dev board box from nothing to printable.</p>
+  <video class="demo" src="/static/demo.mp4" poster="/static/demo-poster.jpg" controls playsinline
+    preload="metadata" width="1600" height="790">
+    <a href="/static/demo.mp4">Download the video</a>
+  </video>
+  <ol>
+    <li><i>"make a box for a ESP32 dev board. Add the text esp32 on the side of the box."</i>
+      Body, friction-fit lid and engraved text.</li>
+    <li><i>"now add screws to the box so I can make the lid solid"</i>
+      Four M3 corner posts in the body, countersunk holes in the lid.</li>
+    <li>A comment clicked on the side of the box, <i>"write the text autoSMITH centered here"</i>.
+      Engraved exactly there.</li>
+    <li><i>"I did not find the screws?"</i>
+      Four printable M3 screws as a separate part, checked for thin walls and overhangs.</li>
+    <li><i>"did you adjust the holes so that the screws will be able to 'screw'?"</i>
+      Claude checks the holes against the printed threads.</li>
+  </ol>
+  <p>Every step shows up in the 3D view as soon as Claude makes it, and each one is a version you
+    can go back to.</p>
+  <p class="hint"><a href="/">Open autosmith</a> ·
+    <a href="https://github.com/htilly/stl-mcp">Source on GitHub</a></p>
+</div></div></main>
+</body>
+</html>
