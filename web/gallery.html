@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gallery · autosmith</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/static/favicon.ico" sizes="48x48">
+<link rel="apple-touch-icon" href="/static/brand/apple-touch-icon.png">
+<link rel="manifest" href="/static/brand/site.webmanifest">
+<meta name="theme-color" content="#0f172a">
+<meta property="og:site_name" content="autosmith.eu">
+<meta property="og:title" content="autosmith: public gallery">
+<meta property="og:image" content="/static/brand/og-image.png">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <a class="wordmark" href="/" title="Back to your library"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-mark"/></svg><span class="name">auto<b>smith</b></span></a>
+  <span class="crumb">/ <b>Gallery</b></span>
+  <span class="count" id="count"></span>
+  <div class="grow lib-only"></div>
+  <label class="search"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-search"/></svg>
+    <input type="search" id="q" placeholder="Search the gallery" autocomplete="off" aria-label="Search the gallery"></label>
+  <a class="btn sm" href="/" title="Your own models, private and public"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-grid"/></svg>My library</a>
+</header>
+<main class="lib">
+  <div class="gallery-head">
+    <h2 id="heading">Public models</h2>
+    <span class="hint" id="intro">Made public by their owners. Click a name to see everything that person made.</span>
+    <span class="chip" id="bychip" hidden></span>
+  </div>
+  <div class="grid" id="grid"></div>
+  <div class="empty" id="empty" hidden>
+    <h2>Nothing here yet</h2>
+    <p id="emptytext">When someone makes a model public, it shows up here. To share one of yours, open it and
+      switch it to <b>Public</b>, or ask Claude to make it public.</p>
+  </div>
+  <p class="hint" id="err" hidden></p>
+</main>
+<script type="module">
+import { api, ago, fmt, esc, icon } from "/static/common.js";
+
+const $ = (id) => document.getElementById(id);
+let models = [];
+let by = new URLSearchParams(location.search).get("by") || "";  // a maker's key: their models only
+
+const makerName = (m) => m.mine ? "You" : m.owner_name;
+const byHref = (key) => `/gallery?by=${encodeURIComponent(key)}`;
+
+function render() {
+  const term = $("q").value.trim().toLowerCase();
+  const shown = by ? models.filter((m) => m.maker === by) : models;
+  const list = shown.filter((m) => !term
+    || `${m.name} ${m.id} ${m.description} ${m.owner_name}`.toLowerCase().includes(term));
+  const maker = shown[0];
+  $("count").textContent = shown.length === 1 ? "1 model" : `${shown.length} models`;
+  $("heading").textContent = by ? `Models by ${maker ? makerName(maker) : "this maker"}` : "Public models";
+  document.title = by && maker ? `${makerName(maker)} · Gallery · autosmith` : "Gallery · autosmith";
+  $("intro").hidden = !!by;
+  $("bychip").hidden = !by;
+  $("bychip").innerHTML = by ? `${maker ? avatar(maker) : ""}<span>${esc(maker ? makerName(maker) : "Unknown maker")}</span>
+    <a class="btn icon quiet sm" href="/gallery" data-nav title="Show everyone's models" aria-label="Clear the filter">${icon("close", "sm")}</a>` : "";
+  $("empty").hidden = shown.length > 0;
+  $("emptytext").hidden = !!by;
+  $("grid").innerHTML = list.map((m) => {
+    const parts = Object.values(m.parts);
+    const dims = parts.length === 1 ? fmt(parts[0].extents_mm) : `${parts.length}`;
+    return `<div class="card">
+      <a class="cover" href="/m/${encodeURIComponent(m.id)}">
+        <div class="thumb"><img loading="lazy" alt="" src="/api/models/${encodeURIComponent(m.id)}/preview.png?v=${m.version}">
+          ${m.mine ? `<span class="vbadge public" title="You made this model public">${icon("globe")}Yours</span>` : ""}</div>
+        <div class="name" title="${esc(m.name)}">${esc(m.name)}</div></a>
+      <div class="by"><a class="maker" href="${byHref(m.maker)}" data-nav title="Everything ${esc(makerName(m))} made public">${avatar(m)}<span>${esc(makerName(m))}</span></a>
+        <span class="hint">${ago(m.updated)}</span></div>
+      <dl class="tb two">
+        <div><dt>${parts.length === 1 ? "Size" : "Parts"}</dt><dd>${dims}</dd></div>
+        <div><dt>Copies</dt><dd>${m.copies}</dd></div>
+      </dl></div>`;
+  }).join("");
+}
+
+// A round avatar with the maker's initials, coloured by their key (the same person, the same colour).
+function avatar(m) {
+  const name = makerName(m) || "?";
+  const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+  const hue = parseInt((m.maker || "0").slice(0, 4), 16) % 360;
+  return `<span class="avatar" aria-hidden="true" style="--hue:${hue}">${esc(initials)}</span>`;
+}
+
+// Clicking a maker (or clearing the filter) stays on the page: no reload, the URL is shareable.
+document.addEventListener("click", (e) => {
+  const a = e.target.closest("a[data-nav]");
+  if (!a || e.metaKey || e.ctrlKey || e.shiftKey) return;
+  e.preventDefault();
+  by = new URL(a.href).searchParams.get("by") || "";
+  history.pushState(null, "", a.href);
+  scrollTo(0, 0);
+  render();
+});
+addEventListener("popstate", () => { by = new URLSearchParams(location.search).get("by") || ""; render(); });
+
+async function load() {
+  try {
+    models = (await api("/api/gallery")).models;
+  } catch (e) {
+    $("err").textContent = `Could not load the gallery: ${e.message}`;
+    $("err").hidden = false;
+    return;
+  }
+  render();
+}
+
+$("q").addEventListener("input", render);
+load();
+</script>
+</body>
+</html>

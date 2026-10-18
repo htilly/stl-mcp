@@ -39,7 +39,7 @@ guarded by one shared `MCP_TOKEN`. This phase adds real users.
   `/files/...`, `/preview.png`, comments and events by owner and role. MCP tool calls resolve
   the user from the OAuth token, so a member's Claude only sees that member's models. Test with
   two users that neither can read, change or delete the other's models, files or previews. (L)
-- [ ] **Public models and copying** (M-L)
+- [x] **Public models and copying** (M-L; done except the report link and stats below)
   - `visibility` on each model: `private` (default) or `public`. The owner toggles it in the web
     UI and through an MCP tool (for example `set_visibility`).
   - Readable by others when public: the model, its versions, STL files, previews and renders. Not

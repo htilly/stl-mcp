@@ -234,6 +234,7 @@ def _summary(m: dict, full: bool = False, lib: "Lib | None" = None) -> dict:
         "name": m["name"],
         "version": cur["version"],
         "kind": cur["kind"],
+        "visibility": m.get("visibility", "private"),
         "viewer_url": f"{PUBLIC_URL}/m/{m['id']}",
         "parts": {n: {"url": f"{PUBLIC_URL}/files/{m['id']}/{p['file']}",
                       "extents_mm": p["extents_mm"], "volume_cm3": p["volume_cm3"],
@@ -245,6 +246,9 @@ def _summary(m: dict, full: bool = False, lib: "Lib | None" = None) -> dict:
         out["print_warnings"] = flat
     if full:
         out["description"] = m.get("description", "")
+        if lib and not lib.models.can_edit(m):
+            out["read_only"] = ("someone else's public model: read it, or copy it with "
+                                "duplicate_model to change your own copy")
         out["params"] = cur["params"]
         out["history"] = [{"version": v["version"], "note": v["note"]} for v in m["versions"][-15:]]
         comments = m.get("comments", [])
@@ -535,8 +539,20 @@ def list_models(ctx: Context = None) -> list[dict]:
         cur = Store.current(m)
         out.append({"model_id": m["id"], "name": m["name"], "kind": cur["kind"],
                     "version": cur["version"], "parts": list(cur["parts"]),
+                    "visibility": m.get("visibility", "private"),
                     "open_comments": _open(m), "viewer_url": f"{PUBLIC_URL}/m/{m['id']}"})
     return out
+
+
+@mcp.tool()
+def set_visibility(model_id: str, visibility: str, ctx: Context = None) -> dict:
+    """Makes a model "public" or "private" (the default). A public model is listed in the public
+    gallery: every logged-in user can view, download and copy it (not change it or see its
+    comments). Only do this when the user asks for it."""
+    lib = _lib(ctx)
+    m = lib.models.set_visibility(model_id, visibility)
+    return {"model_id": m["id"], "visibility": m["visibility"],
+            "viewer_url": f"{PUBLIC_URL}/m/{m['id']}", "gallery_url": f"{PUBLIC_URL}/gallery"}
 
 
 @mcp.tool()
@@ -549,7 +565,8 @@ async def revert_model(model_id: str, version: int, ctx: Context = None) -> dict
 
 @mcp.tool()
 async def duplicate_model(model_id: str, name: str, ctx: Context = None) -> dict:
-    """Copies a model to a new one (to try a variant without touching the original)."""
+    """Copies a model to a new, private one in your library: to try a variant without touching
+    the original, or to make your own editable copy of someone else's public model."""
     lib = _lib(ctx)
     lib.ensure_room(new_model=True)
     return _summary(await lib.build(lib.models.duplicate, model_id, name), lib=lib)
@@ -975,7 +992,7 @@ def _public_path(path: str, read: bool) -> bool:
             or path in SIGNUP_PATHS or path.startswith("/auth/sso/")
             or (bool(OAUTH_ROUTES) and (path in OAUTH_PATHS or path.startswith("/.well-known/oauth-")))
             or (FILES_PUBLIC and read and path.startswith(("/files/", "/f/")))
-            or (UI_PUBLIC and read and (path == "/" or path.startswith("/m/")
+            or (UI_PUBLIC and read and (path in ("/", "/gallery") or path.startswith("/m/")
                                         or (path.startswith("/api/")
                                             and not path.startswith("/api/auth")))))
 
@@ -1624,6 +1641,31 @@ async def page_editor(_):
     return FileResponse(WEB / "editor.html")
 
 
+async def page_gallery(_):
+    return FileResponse(WEB / "gallery.html")
+
+
+def _maker(owner: str | None) -> str:
+    """A public handle for a model's owner, to filter the gallery by maker: stable per user, but
+    not their user id (with FILES_PUBLIC a user id opens /f/<uid>/)."""
+    return hashlib.sha256(f"maker:{owner}".encode()).hexdigest()[:12] if owner else ""
+
+
+async def api_gallery(request):
+    """Every public model, from every user: what the gallery page shows."""
+    lib = _req_lib(request)
+    out = []
+    for m in await _run(store.public):
+        cur = Store.current(m)
+        out.append({"id": m["id"], "name": m["name"], "description": m.get("description", ""),
+                    "owner_name": m["owner_name"] or "Someone", "maker": _maker(m.get("owner")),
+                    "mine": m.get("owner") == lib.user["id"], "copies": m["copies"],
+                    "updated": m["updated"], "published": m.get("published") or m["updated"],
+                    "version": cur["version"], "kind": cur["kind"],
+                    "parts": {n: {"extents_mm": p["extents_mm"]} for n, p in cur["parts"].items()}})
+    return JSONResponse({"models": out})
+
+
 async def api_models(request):
     if request.method == "POST":
         return await _create_blank(request)
@@ -1634,6 +1676,7 @@ async def api_models(request):
         out.append({"id": m["id"], "name": m["name"], "description": m.get("description", ""),
                     "updated": m["updated"], "version": cur["version"], "kind": cur["kind"],
                     "versions": len(m["versions"]), "open_comments": _open(m),
+                    "visibility": m.get("visibility", "private"),
                     "warnings": sum(len(p.get("warnings", [])) for p in cur["parts"].values()),
                     "parts": {n: {"url": f"/files/{m['id']}/{p['file']}",
                                   "extents_mm": p["extents_mm"]} for n, p in cur["parts"].items()}})
@@ -1683,6 +1726,8 @@ async def api_model(request):
             elif action in ("comment_resolve", "comment_reopen", "comment_reply", "comment_delete"):
                 m = lib.models.comment_action(mid, body["id"], action.removeprefix("comment_"),
                                          body.get("text", ""))
+            elif action == "set_visibility":
+                m = lib.models.set_visibility(mid, str(body.get("visibility", "")))
             elif action == "duplicate":
                 lib.ensure_room(new_model=True)
                 m = await lib.build(lib.models.duplicate, mid, body.get("name") or f"{mid} copy")
@@ -1696,6 +1741,16 @@ async def api_model(request):
         for p in v["parts"].values():
             p["url"] = f"/files/{m['id']}/{p['file']}"
     m["revision"] = store.revision_for(lib.user)
+    m["can_edit"] = lib.models.can_edit(m)
+    m["mine"] = m.get("owner") == lib.user["id"]
+    m["owner_name"] = "" if m["mine"] else await _run(store.owner_name, m.get("owner"))
+    m["maker"] = _maker(m.get("owner"))
+    if not m["can_edit"]:
+        m.pop("owner", None)  # user ids stay private: with FILES_PUBLIC they open /f/<uid>/
+    if cf := m.get("copied_from"):
+        m["copied_from"] = {"model_id": cf["model_id"], "name": cf.get("name", ""),
+                            "version": cf.get("version"),
+                            "owner_name": await _run(store.owner_name, cf.get("owner_id"))}
     return JSONResponse(m)
 
 
@@ -1899,6 +1954,8 @@ app = Starlette(
         Route("/", page_index),
         Route("/m/{id}", page_model),
         Route("/edit/{id}", page_editor),
+        Route("/gallery", page_gallery),
+        Route("/api/gallery", api_gallery),
         Route("/api/models", api_models, methods=["GET", "POST"]),
         Route("/api/models/{id}", api_model, methods=["GET", "POST", "DELETE"]),
         Route("/api/models/{id}/preview.png", preview),

@@ -1289,6 +1289,10 @@ async function load() {
     $("loading").textContent = e.message;
     return;
   }
+  if (!model.can_edit) {  // someone else's public model: the viewer shows it read-only
+    location.replace(`/m/${encodeURIComponent(id)}`);
+    return;
+  }
   const cur = model.versions.find((v) => v.version === model.current);
   document.title = `${model.name} · editor`;
   $("crumb").textContent = model.name;

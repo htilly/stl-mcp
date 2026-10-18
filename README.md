@@ -38,7 +38,11 @@ Every step shows up in the 3D view as soon as Claude makes it, and each one is a
 - **MCP server** (streamable HTTP) at `/mcp` with tools for creating, changing, rendering, checking
   and importing models ([list of tools](#mcp-tools)). Claude can also *look* at its own work with
   `render_model`.
-- **Library** at `/`: all your models with preview, search and live updates.
+- **Library** at `/`: all your models with preview, search and live updates. Every card shows
+  whether the model is **Private** (the default: only you) or **Public**.
+- **Gallery** at `/gallery`: every user's public models, with owner and how often they were copied.
+  Anyone logged in can view and download a public model, or copy it into their own library to
+  change it; only the owner (and admins) can change it, and its comments stay private.
 
 ![The library](docs/img/library.png)
 
@@ -280,7 +284,8 @@ page). It requires `PUBLIC_URL` on https (or localhost); `OAUTH=0` turns it off.
 | `get_model` | the recipe, dimensions, history and open comments (with `near_nodes`) |
 | `reply_to_comment` | reply to a comment, optionally marking it resolved |
 | `render_model` | PNG image (iso/front/top/right) so Claude can inspect the model visually |
-| `list_models`, `revert_model`, `duplicate_model`, `delete_model` | |
+| `list_models`, `revert_model`, `duplicate_model`, `delete_model` | `duplicate_model` also copies someone else's public model |
+| `set_visibility` | make a model `public` (listed in the gallery) or `private` again |
 | `whoami` | the account the connection is signed in as |
 | `import_file` | imports STL/OBJ/GLB/PLY/OFF via `url` or `data_base64` (zip with obj+mtl is unpacked) |
 | `file_info` | dimensions, bounds, volume, number of loose parts |
@@ -493,8 +498,8 @@ or unlink providers; the last way to log in cannot be removed.
 Always set `MCP_TOKEN` and put the server behind HTTPS. The web interface requires a login
 (passkey or token, kept as a signed session cookie for 90 days) unless `UI_PUBLIC=1`, which makes it readable by everyone while changes still require a token.
 `FILES_PUBLIC=1` only makes the STL links clickable without a token (model ids are guessable); for
-anonymous visitors, `UI_PUBLIC` and `FILES_PUBLIC` cover the bootstrap admin's own models only,
-never other users'. Keep `ALLOW_SCRIPT` off if the server is reachable from outside; script models
+anonymous visitors, `UI_PUBLIC` and `FILES_PUBLIC` cover the bootstrap admin's own models and
+models their owners made public, never other users' private ones. Keep `ALLOW_SCRIPT` off if the server is reachable from outside; script models
 run with an empty environment, so they cannot read `MCP_TOKEN` or `DATABASE_URL`. `/upload/*`
 always requires a token when `MCP_TOKEN` is set. The CSG spec is safe to let Claude write: builds
 are capped (expression size, numbers up to 1e12, at most 5 million triangles), and imports refuse

@@ -63,6 +63,14 @@
     <div class="sec head">
       <input class="title-input" id="title" aria-label="Name">
       <textarea class="desc-input" id="desc" rows="1" placeholder="Add a description" aria-label="Description"></textarea>
+      <div class="vis" id="vis" hidden>
+        <div class="seg" role="group" aria-label="Visibility">
+          <button data-vis="private" title="Only you can see it"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-lock"/></svg>Private</button>
+          <button data-vis="public" title="List it in the public gallery"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-globe"/></svg>Public</button>
+        </div>
+        <p class="hint" id="vishint"></p>
+      </div>
+      <div class="readonly-note" id="ronote" hidden></div>
       <dl class="tb">
         <div><dt>Revision</dt><dd id="tbrev"></dd></div>
         <div><dt>Saved</dt><dd id="tbsaved"></dd></div>
@@ -74,7 +82,7 @@
       <h2>Parts <span id="vlabel" class="pill"></span></h2>
       <div id="parts"></div>
     </div>
-    <div class="sec">
+    <div class="sec" id="commentsec">
       <h2>Comments <span class="pill" id="ccount"></span></h2>
       <div id="comments"></div>
       <div class="row hint" style="margin-top:6px">
@@ -119,7 +127,7 @@
       </details>
     </div>
     <div class="sec row">
-      <button id="dup"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-duplicate"/></svg>Duplicate</button>
+      <button id="dup"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-duplicate"/></svg><span id="duplabel">Duplicate</span></button>
       <div class="grow"></div>
       <button class="danger" id="del"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-trash"/></svg>Delete model</button>
     </div>
@@ -130,7 +138,7 @@
 import * as THREE from "three";
 import { createStage, loadSTL, spreadX } from "/static/stage.js";
 import { createComments } from "/static/comments.js";
-import { api, subscribe, ago, fmt, esc, icon, warnHtml, PART_COLORS } from "/static/common.js";
+import { api, subscribe, ago, fmt, esc, icon, visBadge, warnHtml, PART_COLORS } from "/static/common.js";
 
 const id = decodeURIComponent(location.pathname.split("/").pop());
 document.getElementById("editlink").href = `/edit/${encodeURIComponent(id)}`;
@@ -232,6 +240,7 @@ function renderSide() {
   if (document.activeElement !== $("title")) $("title").value = model.name;
   if (document.activeElement !== $("desc")) $("desc").value = model.description || "";
   $("mid").textContent = model.id;
+  renderAccess();
   $("vlabel").textContent = `v${ver.version}${ver.version === model.current ? "" : " (older)"}`;
 
   $("parts").innerHTML = Object.entries(ver.parts).map(([name, p], i) => `
@@ -272,11 +281,46 @@ function renderSide() {
     if (!ver.pruned) showVersion(v, false);
     renderSide();
   });
-  $("veractions").hidden = viewVersion === model.current;
+  $("veractions").hidden = viewVersion === model.current || !model.can_edit;
 
   $("recipe").textContent = JSON.stringify(ver.params, null, 2);
   renderComments();
 }
+
+// Visibility: the owner switches it; anyone else sees whose public model this is, read-only.
+const VIS_HINT = {
+  private: "Only you can see this model.",
+  public: `Listed in the <a href="/gallery">public gallery</a>: anyone logged in can view, download and copy it. Comments stay private.`,
+};
+function renderAccess() {
+  const edit = model.can_edit;
+  $("vis").hidden = !edit;
+  document.querySelectorAll("[data-vis]").forEach((b) => {
+    const on = b.dataset.vis === model.visibility;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-pressed", on);
+  });
+  $("vishint").innerHTML = VIS_HINT[model.visibility] || "";
+  const from = model.copied_from;
+  const fromHtml = from ? `<span class="hint">Copied from <b>${esc(from.name || from.model_id)}</b>${from.owner_name ? ` by ${esc(from.owner_name)}` : ""}</span>` : "";
+  const ro = edit ? fromHtml
+    : `${visBadge(model.visibility, "inline")}<span class="hint">by <a class="maker-link" href="/gallery?by=${encodeURIComponent(model.maker)}" title="Everything ${esc(model.owner_name || "they")} made public"><b>${esc(model.owner_name || "someone else")}</b></a>. View only: copy it to your library to change it.</span>`;
+  $("ronote").innerHTML = ro;
+  $("ronote").hidden = !ro;
+  $("title").readOnly = $("desc").readOnly = !edit;
+  for (const el of ["editlink", "commentmode", "commentsec", "editrecipe", "del"]) $(el).hidden = !edit;
+  $("duplabel").textContent = edit ? "Duplicate" : "Copy to my library";
+}
+
+document.querySelectorAll("[data-vis]").forEach((b) => b.onclick = async () => {
+  const visibility = b.dataset.vis;
+  if (visibility === model.visibility) return;
+  if (visibility === "public" && !confirm(`Make “${model.name}” public? Everyone logged in can then find it in the gallery, view, download and copy it.`)) return;
+  await post({ action: "set_visibility", visibility });
+  model.visibility = visibility;
+  renderAccess();
+  toast(visibility === "public" ? "Public: now in the gallery" : "Private: only you can see it");
+});
 
 // Editable parameters: vars for CSG, top-level values for the rest.
 function editableParams(ver) {
@@ -287,7 +331,7 @@ function editableParams(ver) {
 
 function renderParams(ver) {
   const list = editableParams(ver);
-  $("paramsec").hidden = list.length === 0;
+  $("paramsec").hidden = list.length === 0 || !model.can_edit;
   const isCur = ver.version === model.current;
   $("params").innerHTML = list.map(([k, v]) => {
     const input = typeof v === "boolean"
@@ -371,7 +415,7 @@ $("copyid").onclick = () => { navigator.clipboard.writeText(model.id); toast("Id
 $("copyrecipe").onclick = () => { navigator.clipboard.writeText($("recipe").textContent); toast("Recipe copied"); };
 $("revert").onclick = () => { followCurrent = true; post({ action: "revert", version: viewVersion }); };
 $("dup").onclick = async () => {
-  const name = prompt("Name of the copy:", model.name + " copy");
+  const name = prompt("Name of the copy:", model.can_edit ? model.name + " copy" : model.name);
   if (name) { const r = await post({ action: "duplicate", name }); location.href = `/m/${encodeURIComponent(r.id)}`; }
 };
 $("del").onclick = async () => {
