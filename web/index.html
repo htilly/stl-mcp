@@ -75,39 +75,12 @@
   </div>
   <div class="sec" id="appsec">
     <h2>Connect Claude</h2>
-    <p class="hint">Your library's address for AI apps:</p>
-    <span class="row"><code class="mono" id="mcpurl"></code><button id="copymcp" class="sm">Copy</button></span>
-    <details id="howto">
-      <summary>claude.ai and the Claude apps</summary>
-      <ol class="steps">
-        <li>In claude.ai, open <b>Settings → Connectors</b> and click <b>Add custom connector</b>.</li>
-        <li>Name it <code class="mono">autosmith</code>, paste the address above, leave the advanced
-          settings empty and click <b>Add</b>.</li>
-        <li>Click <b>Connect</b>. A page from this library opens; log in with your passkey if asked.</li>
-        <li>Check that it sends you back to <b>https://claude.ai</b>, then click <b>Allow</b>.</li>
-        <li>In a chat, turn the connector on in the tools menu and ask Claude for a model.</li>
-      </ol>
-    </details>
-    <details id="howto-chatgpt">
-      <summary>ChatGPT</summary>
-      <ol class="steps">
-        <li>In ChatGPT, open <b>Settings → Apps &amp; Connectors → Advanced settings</b> and turn on
-          <b>Developer mode</b> (on some plans an admin has to allow it).</li>
-        <li>Click <b>Create</b>, name it <code class="mono">autosmith</code>, paste the address above
-          and choose <b>OAuth</b> as authentication. Leave client id and secret empty.</li>
-        <li>A page from this library opens: log in with your passkey and click <b>Allow</b>.</li>
-        <li>In a chat, turn the connector on and ask for a model.</li>
-      </ol>
-    </details>
-    <details id="howto-code">
-      <summary>Claude Code and Claude Desktop</summary>
-      <ol class="steps">
-        <li>Create a personal token below.</li>
-        <li>Run the command shown with it.</li>
-      </ol>
-    </details>
-    <h2 style="margin-top:16px">Connected apps</h2>
-    <ul class="plain" id="applist"></ul>
+    <div id="connected" hidden>
+      <h3 class="sub">Connected apps</h3>
+      <ul class="plain" id="applist"></ul>
+      <button class="sm" id="wizmore">Connect another app</button>
+    </div>
+    <div id="wiz" class="wiz"></div>
   </div>
   <div class="sec">
     <h2>Personal tokens</h2>
@@ -189,6 +162,44 @@ api("/auth/config").then((c) => {
   if (c.donate_url) { $("donate").href = c.donate_url; $("donate").hidden = false; }
 }).catch(() => {});
 
+// ---- connect wizard: pick the app you use, then follow its steps
+let wizClient = null, wizOpen = false;
+const CLIENTS = {
+  claude: { name: "Claude", sub: "claude.ai, the desktop and phone apps", steps: [
+    `In claude.ai, open <b>Settings → Connectors</b> and click <b>Add custom connector</b>.`,
+    `Name it <code class="mono">autosmith</code> and paste this address. Leave the advanced settings empty and click <b>Add</b>.`,
+    `Click <b>Connect</b>. A page from this library opens; log in with your passkey if asked.`,
+    `Check that it sends you back to <b>https://claude.ai</b>, then click <b>Allow</b>.`,
+    `In a chat, turn the connector on in the tools menu and ask Claude for a model.`], url: 1 },
+  chatgpt: { name: "ChatGPT", sub: "Developer mode connector", steps: [
+    `In ChatGPT, open <b>Settings → Apps &amp; Connectors → Advanced settings</b> and turn on <b>Developer mode</b> (on some plans an admin has to allow it).`,
+    `Click <b>Create</b>, name it <code class="mono">autosmith</code>, paste this address and choose <b>OAuth</b> as authentication. Leave client id and secret empty.`,
+    `A page from this library opens: log in with your passkey and click <b>Allow</b>.`,
+    `In a chat, turn the connector on and ask for a model.`], url: 1 },
+  code: { name: "Claude Code", sub: "the terminal, with a personal token", steps: [
+    `Create a personal token. It is shown once, as a ready-made command.`,
+    `Paste the command into your terminal and run it.`,
+    `Start <code class="mono">claude</code>, and ask for a model.`], token: 0 },
+};
+function renderWiz() {
+  const w = $("wiz");
+  const c = CLIENTS[wizClient];
+  if (!c) {
+    w.innerHTML = `<p class="wiz-q">Where do you want to use it?</p><div class="pick">${Object.entries(CLIENTS).map(([k, v]) =>
+      `<button type="button" data-pick="${k}"><b>${v.name}</b><span class="hint">${v.sub}</span></button>`).join("")}</div>`;
+    return;
+  }
+  const extra = (i) => i === c.url
+    ? `<div class="row"><code class="mono">${esc(auth.mcp_url)}</code><button class="sm" data-wizact="copyurl">Copy</button></div>`
+    : i === c.token
+    ? `<div class="row"><button class="primary sm" data-wizact="mktoken">Create token</button></div>
+       <div class="secret" id="wizcmdbox" hidden><span class="hint">Copy it now; it is not shown again.</span>
+       <code class="mono" id="wizcmd"></code><button class="sm" data-wizact="copycmd">Copy command</button></div>`
+    : "";
+  w.innerHTML = `<p class="wiz-q"><button type="button" class="sm" data-wizact="back">← Back</button> <b>${c.name}</b></p>
+    <ol class="start">${c.steps.map((t, i) => `<li>${t}${extra(i)}</li>`).join("")}</ol>`;
+}
+
 function renderAuth() {
   const u = auth.user;
   $("secbtn").hidden = !auth.login_required;
@@ -212,12 +223,15 @@ function renderAuth() {
     <button class="danger sm" data-pk="${esc(p.id)}">Remove</button></li>`).join("")
     || `<li class="hint">No passkeys yet.</li>`;
   $("appsec").hidden = !auth.oauth && !auth.login_required;
-  $("mcpurl").textContent = auth.mcp_url;
-  $("howto").open = auth.clients.length === 0 && !$("howto-chatgpt").open && !$("howto-code").open;
+  const hasApps = auth.clients.length > 0 || auth.tokens.length > 0;
+  $("connected").hidden = !hasApps;
+  $("applist").hidden = auth.clients.length === 0;
+  $("wiz").hidden = hasApps && !wizOpen && !wizClient;
+  if (!wizClient) renderWiz();
   $("applist").innerHTML = auth.clients.map((c) => `<li>
     <span><b>${esc(c.name)}</b> <span class="hint">${esc((c.redirect_uris[0] || "").replace(/^(\w+:\/\/[^/]+).*/, "$1"))}, approved ${ago(c.last_authorized)}</span></span>
     <button class="danger sm" data-app="${esc(c.client_id)}">Disconnect</button></li>`).join("")
-    || `<li class="hint">No apps connected.</li>`;
+    || "";
   const linked = new Set(auth.identities.map((i) => i.provider));
   const label = (id) => (auth.providers.find((p) => p.id === id) || { label: id }).label;
   $("idsec").hidden = auth.providers.length === 0 && auth.identities.length === 0;
@@ -262,7 +276,26 @@ $("connectbtn").addEventListener("click", () => {
   $("appsec").scrollIntoView({ block: "start" });
 });
 $("secclose").addEventListener("click", () => sec.close());
-$("copymcp").addEventListener("click", (e) => copyText(e.target, auth.mcp_url));
+$("wizmore").addEventListener("click", () => { wizOpen = true; renderAuth(); });
+$("wiz").addEventListener("click", async (e) => {
+  const t = e.target.closest("[data-pick],[data-wizact]");
+  if (!t) return;
+  if (t.dataset.pick !== undefined) { wizClient = t.dataset.pick; renderWiz(); return; }
+  const act = t.dataset.wizact;
+  if (act === "back") { wizClient = null; renderWiz(); }
+  else if (act === "copyurl") copyText(t, auth.mcp_url);
+  else if (act === "copycmd") copyText(t, $("wizcmd").textContent);
+  else if (act === "mktoken") {
+    t.disabled = true;
+    try {
+      const r = await api("/api/auth/tokens", { method: "POST", body: { name: "Claude Code" } });
+      $("wizcmd").textContent = tokenCommand(r.token);
+      $("wizcmdbox").hidden = false;
+      t.hidden = true;
+      loadAuth();
+    } catch (err) { t.disabled = false; alert(err.message); }
+  }
+});
 $("pkadd1").addEventListener("click", addPasskey);
 $("pkadd2").addEventListener("click", addPasskey);
 $("pkadd3").addEventListener("click", addPasskey);
@@ -298,12 +331,13 @@ $("applist").addEventListener("click", async (e) => {
   await api(`/api/auth/clients/${encodeURIComponent(id)}`, { method: "DELETE" });
   loadAuth();
 });
+const tokenCommand = (tok) => `claude mcp add --transport http autosmith ${auth.mcp_url} --header "Authorization: Bearer ${tok}"`;
 let newToken = "";
 $("tokadd").addEventListener("click", async () => {
   const t = await api("/api/auth/tokens", { method: "POST", body: { name: $("tokname").value.trim() || "token" } });
   newToken = t.token;
   $("newtokval").textContent = t.token;
-  $("newtokcmd").textContent = `claude mcp add --transport http autosmith ${auth.mcp_url} --header "Authorization: Bearer ${t.token}"`;
+  $("newtokcmd").textContent = tokenCommand(t.token);
   $("newtok").hidden = false;
   $("tokname").value = "";
   loadAuth();
