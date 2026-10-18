@@ -25,7 +25,6 @@
   <a class="wordmark" href="/" title="Back to the library"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-mark"/></svg><span class="name">auto<b>smith</b></span></a>
   <span class="crumb">/ <b id="crumb"></b></span>
   <div class="grow"></div>
-  <a class="btn sm" id="editlink" href="#" title="Edit the shapes by hand in the editor">Edit</a>
   <span class="live" id="live" title="Connecting…"><span class="dot"></span><span class="label">Live</span></span>
 </header>
 <div class="viewer-layout">
@@ -44,6 +43,7 @@
         <button id="wire" title="Show the triangle mesh"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-wire"/></svg><span class="label">Mesh</span></button>
         <button id="rotate" title="Turn the model slowly"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-spin"/></svg><span class="label">Spin</span></button>
       </div>
+      <a class="btn" id="editlink" href="#" title="Edit the shapes by hand in the editor">Edit</a>
       <button id="commentmode" title="Then click the model to leave a comment for Claude"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-comment"/></svg><span class="label">Comment</span></button>
     </div>
     <div id="pins"></div>
@@ -84,12 +84,14 @@
         Tell Claude to look at the comments and it gets the exact point and the part of the recipe there.</p>
     </div>
     <div class="sec" id="paramsec" hidden>
-      <h2>Parameters</h2>
-      <div class="params" id="params"></div>
-      <div class="row" style="margin-top:10px">
-        <button class="primary" id="apply" disabled>Rebuild</button>
-        <span class="hint" id="paramhint"></span>
-      </div>
+      <details id="parambox">
+        <summary>Parameters</summary>
+        <div class="params" id="params" style="margin-top:8px"></div>
+        <div class="row" style="margin-top:10px">
+          <button class="primary" id="apply" disabled>Rebuild</button>
+          <span class="hint" id="paramhint"></span>
+        </div>
+      </details>
     </div>
     <div class="sec">
       <h2>History</h2>

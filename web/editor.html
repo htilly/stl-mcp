@@ -91,8 +91,8 @@
     <div class="toast" id="toast"></div>
   </div>
   <aside class="ed-inspector">
-    <h2>Selected</h2>
-    <div id="nosel" class="hint">Nothing selected. Click a shape.</div>
+    <h2 id="seltitle">Selected</h2>
+    <div id="nosel" class="hint">Nothing selected. Click a shape; shift-click adds more.</div>
     <div id="sel" hidden>
       <input id="name" class="title-input" placeholder="Name" aria-label="Name" style="width:100%;margin-bottom:var(--s3)">
       <div class="ed-grid" id="posgrid"><label></label><label>X</label><label>Y</label><label>Z</label>
@@ -100,6 +100,7 @@
         <label>Size</label><input type="number" step="1" min="0.1" data-f="size" data-i="0"><input type="number" step="1" min="0.1" data-f="size" data-i="1"><input type="number" step="1" min="0.1" data-f="size" data-i="2">
         <label>Rot</label><input type="number" step="15" data-f="rot" data-i="0"><input type="number" step="15" data-f="rot" data-i="1"><input type="number" step="15" data-f="rot" data-i="2">
       </div>
+      <p class="hint" id="multinote" hidden>Edits apply to every selected shape. Move and Rotate act on the group; to resize, edit the Size fields.</p>
       <label class="row"><input type="checkbox" id="hole"> Hole (cuts out of the solids)</label>
     </div>
     <div id="lockednote" class="hint" hidden>This part comes from a recipe the editor can't change (templates, expressions, arrays …). It stays as it is; add shapes or holes around it.</div>
