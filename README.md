@@ -100,13 +100,22 @@ Instead of saying *"look at the comments"*, run `tools/stl_watch.py watch` as a 
 Claude Code session. It follows the server's `/api/events` stream and prints one
 `NEW_COMMENT model=<id> open=<n> url=...` line for each new open comment, which wakes Claude, who
 reads it (`tools/stl_watch.py comments`) and answers it with `update_model(..., resolves=[...])`.
+Claude can not be woken by the server on its own (connecting claude.ai does not start this), so this
+watcher is what makes the reaction instant.
 ```
 export STL_MCP_URL=https://your-server          # default: https://stl.tilly.se
-export STL_MCP_TOKEN=...                        # or store it once in the macOS keychain:
-security add-generic-password -a "$USER" -s stl-mcp-token -U -w
+python3 tools/stl_watch.py login                # once: sign in in the browser, like connecting claude.ai
 python3 tools/stl_watch.py watch
 ```
-The script needs only the standard library and never prints the token. It runs while that session
+`login` runs the server's normal OAuth consent flow (the same one claude.ai uses): it opens your
+browser, you sign in and press **Allow**, and the watcher then acts as that account and sees exactly
+its models and comments. The refresh token is kept in `~/.config/stl-watch/oauth.json` (mode 0600)
+and renewed automatically. If it is revoked (the account's *Connected apps* list, or "log out
+everywhere") or unused for 90 days, `watch` exits with `WATCH_STOPPED`; run `login` again.
+Use `STL_MCP_TOKEN` (or the keychain item `stl-mcp-token`) to authenticate with the server's
+`MCP_TOKEN` instead; it overrides `login` and sees everything.
+
+The script needs only the standard library and never prints a token. It runs while that session
 is open; comments made while nothing is watching simply wait.
 
 ## Running
