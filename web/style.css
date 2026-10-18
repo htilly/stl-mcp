@@ -202,6 +202,7 @@ button.on { background: var(--layout-wash); border-color: var(--layout); color: 
 .hint { color: var(--scribe); font-size: var(--t-sm); }
 .warn { color: var(--fault); font-size: var(--t-sm); display: flex; gap: 6px; align-items: flex-start; }
 .warn .i { margin-top: 1px; }
+.warn .fixbtn { margin-left: auto; flex: none; }
 details summary { cursor: pointer; color: var(--scribe); font-size: var(--t-sm); }
 details summary:hover { color: var(--graphite); }
 

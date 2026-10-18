@@ -21,11 +21,18 @@ export async function api(path, opts = {}) {
 // whenever the page becomes visible again.
 export function subscribe(cb, statusEl) {
   let es, last = null, retry;
+  const setStatus = (on) => {
+    if (!statusEl) return;
+    statusEl.classList.toggle("on", on);
+    statusEl.title = on
+      ? "Connected: this page updates automatically when Claude changes something"
+      : "Connection lost, retrying. Changes will not appear until it is back (reload if it persists)";
+  };
   const connect = () => {
     clearTimeout(retry);
     es?.close();
     es = new EventSource("/api/events");
-    es.onopen = () => statusEl?.classList.add("on");
+    es.onopen = () => setStatus(true);
     es.onmessage = (e) => {
       const d = JSON.parse(e.data);
       const before = last;
@@ -35,7 +42,7 @@ export function subscribe(cb, statusEl) {
       else if (d.revision !== before) cb({ revision: d.revision, resync: true });  // hello after a gap
     };
     es.onerror = () => {
-      statusEl?.classList.remove("on");
+      setStatus(false);
       es.close();
       retry = setTimeout(connect, 3000);
     };
@@ -61,9 +68,11 @@ export const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => (
 export const PART_COLORS = ["#4f8cff", "#ff9a3c", "#5ac878", "#e65a78", "#aa78ff", "#3cc8d2"];
 
 // Print-check warnings of one part ({warnings: [{severity, message}]}); older versions only have `watertight`.
-export function warnHtml(p) {
+// With `part` each warning gets a Fix button (data-part / data-i) that the page wires up.
+export function warnHtml(p, part) {
   const ws = p.warnings ?? (p.watertight ? [] : [{ message: "not watertight - may cause problems in the slicer" }]);
-  return ws.map((w) => `<div class="warn" title="${esc(w.code ?? "")}">${icon("warning", "sm")}<span>${esc(w.message)}</span></div>`).join("");
+  return ws.map((w, i) => `<div class="warn" title="${esc(w.code ?? "")}">${icon("warning", "sm")}<span>${esc(w.message)}</span>${
+    part ? `<button class="btn sm fixbtn" data-part="${esc(part)}" data-i="${i}" title="Ask Claude to fix this">Fix</button>` : ""}</div>`).join("");
 }
 
 // ---- passkeys (WebAuthn). The server sends options as JSON with base64url binaries.
