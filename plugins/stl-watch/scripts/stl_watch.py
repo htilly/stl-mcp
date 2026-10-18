@@ -19,6 +19,8 @@ Configuration (nothing is ever printed):
   STL_MCP_URL    server base URL, default https://stl.tilly.se
   STL_MCP_TOKEN  optional, overrides `login`: the server's MCP_TOKEN (admin, sees everything).
                  If unset and not signed in, the macOS keychain item "stl-mcp-token" is tried.
+                 Both are only used when STL_MCP_URL is set too, so a token for your own server
+                 is never sent to the default one.
                  Add that once, with a hidden prompt:
                    security add-generic-password -a "$USER" -s stl-mcp-token -U -w
 """
@@ -39,6 +41,7 @@ import webbrowser
 from pathlib import Path
 
 BASE = os.environ.get("STL_MCP_URL", "https://stl.tilly.se").rstrip("/")
+URL_SET = bool(os.environ.get("STL_MCP_URL", "").strip())
 
 
 CREDENTIALS = Path(os.environ.get("STL_WATCH_CREDENTIALS",
@@ -157,12 +160,14 @@ def cmd_login():
 
 
 def find_token() -> str | None:
-    """The first credential found (env, `login`, macOS keychain), or None. Never exits."""
+    """The first credential found (env, `login`, macOS keychain), or None. Never exits.
+    A token from the environment or keychain is only used with an explicit STL_MCP_URL: it is
+    a server's own MCP_TOKEN and must not go to the default server by accident."""
     t = os.environ.get("STL_MCP_TOKEN", "").strip()
-    if t:
+    if t and URL_SET:
         return t
     t = oauth_token()
-    if t:
+    if t or not URL_SET:
         return t
     try:
         r = subprocess.run(["security", "find-generic-password", "-s", "stl-mcp-token", "-w"],

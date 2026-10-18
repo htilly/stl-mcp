@@ -212,6 +212,9 @@ docker compose up -d --build
 ```
 The compose file starts Postgres next to the server; database migrations run at startup.
 Without Docker: `pip install -r requirements.txt && DATABASE_URL=postgresql://... MCP_TOKEN=... python server.py`
+(it listens on all interfaces with `MCP_TOKEN`, on `127.0.0.1` without; `HOST` overrides).
+Dependencies are pinned in `requirements.txt` to what the production image runs: bump them on
+purpose, with the tests.
 
 The container only listens on `127.0.0.1:8765`. Set `BIND=0.0.0.0` to expose the port directly,
 or set `DOMAIN` and run `docker compose --profile caddy up -d` for automatic HTTPS.
@@ -487,18 +490,39 @@ or unlink providers; the last way to log in cannot be removed.
 Always set `MCP_TOKEN` and put the server behind HTTPS. The web interface requires a login
 (passkey or token, kept as a signed session cookie for 90 days) unless `UI_PUBLIC=1`, which makes it readable by everyone while changes still require a token.
 `FILES_PUBLIC=1` only makes the STL links clickable without a token (model ids are guessable); for
-anonymous visitors, `UI_PUBLIC` and `FILES_PUBLIC` cover the admin's library only. Keep
-`ALLOW_SCRIPT` off if the server is reachable from outside. `/upload/*` always requires a token when
-`MCP_TOKEN` is set. The CSG spec is safe to let Claude write, and so is OpenSCAD code (it is
-checked and sandboxed, see [OpenSCAD models](#openscad-models)).
+anonymous visitors, `UI_PUBLIC` and `FILES_PUBLIC` cover the bootstrap admin's own models only,
+never other users'. Keep `ALLOW_SCRIPT` off if the server is reachable from outside; script models
+run with an empty environment, so they cannot read `MCP_TOKEN` or `DATABASE_URL`. `/upload/*`
+always requires a token when `MCP_TOKEN` is set. The CSG spec is safe to let Claude write: builds
+are capped (expression size, numbers up to 1e12, at most 5 million triangles), and imports refuse
+zip files that unpack to more than `MAX_UNZIPPED_MB` (200) or meshes over `MAX_IMPORT_FACES`.
+OpenSCAD code is safe too (it is checked and sandboxed, see [OpenSCAD models](#openscad-models)).
 
 Every login belongs to a user. `MCP_TOKEN` logs in as the bootstrap admin; without it set, every
-request runs as that admin (local single-user mode). Sessions are random ids stored server side
-for 90 days, so logging out or disabling a user takes effect at once. OAuth access tokens live
+request runs as that admin (local single-user mode), so the server then listens on `127.0.0.1`
+only, accepts only requests addressed to `localhost` or `PUBLIC_URL` (no DNS rebinding), and
+refuses to start with `SIGNUP`, `UI_PUBLIC`, `FILES_PUBLIC` or `ALLOW_SCRIPT`. `?token=<MCP_TOKEN>`
+is only a login link for pages: it works on a page load (and is swapped for a session cookie at
+once), never for API writes or `/mcp`.
+
+Personal tokens and connected apps (OAuth) reach `/mcp` and the model library only. Account
+settings, passkeys, tokens, account deletion and the admin pages need a browser session (or the
+`MCP_TOKEN` itself), so an app you approve cannot mint tokens, delete your account or manage
+users. Sessions are random ids stored server side for 90 days, and stop working after 30 days
+without use; logging out or disabling a user takes effect at once. OAuth access tokens live
 24 h and refresh tokens 90 days (rotated on every use). Sessions and tokens are stored only as
 sha256 hashes, next to the passkeys' public keys, in Postgres.
 Client registration is open (as MCP requires), but nothing gets a token without your approval
-on the consent page, which shows where the app will be sent back to.
+on the consent page, which shows where the app will be sent back to. Sign-in starts (passkey,
+Google/GitHub/Apple, OAuth authorize and registration) are limited per client IP
+(`AUTH_REQUESTS_PER_MINUTE`, default 30), and a Google/GitHub/Apple sign-in only completes in the
+browser that started it.
+
+Pages are sent with a Content-Security-Policy, `X-Frame-Options: DENY`, `nosniff` and
+`Referrer-Policy: same-origin` (plus HSTS on https). Security events (failed logins, refused
+tokens, tokens created or deleted, connected apps, role changes and account deletions) are logged
+as JSON lines on the `autosmith.security` logger, without secrets. The container runs as an
+unprivileged user; on first start it takes over ownership of an existing data volume.
 
 three.js (MIT) is shipped locally from `web/vendor/three`, so the interface needs no CDN.
 The DejaVu Sans font (free license, see `fonts/LICENSE`) is used for the text template.

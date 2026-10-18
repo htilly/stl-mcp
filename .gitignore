@@ -16,3 +16,6 @@ render_test.png
 
 # local OpenSCAD libraries (BOSL2); the Docker image bundles its own
 openscad-libs/
+
+# security review output (repo-security-review skill)
+.security-review/

@@ -531,7 +531,7 @@ def test_preview_png_is_rendered_then_cached(client, out_dir):
 def test_api_events_streams_initial_and_changes():
     class Req:
         calls = 0
-        state = type("State", (), {"user": None})()  # anonymous: follows the admin's library
+        state = type("State", (), {"user": None})()  # anonymous: follows the admin's own models
 
         async def is_disconnected(self):
             return False
@@ -540,7 +540,7 @@ def test_api_events_streams_initial_and_changes():
         resp = await server.api_events(Req())
         assert resp.media_type == "text/event-stream"
         first = await resp.body_iterator.__anext__()
-        server.store._bump("zzz", None)
+        server.store._bump("zzz", server._admin()["id"])
         second = await resp.body_iterator.__anext__()
         await resp.body_iterator.aclose()
         return first, second

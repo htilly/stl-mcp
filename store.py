@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -70,8 +71,11 @@ def _build_script(p, allow: bool):
             "\nif 'result' in dir():\n    parts = {'model': result}\n"
             "elif isinstance(parts, list):\n    parts = {'model': g.union(parts)}\n"
             f"for k, m in parts.items():\n    m.export({td!r} + '/out_' + k + '.stl')\n")
+        # A bare environment: the script must not see DATABASE_URL, MCP_TOKEN or SSO secrets.
+        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": td, "TMPDIR": td,
+               "LANG": "C.UTF-8"}
         r = subprocess.run([sys.executable, "-I", str(script)], capture_output=True, text=True,
-                           timeout=120, cwd=td)
+                           timeout=120, cwd=td, env=env)
         if r.returncode != 0:
             raise RuntimeError(r.stderr[-1500:])
         return {f.stem[4:]: trimesh.load(f) for f in sorted(Path(td).glob("out_*.stl"))}

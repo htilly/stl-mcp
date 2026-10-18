@@ -43,6 +43,9 @@ def db(test_db, monkeypatch):
     test_db.execute(f"TRUNCATE {TABLES} CASCADE")
     monkeypatch.setattr(server, "db", test_db)
     monkeypatch.setattr(server.oauth, "state", AuthState(test_db))
+    # TestClient talks to "testserver"; in local mode only local hosts are accepted.
+    monkeypatch.setattr(server, "LOCAL_HOSTS", server.LOCAL_HOSTS + ("testserver",))
+    monkeypatch.setattr(server, "public_hits", server.RateLimiter(server.AUTH_REQUESTS_PER_MINUTE, 60))
     return test_db
 
 
