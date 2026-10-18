@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 from starlette.testclient import TestClient
 
+import auth
 import server
 
 BOX = {"root": {"shape": "box", "size": [20, 20, 10]}}
@@ -109,3 +110,40 @@ def test_users_page_is_an_admin_tab(world):
     assert 'href="/admin/users" aria-current="page"' in page and "/api/admin/users" in page
     for other in ("/admin", "/admin/design"):
         assert 'href="/admin/users"' in world.client.get(other).text
+
+
+def test_login_tracking_shows_country_logins_and_time(world, monkeypatch):
+    st = server.oauth.state
+    raw = st.create_session(world.joe["id"], country="SE", user_agent="pytest")
+    st.create_session(world.joe["id"], country="DE")
+    st.db.execute("UPDATE login_events SET at = at - 600 WHERE country = 'SE'")
+    st.db.execute("UPDATE sessions SET last_seen = last_seen - 7200 WHERE hash = %s",
+                  (auth._hash(raw),))
+    joe = {u["display_name"]: u for u in world.client.get("/api/admin/users").json()["users"]}["Joe"]
+    assert joe["logins"] == 2 and joe["countries"] == ["DE", "SE"] and joe["seconds"] >= 600
+    logins = world.client.get(f"/api/admin/users/{world.joe['id']}/logins").json()["logins"]
+    assert [r["country"] for r in logins] == ["DE", "SE"]
+
+
+def test_country_comes_from_cloudflare_header_only_when_enabled(monkeypatch):
+    req = SimpleNamespace(headers={"cf-ipcountry": "se"}, client=None)
+    monkeypatch.setattr(server, "GEOIP_DB", "")
+    monkeypatch.setattr(server, "CF_COUNTRY", True)
+    assert server._country(req) == "SE"
+    req.headers["cf-ipcountry"] = "XX"
+    assert server._country(req) is None
+    monkeypatch.setattr(server, "CF_COUNTRY", False)  # not behind Cloudflare: the header is spoofable
+    req.headers["cf-ipcountry"] = "SE"
+    assert server._country(req) is None
+
+
+def test_old_login_events_are_purged(world, monkeypatch):
+    st = server.oauth.state
+    st.create_session(world.joe["id"], country="SE")
+    st.db.execute("UPDATE login_events SET at = at - %s", (auth.LOGIN_HISTORY + 60,))
+    st.create_session(world.joe["id"], country="DE")
+    assert [r["country"] for r in st.recent_logins(world.joe["id"])] == ["DE"]
+
+
+def test_login_history_is_admin_only(world):
+    assert as_user(world.joe).get(f"/api/admin/users/{world.joe['id']}/logins").status_code == 403

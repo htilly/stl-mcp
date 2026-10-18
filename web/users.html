@@ -38,13 +38,28 @@ import { api, ago, esc } from "/static/common.js";
 const $ = (id) => document.getElementById(id);
 const say = (t, err) => { $("msg").textContent = t; $("msg").className = "msg" + (err ? " err" : ""); };
 let users = [], me = null;
+const history = new Map();  // user id -> recent logins, for the users whose list is open
+
+const flag = (cc) => String.fromCodePoint(...[...cc.toUpperCase()].map((c) => 127397 + c.charCodeAt(0)));
+const country = (cc) => {
+  try { return `${flag(cc)} ${new Intl.DisplayNames(["en"], { type: "region" }).of(cc.toUpperCase())}`; }
+  catch { return cc; }
+};
+const dur = (s) => {
+  if (s < 60) return s ? "<1 min" : "0";
+  const m = Math.round(s / 60);
+  return m < 60 ? `${m} min` : m < 2880 ? `${(m / 60).toFixed(1).replace(/\.0$/, "")} h` : `${Math.round(m / 1440)} days`;
+};
 
 function draw() {
   const term = $("q").value.trim().toLowerCase();
   const list = users.filter((u) => !term || `${u.display_name} ${u.email || ""}`.toLowerCase().includes(term));
   const admins = users.filter((u) => u.role === "admin").length;
+  const byCountry = {};
+  users.forEach((u) => u.countries.slice(0, 1).forEach((c) => { byCountry[c] = (byCountry[c] || 0) + 1; }));
+  const top = Object.entries(byCountry).sort((a, b) => b[1] - a[1]).map(([c, n]) => `${country(c)} ${n}`).join(" · ");
   $("summary").textContent = `${users.length} users, ${admins} admin${admins === 1 ? "" : "s"}. ` +
-    (signup ? "Signup is open." : "Signup is closed (SIGNUP=0).");
+    (signup ? "Signup is open." : "Signup is closed (SIGNUP=0).") + (top ? ` Last login from: ${top}.` : "");
   $("users").innerHTML = list.map((u) => {
     const self = me && u.id === me.id;
     const locked = u.bootstrap || self;
@@ -62,17 +77,31 @@ function draw() {
         <div><dt>Storage</dt><dd>${u.disk_mb} MB</dd></div>
         <div><dt>Logs in with</dt><dd title="${esc(ways)}">${esc(ways)}</dd></div>
         <div><dt>Apps · tokens</dt><dd>${u.apps} · ${u.tokens}</dd></div>
+        <div><dt>Logins</dt><dd>${u.logins}</dd></div>
+        <div><dt>Time logged in</dt><dd title="Sum of login to last activity, approximate">${dur(u.seconds)}</dd></div>
+        <div><dt>Country</dt><dd title="${esc(u.countries.map(country).join(", "))}">${u.countries.length ? esc(u.countries.map(country).join(", ")) : "unknown"}</dd></div>
       </dl>
       <div class="row acts">
         <button class="sm" data-act="role" data-role="${u.role === "admin" ? "member" : "admin"}" ${u.role === "admin" && locked ? "disabled" : ""}>
           ${u.role === "admin" ? "Make member" : "Make admin"}</button>
         <button class="sm" data-act="${u.disabled ? "enable" : "disable"}" ${locked ? "disabled" : ""}>${u.disabled ? "Enable" : "Disable"}</button>
         <button class="sm" data-act="logout" title="End all sessions and revoke connected apps and tokens">Log out everywhere</button>
+        <button class="sm" data-act="logins" aria-expanded="${history.has(u.id)}" ${u.logins ? "" : "disabled"}>${history.has(u.id) ? "Hide logins" : "Recent logins"}</button>
         <div class="grow"></div>
         <button class="sm danger" data-act="delete" ${locked ? "disabled" : ""}>Delete</button>
-      </div></section>`;
+      </div>${history.has(u.id) ? logins(history.get(u.id)) : ""}</section>`;
   }).join("") || `<p class="msg">No users match.</p>`;
 }
+
+function logins(rows) {
+  return `<ul class="help logins">${rows.map((r) => `<li>${ago(r.at)} · ${r.country ? esc(country(r.country)) : "unknown country"}
+    · ${dur(Math.round(r.last_seen - r.at))} · <span title="${esc(r.user_agent)}">${esc(browser(r.user_agent))}</span></li>`).join("")}</ul>`;
+}
+const browser = (ua) => {
+  const b = /Edg\//.test(ua) ? "Edge" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "";
+  const os = /iPhone|iPad/.test(ua) ? "iOS" : /Android/.test(ua) ? "Android" : /Mac OS X/.test(ua) ? "macOS" : /Windows/.test(ua) ? "Windows" : /Linux/.test(ua) ? "Linux" : "";
+  return [b, os].filter(Boolean).join(" on ") || ua || "unknown browser";
+};
 
 let signup = false;
 async function load() {
@@ -93,6 +122,11 @@ $("users").addEventListener("click", async (e) => {
   const u = users.find((x) => x.id === id);
   const act = b.dataset.act;
   try {
+    if (act === "logins") {
+      if (history.has(id)) history.delete(id);
+      else history.set(id, (await api(`/api/admin/users/${encodeURIComponent(id)}/logins`)).logins);
+      return draw();
+    }
     if (act === "delete") {
       const typed = prompt(`Delete ${u.display_name || "this user"} with all ${u.models} models and files? Type "delete" to confirm.`);
       if (typed !== "delete") return;

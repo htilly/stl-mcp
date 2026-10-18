@@ -15,3 +15,4 @@ httpx==0.28.1
 webauthn==3.0.1
 psycopg[binary,pool]==3.3.6
 psycopg-pool==3.3.3
+maxminddb==3.2.0
