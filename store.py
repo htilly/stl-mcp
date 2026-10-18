@@ -24,6 +24,7 @@ import trimesh
 
 import csg
 import geometry as g
+import printcheck
 
 MAX_VERSIONS = 50  # older versions' STL files are pruned (the recipe is kept)
 
@@ -158,6 +159,7 @@ class Store:
         self.dir = Path(root) / "models"
         self.dir.mkdir(parents=True, exist_ok=True)
         self.allow_script = allow_script
+        self.settings = printcheck.Settings(Path(root) / "settings.json")
         self.lock = threading.RLock()
         self.revision = 0          # incremented on every change (the web UI polls via SSE)
         self.last_changed: str | None = None
@@ -209,7 +211,8 @@ class Store:
         for pname, mesh in parts.items():
             fname = f"{slug(pname)}.stl"
             mesh.export(vdir / fname)
-            pinfo[pname] = {"file": f"v{ver}/{fname}", **_stats(mesh)}
+            pinfo[pname] = {"file": f"v{ver}/{fname}", **_stats(mesh),
+                            "warnings": printcheck.check(mesh, self.settings.get())}
         v = {"version": ver, "kind": kind, "params": params, "note": note or "",
              "created": time.time(), "build_seconds": round(time.time() - t0, 2), "parts": pinfo}
         m["versions"].append(v)
@@ -271,6 +274,24 @@ class Store:
             m["updated"] = time.time()
             self._write(m)
             return m
+
+    def recheck(self, mid: str | None = None) -> int:
+        """Re-run the print checks on the current version of one model (or all) with the current
+        settings, without creating a version. Returns the number of models updated."""
+        n = 0
+        with self.lock:
+            for m in ([self._read(mid)] if mid else self.list()):
+                cur = self.current(m)
+                if cur.get("pruned"):
+                    continue
+                settings = self.settings.get()
+                for p in cur["parts"].values():
+                    path = self._path(m["id"]) / p["file"]
+                    if path.is_file():
+                        p["warnings"] = printcheck.check(trimesh.load(path, force="mesh"), settings)
+                self._write(m)
+                n += 1
+        return n
 
     def revert(self, mid: str, version: int) -> dict:
         with self.lock:

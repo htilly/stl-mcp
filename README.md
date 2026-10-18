@@ -147,6 +147,7 @@ python -m pytest
 | `list_models`, `revert_model`, `duplicate_model`, `delete_model` | |
 | `import_file` | imports STL/OBJ/GLB/PLY/OFF via `url` or `data_base64` (zip with obj+mtl is unpacked) |
 | `file_info` | dimensions, bounds, volume, number of loose parts |
+| `check_print` | re-run the print check on a library model or a standalone file with the current settings |
 | `modify_file` | scale, rotate, mirror, place, add/subtract shapes (e.g. screw holes), repair mesh, simplify |
 | `split_file` | splits a file into its loose parts |
 | `export_obj` | merges several STLs (including library ones, `<model_id>/v3/lid.stl`) into one colored OBJ (+ .mtl and .zip) |
@@ -228,6 +229,26 @@ Tinkercad has no public API, so exchange happens via files:
 
 Imported and modified files are standalone files in `STL_DIR` (`/files/<name>`). They do not show up
 in the web library.
+
+## Print check and admin settings
+Every build runs a fast, approximate print check per part. Problems are **warnings only** (nothing
+is blocked): they are returned to Claude as `print_warnings`, shown under each part in the 3D view
+and as a badge in the library.
+
+| check | warns when |
+|---|---|
+| watertight | open edges/holes, or inverted normals (critical) |
+| disconnected shells | one part consists of several unconnected pieces |
+| thin walls | material thinner than the minimum wall thickness over a noticeable area |
+| overhangs | too large a share of the surface overhangs more than the maximum angle |
+| build volume | the part does not fit the printer bed |
+
+Thresholds have sensible defaults (`printcheck.py`, `SCHEMA`) and can be changed at `/admin`
+(token required, even with `UI_PUBLIC=1`): per-check switches, minimum wall (1.2 mm), overhang angle
+(45°) and share (10 %), and the build volume (220 × 220 × 250 mm). Overrides are stored in
+`STL_DIR/settings.json`. New settings apply to new builds; **Re-check all models** on the admin page
+(or `POST /api/recheck`) refreshes existing models without creating versions.
+The thin-wall and overhang checks are sampling-based estimates, not a slicer.
 
 ## Storage
 `STL_DIR/models/<id>/model.json` (recipe and history) and `v<N>/<part>.stl`. The 50 most recent

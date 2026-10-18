@@ -59,3 +59,9 @@ export const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => (
   { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 export const PART_COLORS = ["#4f8cff", "#ff9a3c", "#5ac878", "#e65a78", "#aa78ff", "#3cc8d2"];
+
+// Print-check warnings of one part ({warnings: [{severity, message}]}); older versions only have `watertight`.
+export function warnHtml(p) {
+  const ws = p.warnings ?? (p.watertight ? [] : [{ message: "not watertight - may cause problems in the slicer" }]);
+  return ws.map((w) => `<div class="warn" title="${esc(w.code ?? "")}">⚠ ${esc(w.message)}</div>`).join("");
+}

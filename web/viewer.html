@@ -111,7 +111,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "/static/vendor/three/OrbitControls.js";
 import { STLLoader } from "/static/vendor/three/STLLoader.js";
-import { api, subscribe, ago, fmt, esc, PART_COLORS } from "/static/common.js";
+import { api, subscribe, ago, fmt, esc, warnHtml, PART_COLORS } from "/static/common.js";
 
 const id = decodeURIComponent(location.pathname.split("/").pop());
 const $ = (s) => document.getElementById(s);
@@ -285,7 +285,7 @@ function renderSide() {
             style="background:${PART_COLORS[i % PART_COLORS.length]}"></span>
       <div><div>${esc(name)}</div>
         <div class="dims">${fmt(p.extents_mm)} · ${p.volume_cm3} cm³</div>
-        ${p.watertight ? "" : '<div class="warn">⚠ not watertight – may cause problems in the slicer</div>'}</div>
+        ${warnHtml(p)}</div>
       <a class="btn" href="${p.url}" download>STL</a>
     </div>`).join("");
   document.querySelectorAll(".swatch").forEach((s) => s.onclick = () => {
