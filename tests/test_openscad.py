@@ -55,6 +55,71 @@ def test_check_ignores_strings_and_comments(code):
     assert check(code) == []
 
 
+def test_check_rejects_library_wrappers_of_file_readers(tmp_path, monkeypatch):
+    """A library module that calls a file reader (BOSL2's builtins.scad `_surface(file)`) is as
+    forbidden as the reader itself, also through further wrappers and function literals."""
+    lib = tmp_path / "BOSL2"
+    lib.mkdir()
+    (lib / "builtins.scad").write_text(
+        "// surface(file) in a comment is not a call\n"
+        "module _surface(file,center,convexity,invert)\n"
+        "  if ($children>0) cube(1) children();\n"
+        "  else surface(file=file,center=center,convexity=convexity,invert=invert);\n"
+        "module wrap(f) { translate([1, 0, 0]) _surface(f); }\n"
+        "function reader(f) = dxf_dim(file=f, name=\"w\");\n"
+        "via = function(f) reader(f);\n"
+        "module fine(surface=1) cube(surface);\n"
+        "function also_fine(x) = x * 2;\n")
+    monkeypatch.setattr(openscad, "LIBS", tmp_path)
+    assert openscad._forbidden(tmp_path) == {
+        "import", "surface", "dxf_dim", "dxf_cross", "_surface", "wrap", "reader", "via"}
+    for code in ('use <BOSL2/builtins.scad>\n_surface(file="/etc/hostname");',
+                 'use <BOSL2/builtins.scad> wrap("/etc/hostname");',
+                 'include <BOSL2/builtins.scad> x = via("a.dxf");'):
+        with pytest.raises(OpenSCADError, match="not allowed"):
+            check(code)
+    assert check("use <BOSL2/builtins.scad>\nfine(); echo(also_fine(2));") == ["BOSL2/builtins.scad"]
+
+
+@needs_bosl2
+def test_bundled_bosl2_surface_wrapper_is_blocked():
+    with pytest.raises(OpenSCADError, match="_surface"):
+        check('use <BOSL2/builtins.scad>\n_surface(file="/etc/hostname");')
+
+
+def test_builds_are_limited_server_wide(monkeypatch):
+    """No more than CONCURRENCY builds at once: one that cannot start in time fails as busy."""
+    monkeypatch.setattr(openscad, "available", lambda: True)
+    monkeypatch.setattr(openscad, "TIMEOUT", 0.05)
+    monkeypatch.setattr(openscad, "_slots", openscad.threading.BoundedSemaphore(1))
+    monkeypatch.setattr(openscad, "_build", lambda *a: {"model": "built"})
+    assert openscad.build({"code": "cube(1);"}) == {"model": "built"}   # the slot is given back
+    openscad._slots.acquire()
+    try:
+        with pytest.raises(OpenSCADError, match="busy"):
+            openscad.build({"code": "cube(1);"})
+    finally:
+        openscad._slots.release()
+
+
+def test_resource_limits_apply_where_supported(monkeypatch):
+    """The rlimits are not Linux-only any more; a limit the OS rejects is skipped only off Linux."""
+    import resource
+    calls = []
+
+    def setrlimit(lim, val):
+        calls.append(lim)
+        if lim == resource.RLIMIT_AS:
+            raise ValueError("not supported")
+    monkeypatch.setattr(resource, "setrlimit", setrlimit)
+    monkeypatch.setattr(openscad.sys, "platform", "darwin")
+    openscad._limits(10)()
+    assert resource.RLIMIT_CPU in calls and resource.RLIMIT_FSIZE in calls
+    monkeypatch.setattr(openscad.sys, "platform", "linux")
+    with pytest.raises(ValueError):
+        openscad._limits(10)()
+
+
 @needs_bosl2
 def test_check_allows_bosl2():
     assert check("include <BOSL2/std.scad>\nuse<BOSL2/threading.scad>") == [
