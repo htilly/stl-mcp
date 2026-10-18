@@ -49,6 +49,9 @@ def primitive(shape: str, **p) -> trimesh.Trimesh:
 WALLS = ("left", "right", "front", "back")
 
 
+LID_MIN_FLOOR = 1.2   # minimum material kept around the lid screw counterbores (mm)
+
+
 def enclosure(inner_x, inner_y, inner_z, wall=2.4, floor=2.4, lid_t=2.4,
               screws=True, post_d=7.0, pilot_d=2.6, lid_hole_d=3.4, clearance=0.3,
               standoffs=None, cutouts=None, lid_holes=None, lid_slots=None):
@@ -110,9 +113,15 @@ def enclosure(inner_x, inner_y, inner_z, wall=2.4, floor=2.4, lid_t=2.4,
                     lip_h + 1, wall + clearance + lip_t, wall + clearance + lip_t, lid_t - 0.5)
     lid = union([lid, diff(lip_outer, [lip_inner])])
     cuts = []
+    # Counterbore opens on the outer face (z=0), the lip points into the body. It leaves at least
+    # LID_MIN_FLOOR of material above it, stays LID_MIN_FLOOR inside the lid outline, and is skipped
+    # when the lid is too thin to hold one.
+    cb_depth = min(1.6, lid_t - LID_MIN_FLOOR)
+    cb_r = min(3.2, wall + post_d / 2 - LID_MIN_FLOOR)
     for px, py in posts:
-        cuts += [cyl(lid_hole_d / 2, lid_t + lip_h + 1, px, py, -0.5),
-                 cyl(3.2, 1.6, px, py, lid_t - 1.4)]
+        cuts.append(cyl(lid_hole_d / 2, lid_t + lip_h + 1, px, py, -0.5))
+        if cb_depth >= 0.8 and cb_r > lid_hole_d / 2 + 0.4:
+            cuts.append(cyl(cb_r, cb_depth + 0.5, px, py, -0.5))
     for h in lid_holes:
         cuts.append(cyl(h["d"] / 2, lid_t + lip_h + 1, wall + h["x"], wall + h["y"], -0.5))
     for s in lid_slots:
