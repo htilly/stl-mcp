@@ -72,6 +72,20 @@ $("tok").open = admin;
 $("nopk").hidden = supported;
 $("pk").hidden = !supported;
 
+// sign in with Google / Apple / GitHub: comes back to this same address
+const here = new URL(location.href);
+const ssoError = here.searchParams.get("sso_error");
+here.searchParams.delete("sso_error");
+if (ssoError) {
+  err.textContent = ssoError;
+  err.hidden = false;
+  history.replaceState(null, "", here.pathname + here.search);
+}
+const next = encodeURIComponent(here.pathname + here.search);
+$("sso").innerHTML = (cfg.providers || []).map((p) =>
+  `<a class="btn big" href="/auth/sso/${p.id}/start?next=${next}">Continue with ${p.label}</a>`).join("");
+$("sso").hidden = !(cfg.providers || []).length;
+
 $("pkbtn").addEventListener("click", async () => {
   err.hidden = true;
   try { await passkeyLogin(); done(); } catch (e) { show(e); }

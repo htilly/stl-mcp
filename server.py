@@ -80,6 +80,7 @@ import csg
 import geometry as g
 import printcheck
 import render
+import sso
 from auth import (CHALLENGE_TTL, SCOPE, SESSION_TTL, AuthState, Expiring, OAuthProvider, RateLimiter,
                   verify_turnstile)
 from db import Database
@@ -626,6 +627,8 @@ SESSION_COOKIE = "stl_session"
 PASSKEY_LOGIN_PATHS = ("/auth/passkey/login/options", "/auth/passkey/login/verify")
 SIGNUP_PATHS = ("/auth/config", "/auth/signup/options", "/auth/signup/verify", "/privacy")
 signups = RateLimiter(SIGNUPS_PER_HOUR, 3600)
+SSO = sso.configured()
+sso_flows = Expiring(10 * 60)  # state -> {provider, nonce, verifier, next, link}
 OAUTH_PATHS = ("/authorize", "/token", "/register", "/revoke")
 
 
@@ -720,7 +723,7 @@ def _public_path(path: str, read: bool) -> bool:
     if _admin_path(path):
         return False  # admin is never public, not even with UI_PUBLIC
     return (path == "/health" or path.startswith("/static/") or path in PASSKEY_LOGIN_PATHS
-            or path in SIGNUP_PATHS
+            or path in SIGNUP_PATHS or path.startswith("/auth/sso/")
             or (bool(OAUTH_ROUTES) and (path in OAUTH_PATHS or path.startswith("/.well-known/oauth-")))
             or (FILES_PUBLIC and read and path.startswith(("/files/", "/f/")))
             or (UI_PUBLIC and read and (path == "/" or path.startswith("/m/")
@@ -857,6 +860,8 @@ async def api_auth(request):
     return JSONResponse({"user": _user_view(user),
                          "passkeys": [_passkey_view(p) for p in oauth.state.passkeys(user["id"])],
                          "tokens": oauth.state.personal_tokens(user["id"]),
+                         "identities": oauth.state.identities(user["id"]),
+                         "providers": _providers(),
                          "usage": await _run(Lib(user).usage),
                          "clients": oauth.state.clients(user["id"]) if OAUTH_ROUTES else [],
                          "oauth": bool(OAUTH_ROUTES), "mcp_url": f"{PUBLIC_URL}/mcp",
@@ -864,7 +869,13 @@ async def api_auth(request):
 
 
 async def api_auth_passkey(request):
-    if not oauth.state.delete_passkey(request.path_params["id"], _user(request)["id"]):
+    user, st = _user(request), oauth.state
+    mine = st.passkeys(user["id"])
+    if (not user["bootstrap"] and not st.identities(user["id"])
+            and [p["id"] for p in mine] == [request.path_params["id"]]):
+        return JSONResponse({"error": "this is your only way to log in - add another passkey or a "
+                                      "sign-in first"}, status_code=400)
+    if not st.delete_passkey(request.path_params["id"], user["id"]):
         return JSONResponse({"error": "no such passkey"}, status_code=404)
     return JSONResponse({"ok": True})
 
@@ -889,7 +900,11 @@ def _client_ip(request) -> str:
 async def auth_config(_):
     """What the login page offers."""
     return JSONResponse({"signup": SIGNUP, "turnstile_site_key": TURNSTILE_SITE_KEY if SIGNUP else "",
-                         "providers": []})
+                         "providers": _providers()})
+
+
+def _providers() -> list[dict]:
+    return [{"id": p.name, "label": p.label} for p in SSO.values()]
 
 
 async def signup_options(request):
@@ -942,6 +957,112 @@ async def signup_verify(request):
         return JSONResponse({"error": "this passkey already belongs to an account - log in instead"},
                             status_code=409)
     return _set_session(JSONResponse({"ok": True, "user": _user_view(user)}), user)
+
+
+# ---- sign in with Google, GitHub or Apple (see sso.py)
+
+def _safe_next(n: str) -> str:
+    """Only local paths: never an open redirect."""
+    return n if n.startswith("/") and not n.startswith(("//", "/\\")) else "/"
+
+
+def _with_error(path: str, msg: str) -> str:
+    return f"{path}{'&' if '?' in path else '?'}{urlencode({'sso_error': msg})}"
+
+
+def _sso_redirect_uri(name: str) -> str:
+    return f"{PUBLIC_URL}/auth/sso/{name}/callback"
+
+
+async def sso_start(request):
+    """/auth/sso/<provider>/start?next=/path - or &link=1 to add the sign-in to your account."""
+    p = SSO.get(request.path_params["provider"])
+    if not p:
+        return PlainTextResponse("not found", status_code=404)
+    nxt = _safe_next(request.query_params.get("next", "/"))
+    link = request.query_params.get("link") == "1"
+    user = request.state.user
+    if link and not user:
+        return RedirectResponse(nxt, status_code=303)
+    state, nonce = secrets.token_urlsafe(24), secrets.token_urlsafe(24)
+    verifier, challenge = sso.pkce()
+    sso_flows.put(state, {"provider": p.name, "nonce": nonce, "verifier": verifier, "next": nxt,
+                          "link": user["id"] if link else None})
+    return RedirectResponse(p.authorize(_sso_redirect_uri(p.name), state, nonce, challenge),
+                            status_code=303)
+
+
+def _sso_account(ident: sso.Identity, link: str | None, ip: str) -> tuple[dict | None, str]:
+    """Which account the identity signs in to (or is linked to). Returns (user, error)."""
+    st = oauth.state
+    label = SSO[ident.provider].label
+    owner = st.identity_user(ident.provider, ident.subject)
+    if link:
+        if owner and owner["id"] != link:
+            return None, f"this {label} account is already linked to another account"
+        if not owner:
+            st.add_identity(link, ident.provider, ident.subject, ident.email)
+            if ident.email:
+                st.set_email(link, ident.email)
+        return st.user(link), ""
+    if owner:
+        user = owner
+    elif ident.email and (match := st.user_by_email(ident.email)):
+        # a verified email that an account already has: the same person (emails only ever come
+        # from verified sign-ins or from ADMIN_EMAILS, never from what someone typed)
+        st.add_identity(match["id"], ident.provider, ident.subject, ident.email)
+        user = match
+    else:
+        if not SIGNUP:
+            return None, f"there is no account for this {label} sign-in"
+        if not signups.hit(ip):
+            return None, "too many new accounts from your network - try again later"
+        name = ident.name or (ident.email or "").split("@")[0] or f"{label} user"
+        user = st.create_user(name, ident.email if ident.email and not st.user_by_email(ident.email) else None)
+        st.add_identity(user["id"], ident.provider, ident.subject, ident.email)
+    if user["disabled"]:
+        return None, "this account is disabled"
+    if ident.email and ident.email.lower() in ADMIN_EMAILS and user["role"] != "admin":
+        st.set_role(user["id"], "admin")
+        user = st.user(user["id"])
+    return user, ""
+
+
+async def sso_callback(request):
+    name = request.path_params["provider"]
+    p = SSO.get(name)
+    if not p:
+        return PlainTextResponse("not found", status_code=404)
+    params = dict(await request.form()) if request.method == "POST" else dict(request.query_params)
+    flow = sso_flows.pop(str(params.get("state", "")))
+    if not flow or flow["provider"] != name:
+        return RedirectResponse(_with_error("/", "the sign-in expired - try again"), status_code=303)
+    nxt = flow["next"]
+    if params.get("error") or not params.get("code"):
+        return RedirectResponse(_with_error(nxt, f"{p.label} sign-in was cancelled"), status_code=303)
+    try:
+        ident = await _run(p.identity, str(params["code"]), _sso_redirect_uri(name), flow["nonce"],
+                           flow["verifier"], {k: str(v) for k, v in params.items()})
+    except (sso.SSOError, httpx.HTTPError, KeyError) as e:
+        return RedirectResponse(_with_error(nxt, f"{p.label} sign-in failed: {e}"), status_code=303)
+    user, error = await _run(_sso_account, ident, flow["link"], _client_ip(request))
+    if error:
+        return RedirectResponse(_with_error(nxt, error), status_code=303)
+    resp = RedirectResponse(nxt, status_code=303)
+    return resp if flow["link"] else _set_session(resp, user)
+
+
+async def api_auth_identity(request):
+    """DELETE: unlink a sign-in method, as long as another way in remains."""
+    user, provider = _user(request), request.path_params["provider"]
+    st = oauth.state
+    others = len(st.passkeys(user["id"])) + sum(i["provider"] != provider for i in st.identities(user["id"]))
+    if not user["bootstrap"] and others == 0:
+        return JSONResponse({"error": "add a passkey or another sign-in first, or you cannot log in"},
+                            status_code=400)
+    if not st.delete_identity(user["id"], provider):
+        return JSONResponse({"error": "not linked"}, status_code=404)
+    return JSONResponse({"ok": True})
 
 
 async def page_privacy(_):
@@ -1295,6 +1416,9 @@ app = Starlette(
         Route("/auth/signup/options", signup_options, methods=["POST"]),
         Route("/auth/signup/verify", signup_verify, methods=["POST"]),
         Route("/privacy", page_privacy),
+        Route("/auth/sso/{provider}/start", sso_start),
+        Route("/auth/sso/{provider}/callback", sso_callback, methods=["GET", "POST"]),
+        Route("/api/auth/identities/{provider}", api_auth_identity, methods=["DELETE"]),
         Route("/api/auth/me", api_auth_me, methods=["PATCH", "DELETE"]),
         Route("/api/auth/tokens", api_auth_tokens, methods=["POST"]),
         Route("/api/auth/tokens/{id}", api_auth_token, methods=["DELETE"]),

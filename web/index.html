@@ -55,6 +55,11 @@
       <button id="renamebtn">Save</button></div>
     <p class="hint" id="whoami" style="margin-top:8px"></p>
   </div>
+  <div class="sec" id="idsec" hidden>
+    <h2>Sign-in methods</h2>
+    <ul class="plain" id="idlist"></ul>
+    <div class="row" id="idlink"></div>
+  </div>
   <div class="sec">
     <h2>Passkeys</h2>
     <ul class="plain" id="pklist"></ul>
@@ -195,6 +200,15 @@ function renderAuth() {
     <span><b>${esc(c.name)}</b> <span class="hint">${esc((c.redirect_uris[0] || "").replace(/^(\w+:\/\/[^/]+).*/, "$1"))}, approved ${ago(c.last_authorized)}</span></span>
     <button class="danger sm" data-app="${esc(c.client_id)}">Disconnect</button></li>`).join("")
     || `<li class="hint">No apps connected.</li>`;
+  const linked = new Set(auth.identities.map((i) => i.provider));
+  const label = (id) => (auth.providers.find((p) => p.id === id) || { label: id }).label;
+  $("idsec").hidden = auth.providers.length === 0 && auth.identities.length === 0;
+  $("idlist").innerHTML = auth.identities.map((i) => `<li>
+    <span><b>${esc(label(i.provider))}</b> <span class="hint">${esc(i.email || "")}${i.email ? ", " : ""}linked ${ago(i.created)}</span></span>
+    <button class="danger sm" data-idp="${esc(i.provider)}">Unlink</button></li>`).join("")
+    || `<li class="hint">None linked yet.</li>`;
+  $("idlink").innerHTML = auth.providers.filter((p) => !linked.has(p.id)).map((p) =>
+    `<a class="btn sm" href="/auth/sso/${p.id}/start?link=1&next=%2F">Link ${esc(p.label)}</a>`).join("");
   $("toklist").innerHTML = auth.tokens.map((t) => `<li>
     <span><b>${esc(t.name)}</b> <span class="hint">created ${ago(t.created)}${t.last_used ? `, used ${ago(t.last_used)}` : ", never used"}</span></span>
     <button class="danger sm" data-tok="${esc(t.id)}">Revoke</button></li>`).join("")
@@ -245,7 +259,9 @@ $("renamebtn").addEventListener("click", async () => {
 $("pklist").addEventListener("click", async (e) => {
   const id = e.target.dataset.pk;
   if (!id || !confirm("Remove this passkey? You can no longer log in with it.")) return;
-  await api(`/api/auth/passkeys/${encodeURIComponent(id)}`, { method: "DELETE" });
+  try {
+    await api(`/api/auth/passkeys/${encodeURIComponent(id)}`, { method: "DELETE" });
+  } catch (err) { alert(err.message); }
   loadAuth();
 });
 $("applist").addEventListener("click", async (e) => {
@@ -266,6 +282,23 @@ $("tokadd").addEventListener("click", async () => {
 });
 $("copytok").addEventListener("click", (e) => copyText(e.target, newToken));
 $("copycmd").addEventListener("click", (e) => copyText(e.target, $("newtokcmd").textContent));
+$("idlist").addEventListener("click", async (e) => {
+  const id = e.target.dataset.idp;
+  if (!id || !confirm("Unlink this sign-in? You can link it again later.")) return;
+  try {
+    await api(`/api/auth/identities/${encodeURIComponent(id)}`, { method: "DELETE" });
+  } catch (err) { alert(err.message); }
+  loadAuth();
+});
+{  // coming back from linking a sign-in that failed
+  const u = new URL(location.href);
+  const msg = u.searchParams.get("sso_error");
+  if (msg) {
+    u.searchParams.delete("sso_error");
+    history.replaceState(null, "", u.pathname + u.search);
+    alert(msg);
+  }
+}
 $("toklist").addEventListener("click", async (e) => {
   const id = e.target.dataset.tok;
   if (!id || !confirm("Revoke this token? Apps using it stop working.")) return;

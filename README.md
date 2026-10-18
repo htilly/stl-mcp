@@ -317,6 +317,24 @@ tokens for clients that send a header.
 
 `SIGNUP=1` requires `MCP_TOKEN`; without it every visitor would be the admin.
 
+### Sign in with Google, GitHub or Apple
+Each provider appears on the login page once its settings are present (see `.env.example`). Register
+`https://<your-domain>/auth/sso/<provider>/callback` as the redirect URI with the provider:
+
+- **Google:** Google Cloud console → APIs & Services → Credentials → OAuth client ID (web
+  application). Scopes `openid email profile`; publish the consent screen for public use.
+- **GitHub:** Settings → Developer settings → OAuth Apps → New OAuth App.
+- **Apple:** needs an Apple Developer Program membership. Create an App ID with *Sign in with
+  Apple*, a Services ID (that is `APPLE_CLIENT_ID`) with your domain and the redirect URI, and a
+  key with *Sign in with Apple* (`APPLE_KEY_ID`, and the downloaded `.p8` as `APPLE_PRIVATE_KEY`).
+
+How a sign-in finds its account: an identity that is already linked logs in to its account; else a
+**verified** email equal to an account's email links to that account; else a new account is
+created (only with `SIGNUP=1`, within the per-IP limit). Emails are only ever taken from verified
+sign-ins or `ADMIN_EMAILS`, never typed in, so nobody can claim someone else's address in advance.
+A verified email in `ADMIN_EMAILS` makes the account an admin. In the account dialog users link
+or unlink providers; the last way to log in cannot be removed.
+
 ## Security
 Always set `MCP_TOKEN` and put the server behind HTTPS. The web interface requires a login
 (passkey or token, kept as a signed session cookie for 90 days) unless `UI_PUBLIC=1`, which makes it readable by everyone while changes still require a token.
