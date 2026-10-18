@@ -1249,7 +1249,13 @@ async def page_model(_):
     return FileResponse(WEB / "viewer.html")
 
 
+async def page_editor(_):
+    return FileResponse(WEB / "editor.html")
+
+
 async def api_models(request):
+    if request.method == "POST":
+        return await _create_blank(request)
     lib = _req_lib(request)
     out = []
     for m in lib.models.list():
@@ -1261,6 +1267,23 @@ async def api_models(request):
                     "parts": {n: {"url": f"/files/{m['id']}/{p['file']}",
                                   "extents_mm": p["extents_mm"]} for n, p in cur["parts"].items()}})
     return JSONResponse({"models": out, "revision": store.revision_for(lib.user)})
+
+
+BLANK_SPEC = {"vars": {}, "root": {"op": "union", "children": [
+    {"shape": "box", "size": [20, 20, 20], "center": True, "translate": [0, 0, 10]}]}}
+
+
+async def _create_blank(request):
+    """A new model for the web editor: one 20 mm cube to start from."""
+    lib = _req_lib(request)
+    try:
+        body = await request.json()
+        name = str(body.get("name") or "New model").strip()[:80] or "New model"
+        lib.ensure_room(new_model=True)
+        m = await _run(lib.models.create, name, "csg", BLANK_SPEC, "", "created in the web editor")
+        return JSONResponse({"ok": True, "id": m["id"]})
+    except Exception as e:  # noqa: BLE001 – the error is shown in the UI
+        return _err(e)
 
 
 async def api_model(request):
@@ -1469,7 +1492,8 @@ app = Starlette(
     routes=[
         Route("/", page_index),
         Route("/m/{id}", page_model),
-        Route("/api/models", api_models),
+        Route("/edit/{id}", page_editor),
+        Route("/api/models", api_models, methods=["GET", "POST"]),
         Route("/api/models/{id}", api_model, methods=["GET", "POST", "DELETE"]),
         Route("/api/models/{id}/preview.png", preview),
         Route("/api/events", api_events),

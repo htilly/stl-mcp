@@ -21,6 +21,7 @@
   <div class="grow lib-only"></div>
   <label class="search"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-search"/></svg>
     <input type="search" id="q" placeholder="Search models" autocomplete="off" aria-label="Search models"></label>
+  <button class="btn sm" id="newmodel" title="Build a new model by hand in the editor">New model</button>
   <span class="live" id="live" title="Connecting…"><span class="dot"></span><span class="label">Live</span></span>
   <a class="btn sm" id="donate" hidden target="_blank" rel="noopener noreferrer" title="Support autosmith with a donation (PayPal)"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-heart"/></svg>Donate</a>
   <a class="btn icon quiet" id="adminlink" hidden href="/admin" title="Admin: print-check settings and design system" aria-label="Admin"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-settings"/></svg></a>
@@ -137,6 +138,14 @@ import { api, subscribe, ago, fmt, esc, icon, copyText, passkeyRegister, passkey
 
 const grid = document.getElementById("grid");
 const q = document.getElementById("q");
+document.getElementById("newmodel").onclick = async () => {
+  const name = prompt("Name of the new model", "New model");
+  if (!name) return;
+  try {
+    const r = await api("/api/models", { method: "POST", body: { name } });
+    location.href = `/edit/${encodeURIComponent(r.id)}`;
+  } catch (e) { alert(e.message); }
+};
 let models = [];
 
 function render(flashId) {

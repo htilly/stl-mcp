@@ -25,6 +25,7 @@
   <a class="wordmark" href="/" title="Back to the library"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-mark"/></svg><span class="name">auto<b>smith</b></span></a>
   <span class="crumb">/ <b id="crumb"></b></span>
   <div class="grow"></div>
+  <a class="btn sm" id="editlink" href="#" title="Edit the shapes by hand in the editor">Edit</a>
   <span class="live" id="live" title="Connecting…"><span class="dot"></span><span class="label">Live</span></span>
 </header>
 <div class="viewer-layout">
@@ -130,6 +131,7 @@ import { STLLoader } from "/static/vendor/three/STLLoader.js";
 import { api, subscribe, ago, fmt, esc, icon, warnHtml, PART_COLORS } from "/static/common.js";
 
 const id = decodeURIComponent(location.pathname.split("/").pop());
+document.getElementById("editlink").href = `/edit/${encodeURIComponent(id)}`;
 const $ = (s) => document.getElementById(s);
 let model = null;          // latest model.json
 let viewVersion = null;    // version being shown
