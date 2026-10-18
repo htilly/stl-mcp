@@ -48,7 +48,7 @@ function draw() {
   $("users").innerHTML = list.map((u) => {
     const self = me && u.id === me.id;
     const locked = u.bootstrap || self;
-    const ways = [u.bootstrap ? "server token" : "", u.passkeys ? `${u.passkeys} passkey${u.passkeys === 1 ? "" : "s"} (${u.passkey_names.join(", ")})` : "",
+    const ways = [u.bootstrap ? "server token" : "", u.passkeys ? `${u.passkeys} passkey${u.passkeys === 1 ? "" : "s"} (${(u.passkey_names || []).join(", ")})` : "",
       ...u.providers].filter(Boolean).join(", ") || "no way to log in";
     return `<section class="group user${u.disabled ? " off" : ""}" data-id="${esc(u.id)}">
       <h2>${esc(u.display_name || "(no name)")}
