@@ -128,8 +128,8 @@
 
 <script type="module">
 import * as THREE from "three";
-import { OrbitControls } from "/static/vendor/three/OrbitControls.js";
-import { STLLoader } from "/static/vendor/three/STLLoader.js";
+import { createStage, loadSTL, spreadX } from "/static/stage.js";
+import { createComments } from "/static/comments.js";
 import { api, subscribe, ago, fmt, esc, icon, warnHtml, PART_COLORS } from "/static/common.js";
 
 const id = decodeURIComponent(location.pathname.split("/").pop());
@@ -142,47 +142,12 @@ const hidden = new Set();
 let spread = true, showEdges = true, wire = false;
 
 // ------------------------------------------------------------ three.js
-const stage = $("stage");
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-stage.prepend(renderer.domElement);
-const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100000);
-camera.up.set(0, 0, 1);
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
-controls.dampingFactor = 0.12;
-
-scene.add(new THREE.HemisphereLight(0xffffff, 0x8890a0, 1.6));
-const key = new THREE.DirectionalLight(0xffffff, 1.8);
-camera.add(key); key.position.set(0.5, 1, 0.4);
-scene.add(camera);
-
 const group = new THREE.Group();
+const st = createStage($("stage"), { onFrame: () => updatePins() });
+const { scene, controls } = st;
 scene.add(group);
-let grid = null;
-const loader = new STLLoader();
 const geomCache = new Map();
 let loadSeq = 0;
-
-// Viewport colours come from the --stage tokens in style.css, so the theme lives in one place.
-function themeColors() {
-  const css = getComputedStyle(document.documentElement);
-  const c = (name) => new THREE.Color(css.getPropertyValue(name).trim());
-  scene.background = c("--stage");
-  return { major: c("--stage-grid-major"), minor: c("--stage-grid") };
-}
-matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { themeColors(); buildGrid(); });
-
-function resize() {
-  const w = stage.clientWidth, h = stage.clientHeight;
-  renderer.setSize(w, h, false);
-  camera.aspect = w / h;
-  camera.updateProjectionMatrix();
-}
-new ResizeObserver(resize).observe(stage);
-
-renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); updatePins(); });
 
 function bbox() {
   const b = new THREE.Box3();
@@ -191,47 +156,11 @@ function bbox() {
   return b;
 }
 
-function buildGrid() {
-  if (grid) { scene.remove(grid); grid.geometry.dispose(); }
-  const b = bbox();
-  if (b.isEmpty()) return;
-  const size = b.getSize(new THREE.Vector3());
-  const span = Math.max(size.x, size.y) * 1.6 + 20;
-  const step = span > 600 ? 50 : span > 200 ? 20 : 10;
-  const n = Math.ceil(span / step);
-  const col = themeColors();
-  grid = new THREE.GridHelper(n * step, n, col.major, col.minor);
-  grid.rotation.x = Math.PI / 2;
-  const c = b.getCenter(new THREE.Vector3());
-  grid.position.set(Math.round(c.x / step) * step, Math.round(c.y / step) * step, 0);
-  scene.add(grid);
-}
-
-function setView(kind) {
-  const b = bbox();
-  if (b.isEmpty()) return;
-  const c = b.getCenter(new THREE.Vector3());
-  const r = b.getBoundingSphere(new THREE.Sphere()).radius || 10;
-  const d = r / Math.sin((camera.fov * Math.PI) / 360) * 1.15;
-  const dirs = { iso: [1, -1.2, 0.9], front: [0, -1, 0.0001], top: [0, -0.0001, 1], right: [1, 0, 0.0001] };
-  const dir = kind === "keep" ? camera.position.clone().sub(controls.target) : new THREE.Vector3(...dirs[kind] || dirs.iso);
-  const v = dir.normalize().multiplyScalar(d);
-  camera.position.copy(c).add(v);
-  camera.near = d / 100; camera.far = d * 100; camera.updateProjectionMatrix();
-  controls.target.copy(c);
-  controls.update();
-}
+const buildGrid = () => st.buildGrid(bbox());
+const setView = (kind) => st.frame(bbox(), kind);
 
 function layoutParts() {
-  let x = null;
-  for (const obj of group.children) {
-    obj.position.set(0, 0, 0);
-    if (!spread || group.children.length < 2) continue;
-    const b = new THREE.Box3().setFromObject(obj);
-    if (x === null) x = b.min.x;
-    obj.position.x = x - b.min.x;
-    x += b.max.x - b.min.x + 10;
-  }
+  spreadX(group.children, spread);
   const b = bbox();
   if (!b.isEmpty()) {
     const s = b.getSize(new THREE.Vector3());
@@ -242,7 +171,7 @@ function layoutParts() {
 }
 
 async function loadGeometry(url) {
-  if (!geomCache.has(url)) geomCache.set(url, loader.loadAsync(url));
+  if (!geomCache.has(url)) geomCache.set(url, loadSTL(url));
   return geomCache.get(url);
 }
 
@@ -347,7 +276,6 @@ function renderSide() {
 
   $("recipe").textContent = JSON.stringify(ver.params, null, 2);
   renderComments();
-  renderPins();
 }
 
 // Editable parameters: vars for CSG, top-level values for the rest.
@@ -390,95 +318,23 @@ $("apply").onclick = async () => {
 };
 
 // ------------------------------------------------------------ comments
-let commentMode = false, showResolved = false, pending = null, focusId = null;
-const raycaster = new THREE.Raycaster();
-const pinsEl = $("pins");
-
-const visibleComments = () => (model?.comments || []).filter((c) => showResolved || c.status === "open");
-
-function worldOf(c) {
-  const obj = group.children.find((o) => o.name === c.part);
-  if (!obj || !obj.visible || !c.point) return null;
-  return new THREE.Vector3(...c.point).add(obj.position);
-}
-
-function renderPins() {
-  const list = visibleComments().filter((c) => c.point);
-  pinsEl.innerHTML = list.map((c) => `<button class="pin${c.status !== "open" ? " done" : ""}${c.id === focusId ? " focus" : ""}"
-      data-id="${c.id}" title="${esc(c.text)}">${c.id.slice(1)}</button>`).join("")
-    + (pending ? '<span class="pin new" data-id="new">+</span>' : "");
-  pinsEl.querySelectorAll("button.pin").forEach((b) => b.onclick = () => focusComment(b.dataset.id, false));
-}
-
-const _v = new THREE.Vector3();
-function updatePins() {
-  if (!pinsEl.childElementCount) return;
-  const w = stage.clientWidth, h = stage.clientHeight;
-  for (const el of pinsEl.children) {
-    const id = el.dataset.id;
-    let p = null;
-    if (id === "new") p = pending && pending.world;
-    else { const c = model.comments.find((x) => x.id === id); p = c && worldOf(c); }
-    if (!p) { el.style.display = "none"; continue; }
-    _v.copy(p).project(camera);
-    if (_v.z > 1) { el.style.display = "none"; continue; }
-    el.style.display = "";
-    el.style.transform = `translate(${(_v.x + 1) / 2 * w}px, ${(1 - _v.y) / 2 * h}px)`;
-  }
-}
-
-function focusComment(id, moveCamera) {
-  focusId = id;
-  renderPins(); renderComments();
-  const item = document.querySelector(`.cmt[data-id="${id}"]`);
-  item?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  const c = model.comments.find((x) => x.id === id);
-  const p = c && worldOf(c);
-  if (moveCamera && p) {
-    const off = camera.position.clone().sub(controls.target);
-    controls.target.copy(p);
-    camera.position.copy(p).add(off);
-  }
-}
-
-function renderComments() {
-  const all = model.comments || [];
-  const open = all.filter((c) => c.status === "open").length;
-  $("ccount").textContent = all.length ? `${open} open` : "";
-  const list = visibleComments();
-  $("comments").innerHTML = list.length ? list.map((c) => `
-    <div class="cmt${c.status !== "open" ? " done" : ""}${c.id === focusId ? " focus" : ""}" data-id="${c.id}">
-      <span class="badge">${c.id.slice(1)}</span>
-      <div>
-        <div class="ctext">${esc(c.text)}</div>
-        <div class="hint">v${c.version}${c.part ? ", " + esc(c.part) : ""}, ${ago(c.created)}${c.point ? "" : ", no point"}</div>
-        ${(c.replies || []).map((r) => `<div class="reply ${r.author}"><b>${r.author === "claude" ? "Claude" : "You"}:</b> ${esc(r.text)}</div>`).join("")}
-        <div class="row cact">
-          ${c.status === "open" ? `<button class="sm" data-a="resolve">${icon("check", "sm")}Resolve</button>` : `<button class="sm" data-a="reopen">Reopen</button>`}
-          <button class="sm" data-a="reply">${icon("reply", "sm")}Reply</button>
-          <button class="sm danger" data-a="delete">Delete</button>
-        </div>
-      </div>
-    </div>`).join("") : "";
-  document.querySelectorAll(".cmt").forEach((el) => {
-    const id = el.dataset.id;
-    el.onclick = (e) => { if (!e.target.closest("button")) focusComment(id, true); };
-    el.querySelectorAll("button[data-a]").forEach((b) => b.onclick = async () => {
-      const a = b.dataset.a;
-      let text = "";
-      if (a === "reply" && !(text = prompt("Reply:") || "")) return;
-      if (a === "delete" && !confirm("Delete the comment?")) return;
-      await post({ action: "comment_" + a, id, text });
-    });
-  });
-  $("chint").hidden = all.length > 0;
-}
+let commentMode = false;
+const comments = createComments(st, {
+  root: stage,
+  parts: () => group.children.map((obj) => ({ name: obj.name, obj })),
+  meshes: () => group.children.filter((o) => o.visible).map((o) => o.children[0]),
+  comments: () => model?.comments || [],
+  version: () => viewVersion,
+  post, toast,
+  list: $("comments"), count: $("ccount"), hint: $("chint"),
+});
+const renderComments = () => comments.render();
+const updatePins = () => comments.updatePins();
 
 function setCommentMode(on) {
   commentMode = on;
   $("commentmode").classList.toggle("on", on);
-  stage.classList.toggle("commenting", on);
-  if (!on) closePopup();
+  comments.setMode(on);
 }
 
 // "Fix" on a print-check warning: the same as placing a comment, prefilled and anchored at the problem.
@@ -489,66 +345,13 @@ function startFix(part, w) {
   hidden.delete(part); obj.visible = true;
   const local = Array.isArray(near) ? new THREE.Vector3(...near)
     : new THREE.Box3().setFromObject(obj.children[0]).getCenter(new THREE.Vector3()).sub(obj.position);
-  pending = { world: local.clone().add(obj.position), point: local.toArray(), normal: null, part };
-  const pop = $("cpop");
-  pop.hidden = false;
-  pop.style.left = "16px"; pop.style.top = "16px";
-  $("ctext").value = `Fix this print problem in "${part}": ${w.message}. Keep the design intent and resolve this comment.`;
-  $("ctext").focus();
-  renderPins();
+  comments.startAt(part, local, `Fix this print problem in "${part}": ${w.message}. Keep the design intent and resolve this comment.`);
 }
 
-function closePopup() {
-  pending = null;
-  $("cpop").hidden = true;
-  renderPins();
-}
-
-let downAt = null;
-renderer.domElement.addEventListener("pointerdown", (e) => { downAt = [e.clientX, e.clientY]; });
-renderer.domElement.addEventListener("pointerup", (e) => {
-  if (!commentMode || !downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4) return;
-  const r = renderer.domElement.getBoundingClientRect();
-  raycaster.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1,
-    -((e.clientY - r.top) / r.height) * 2 + 1), camera);
-  const meshes = group.children.filter((o) => o.visible).map((o) => o.children[0]);
-  const hit = raycaster.intersectObjects(meshes, false)[0];
-  if (!hit) return;
-  const obj = hit.object.parent;
-  pending = {
-    world: hit.point.clone(),
-    point: hit.point.clone().sub(obj.position).toArray(),
-    normal: hit.face ? hit.face.normal.toArray() : null,
-    part: obj.name,
-  };
-  const pop = $("cpop");
-  pop.hidden = false;
-  const x = Math.min(e.clientX - r.left + 14, r.width - pop.offsetWidth - 8);
-  const y = Math.min(e.clientY - r.top + 14, r.height - pop.offsetHeight - 8);
-  pop.style.left = Math.max(8, x) + "px"; pop.style.top = Math.max(8, y) + "px";
-  $("ctext").value = ""; $("ctext").focus();
-  renderPins();
-});
-
-$("cpop").onsubmit = async (e) => {
-  e.preventDefault();
-  const text = $("ctext").value.trim();
-  if (!text || !pending) return;
-  const { point, normal, part } = pending;
-  try {
-    await post({ action: "comment_add", text, point, normal, part, version: viewVersion });
-    closePopup();
-    toast("Comment saved. Ask Claude to look at the comments.");
-  } catch { /* post shows the toast */ }
-};
-$("ctext").onkeydown = (e) => {
-  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) $("cpop").requestSubmit();
-  if (e.key === "Escape") closePopup();
-};
-$("ccancel").onclick = closePopup;
+st.onClick((e) => comments.click(e));
 $("commentmode").onclick = () => setCommentMode(!commentMode);
-$("showresolved").onchange = (e) => { showResolved = e.target.checked; renderComments(); renderPins(); };
-addEventListener("keydown", (e) => { if (e.key === "Escape" && commentMode && $("cpop").hidden) setCommentMode(false); });
+$("showresolved").onchange = (e) => { comments.showResolved = e.target.checked; };
+addEventListener("keydown", (e) => { if (e.key === "Escape" && commentMode && !comments.open) setCommentMode(false); });
 
 // ------------------------------------------------------------ events
 function toast(msg, err = false) {
@@ -619,7 +422,6 @@ async function refresh(first) {
 }
 
 subscribe((d) => { if (d.resync || d.id === id) refresh(false); }, $("live"));
-resize();
 refresh(true);
 </script>
 </body>

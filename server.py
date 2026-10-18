@@ -40,6 +40,7 @@ import base64
 import contextlib
 import hmac
 import html
+import io
 import ipaddress
 import json
 import os
@@ -1412,6 +1413,31 @@ async def api_model(request):
     return JSONResponse(m)
 
 
+async def api_mesh(request):
+    """The editor's preview of one recipe node it can't draw itself (templates, hull, arrays ...):
+    {"node": {...}, "vars": {...}} -> binary STL of that node in its own frame. Nothing is stored."""
+    mid = request.path_params["id"]
+    lib = _req_lib(request)
+    try:
+        lib.models.get(mid)  # the editor only meshes for models the user can open
+        body = await request.json()
+        node = body.get("node")
+        if len(json.dumps(node)) > 200_000:
+            raise ValueError("node too large")
+
+        def work():
+            m = csg.build_node(node, csg.resolve_vars(body.get("vars") or {}))
+            if m.is_empty():
+                return b""
+            buf = io.BytesIO()
+            csg.to_trimesh(m).export(buf, file_type="stl")
+            return buf.getvalue()
+        stl = await _run(work)
+    except Exception as e:  # noqa: BLE001 – the error is shown in the editor
+        return _err(e)
+    return Response(stl, media_type="model/stl")
+
+
 async def page_admin(_):
     return FileResponse(WEB / "admin.html")
 
@@ -1580,6 +1606,7 @@ app = Starlette(
         Route("/api/models", api_models, methods=["GET", "POST"]),
         Route("/api/models/{id}", api_model, methods=["GET", "POST", "DELETE"]),
         Route("/api/models/{id}/preview.png", preview),
+        Route("/api/models/{id}/mesh", api_mesh, methods=["POST"]),
         Route("/api/events", api_events),
         Route("/admin", page_admin),
         Route("/admin/design", page_admin_design),
