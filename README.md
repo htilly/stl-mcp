@@ -2,11 +2,42 @@
 
 *STL, made by AI.* (repo and service name: `stl-mcp`)
 
-Self-hosted MCP server where Claude creates and iteratively adjusts 3D models for printing (mm),
-with a web interface for viewing, rotating and browsing the models.
+autosmith is a self-hosted [MCP](https://modelcontextprotocol.io) server that lets Claude (or ChatGPT,
+or any MCP client) design 3D models for printing, in millimetres, and adjust them again and again until
+they are right. Next to the chat there is a web app where you look at the model, turn it around, change
+its dimensions, point at the spot that needs fixing, or build shapes by hand.
 
-- **MCP** (streamable HTTP) at `/mcp`
-- **Library** at `/`: all models with preview, search, live updates
+You describe what you want, Claude builds it, you look at it live, you say what to change.
+Every change is a small, versioned edit, and you download an STL when you are happy.
+
+## See it in action
+
+[![Claude designing an ESP32 box in autosmith: click to play the video](docs/img/demo-poster.png)](docs/img/demo.mp4)
+
+*A real session, sped up 4× (about one minute, [play the video](docs/img/demo.mp4)).* Claude on claude.ai
+on the right, the live 3D view on the left. A handful of short messages take an ESP32 dev board box from
+nothing to printable:
+
+1. *"make a box for a ESP32 dev board. Add the text esp32 on the side of the box."* → body, friction-fit
+   lid and engraved text (v1).
+2. *"now add screws to the box so I can make the lid solid"* → four M3 corner posts in the body and
+   countersunk holes in the lid (v2).
+3. A [comment](#commenting-directly-in-the-ui) clicked on the long side of the box, *"write the text
+   autoSMITH centered here"*, then *"I also left a comment for you"* in the chat → engraved exactly
+   there (v3).
+4. *"I did not find the screws?"* → four printable M3 countersunk screws as a separate part, with the
+   print check flagging thin walls and overhangs (v4).
+5. *"did you adjust the holes so that the screws will be able to 'screw'?"* → Claude checks the hole
+   sizes against the printed threads.
+
+Every step shows up in the 3D view as soon as Claude makes it, and each one is a version you can go back to.
+
+## What it does
+
+- **MCP server** (streamable HTTP) at `/mcp` with tools for creating, changing, rendering, checking
+  and importing models ([list of tools](#mcp-tools)). Claude can also *look* at its own work with
+  `render_model`.
+- **Library** at `/`: all your models with preview, search and live updates.
 
 ![The library](docs/img/library.png)
 
@@ -15,20 +46,29 @@ with a web interface for viewing, rotating and browsing the models.
 
 ![The 3D view](docs/img/viewer.png)
 
-- **Comments**: click a point on the model and write what should change. Claude sees the
-  point and which part of the recipe is located there.
-- **Web editor** at `/edit/<id>` (**New model** in the library, **Edit** in the 3D view): build a
-  model by hand or change one Claude made. Every recipe opens, including multi-part ones, templates
-  and expressions; only the values you change are written
-  ([details](#building-by-hand-in-the-editor)).
-- **Design system**: colours, type, icons and components are documented in
-  [`docs/DESIGN.md`](docs/DESIGN.md) and shown live in the admin section at `/admin/design`.
+- **Comments**: click a point on the model and write what should change. Claude sees the point and
+  which part of the recipe is located there ([details](#commenting-directly-in-the-ui)).
+- **Web editor** at `/edit/<id>` (button **New model** in the library, **Edit** in the 3D view): build
+  a model by hand or change one Claude made: every recipe opens, including multi-part ones, templates
+  and expressions. A recipe tree, exact fields that take `=expressions`, variables, holes, groups,
+  measure, align and workplanes; saving makes a new version. Claude can keep working on the same model
+  afterwards ([details](#building-by-hand-in-the-editor)).
 - **Templates**: screw holes (M2–M8, countersunk/cylindrical, nut trap), heat inserts, screw bosses,
   printable screws, nuts and threaded holes with real ISO threads,
-  snap hooks, hinges and text.
+  snap hooks, hinges and text, so Claude does not have to model them from scratch.
 - **Expression shapes**: `radial`, `heightmap`, `sweep` and `loft` build organic and parametric
   forms (vases, knobs, wavy surfaces, pipes, springs, outline transitions) from safe per-vertex
   expressions, so script models are not needed for them.
+- **Print check**: every build is checked for holes, loose pieces, thin walls, overhangs and bed size;
+  problems are warnings, never blockers ([details](#print-check-and-admin-settings)).
+- **Accounts**: passkeys, Google/GitHub/Apple sign-in, a private library per user, and OAuth so
+  claude.ai can connect with one click ([details](#accounts-and-signup)).
+- **Tinkercad exchange** via STL/OBJ files, and import of STL/OBJ/GLB/PLY/OFF files to keep working on
+  ([details](#tinkercad)).
+- **Design system**: colours, type, icons and components are documented in
+  [`docs/DESIGN.md`](docs/DESIGN.md) and shown live in the admin section at `/admin/design`.
+
+![The design system page](docs/img/design.png)
 
 ## The idea: models are recipes, not files
 
@@ -90,7 +130,7 @@ without guessing:
 
 ### Example round trip
 1. You click the hole and write *"Make this hole 2 mm larger so a marker fits"*.
-2. You tell Claude *"look at the comments"* (or let [`tools/stl_watch.py`](#having-claude-react-to-comments-immediately)
+2. You tell Claude *"look at the comments"* (or let [`tools/stl_watch.py`](#having-claude-react-to-comments)
    do it automatically).
 3. Claude reads `near_nodes`, sees that `/root/children/1` is the pen hole cylinder driven by the variable `d`,
    and calls:
@@ -133,6 +173,8 @@ is open; comments made while nothing is watching simply wait.
 ## Building by hand in the editor
 Not everything is easiest to say in words. Press **New model** in the library (or **Edit** on an
 existing model) to open the editor at `/edit/<id>`.
+
+![The web editor with a cylinder marked as a hole](docs/img/editor.png)
 
 - Click a shape (box, cylinder, sphere, cone, tube, torus, wedge, text, or a template such as a
   screw hole) to add it, or drag it onto the workplane. Screw holes and inserts are added as holes, on
@@ -269,9 +311,10 @@ page). It requires `PUBLIC_URL` on https (or localhost); `OAUTH=0` turns it off.
   other expressions, plus `atan2`, `exp`, `log`, `clamp`, `lerp`, `smoothstep`, `noise`). A shape
   may have at most 2 million triangles.
 - Templates: `screw_hole`, `heat_insert`, `nut_trap` (cutting: the surface is at z=0, going downward),
-  `boss`, `snap_hook`, `hinge` (print-in-place or with a separate pin) and `text`
-  (DejaVu Sans, raised or engraved). Printable `screw`, `nut` and `threaded_hole` have a real
-  helical ISO metric thread. Dimensions for M2–M8 are in `templates.py`.
+  `threaded_hole` (a printed ISO metric internal thread), `boss`, `snap_hook`, `hinge`
+  (print-in-place or with a separate pin), `screw` and `nut` (printable, with a real helical
+  ISO thread; socket, countersunk, button, hex or no head, hex or slot drive) and `text`
+  (DejaVu Sans, raised or engraved). Dimensions for M2–M8 are in `templates.py`.
 - Operations: `union`, `difference`, `intersection`, `hull`, `minkowski`
 - All nodes: `translate`, `rotate` (degrees), `scale`, `mirror`, `array`, `polar`, `hidden`
 - Multiple parts (one STL per part): `{"parts": {"body": {...}, "lid": {...}}}`
@@ -377,6 +420,8 @@ and as a badge in the library.
 | thin walls | material thinner than the minimum wall thickness over a noticeable area |
 | overhangs | too large a share of the surface overhangs more than the maximum angle |
 | build volume | the part does not fit the printer bed |
+
+![The admin page with print-check settings](docs/img/admin.png)
 
 Thresholds have sensible defaults (`printcheck.py`, `SCHEMA`) and can be changed at `/admin`
 (token required, even with `UI_PUBLIC=1`): per-check switches, minimum wall (1.2 mm), overhang angle
