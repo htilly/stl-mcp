@@ -1,28 +1,31 @@
-"""Login for the web UI (passkeys + signed session cookies) and an OAuth 2.1 authorization server
+"""Users and login: web sessions, passkeys, personal tokens and an OAuth 2.1 authorization server
 so MCP clients that cannot send a custom header (claude.ai connectors) can connect.
 
 The OAuth flow: the client registers itself (dynamic client registration), sends the user to
-/authorize, the user logs in to the web UI (passkey or MCP_TOKEN) and approves the client on the
-consent page, and the client exchanges the code for an access + refresh token.
+/authorize, the user logs in to the web UI and approves the client on the consent page, and the
+client exchanges the code for an access + refresh token tied to that user.
 
-Persistent state lives in <STL_DIR>/auth.json: passkeys, registered clients and tokens (only
-sha256 hashes of tokens are stored). Challenges, pending authorization requests and codes are
+Persistent state lives in Postgres (see migrations/001_users_and_auth.sql); tokens and session ids
+are stored only as sha256 hashes. Challenges, pending authorization requests and codes are
 short-lived and kept in memory.
 """
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 import secrets
 import threading
 import time
 from pathlib import Path
 
+from psycopg.types.json import Jsonb
+
 from mcp.server.auth.provider import (AccessToken, AuthorizationCode, AuthorizationParams,
                                       AuthorizeError, RefreshToken, TokenError,
                                       construct_redirect_uri)
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
+
+from db import Database
 
 SESSION_TTL = 60 * 60 * 24 * 90
 ACCESS_TTL = 60 * 60 * 24
@@ -30,37 +33,14 @@ REFRESH_TTL = 60 * 60 * 24 * 90
 CODE_TTL = 5 * 60
 PENDING_TTL = 10 * 60
 CHALLENGE_TTL = 5 * 60
-MAX_CLIENTS = 50
+SEEN_EVERY = 60 * 60          # how often last_seen/last_used is written
+MAX_CLIENTS = 1000
 SCOPE = "stl"
+PERSONAL_PREFIX = "stlp_"     # personal tokens are recognizable (and cheap to tell apart)
 
 
 def _hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
-
-
-# ---------------------------------------------------------------- sessions
-
-def _session_key(secret: str) -> bytes:
-    return hmac.new(secret.encode(), b"stl-mcp session", hashlib.sha256).digest()
-
-
-def make_session(secret: str, ttl: int = SESSION_TTL, now: float | None = None) -> str:
-    """A signed, expiring cookie value. Rotating MCP_TOKEN invalidates every session."""
-    body = f"s1.{int((now or time.time()) + ttl)}"
-    sig = hmac.new(_session_key(secret), body.encode(), hashlib.sha256).hexdigest()
-    return f"{body}.{sig}"
-
-
-def check_session(secret: str, value: str, now: float | None = None) -> bool:
-    try:
-        version, exp, sig = value.split(".")
-        expires = int(exp)
-    except ValueError:
-        return False
-    if version != "s1" or not secret:
-        return False
-    good = hmac.new(_session_key(secret), f"s1.{exp}".encode(), hashlib.sha256).hexdigest()
-    return hmac.compare_digest(sig, good) and expires > (now or time.time())
 
 
 # ---------------------------------------------------------------- short-lived values
@@ -91,106 +71,221 @@ class Expiring:
             return item[1] if item and item[0] > time.time() else None
 
 
-# ---------------------------------------------------------------- persistent state
+# ---------------------------------------------------------------- persistent state (Postgres)
+
+_USER = "u.id, u.display_name, u.email, u.role, u.bootstrap, u.disabled, u.created, u.last_login"
+
 
 class AuthState:
-    def __init__(self, path: Path):
-        self.path = path
-        self._lock = threading.RLock()
+    """Users, sessions, passkeys, OAuth clients/tokens and personal tokens, stored in Postgres.
 
-    def _read(self) -> dict:
-        try:
-            data = json.loads(self.path.read_text())
-        except (FileNotFoundError, json.JSONDecodeError):
-            data = {}
-        data.setdefault("passkeys", [])
-        data.setdefault("clients", {})
-        data.setdefault("tokens", {})
-        return data
+    Every lookup that turns a credential into a user skips disabled users, so disabling a user
+    locks them out everywhere at once."""
 
-    def _write(self, data: dict):
+    def __init__(self, db: Database):
+        self.db = db
+
+    # ---- users
+
+    def user(self, uid: str) -> dict | None:
+        return self.db.one(f"SELECT {_USER} FROM users u WHERE u.id = %s", (uid,))
+
+    def create_user(self, display_name: str = "", email: str | None = None,
+                    role: str = "member") -> dict:
+        return self.db.one(
+            f"INSERT INTO users AS u (display_name, email, role) VALUES (%s, %s, %s) RETURNING {_USER}",
+            ((display_name or "").strip()[:80], (email or "").strip().lower() or None, role))
+
+    def bootstrap_admin(self, email: str | None = None) -> dict:
+        """The admin that MCP_TOKEN logs in as (and that owns data from before users existed)."""
+        u = self.db.one(f"SELECT {_USER} FROM users u WHERE u.bootstrap")
+        if u:
+            return u
+        self.db.execute(
+            "INSERT INTO users (display_name, email, role, bootstrap) VALUES ('admin', %s, 'admin', true) "
+            "ON CONFLICT DO NOTHING", ((email or "").strip().lower() or None,))
+        return self.db.one(f"SELECT {_USER} FROM users u WHERE u.bootstrap")
+
+    def touch_login(self, uid: str):
+        self.db.execute("UPDATE users SET last_login = %s WHERE id = %s", (time.time(), uid))
+
+    # ---- web sessions (the cookie holds a random id; only its hash is stored)
+
+    def create_session(self, uid: str, ttl: int = SESSION_TTL) -> str:
+        raw, now = secrets.token_urlsafe(32), time.time()
+        with self.db.tx() as c:
+            c.execute("DELETE FROM sessions WHERE expires_at < %s", (now,))
+            c.execute("INSERT INTO sessions (hash, user_id, created, expires_at, last_seen) "
+                      "VALUES (%s, %s, %s, %s, %s)", (_hash(raw), uid, now, now + ttl, now))
+        self.touch_login(uid)
+        return raw
+
+    def session_user(self, raw: str) -> dict | None:
+        if not raw:
+            return None
         now = time.time()
-        data["tokens"] = {h: t for h, t in data["tokens"].items() if t["expires_at"] > now}
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, indent=1))
-        tmp.chmod(0o600)
-        tmp.replace(self.path)
+        row = self.db.one(
+            f"SELECT {_USER}, s.last_seen AS _seen FROM sessions s JOIN users u ON u.id = s.user_id "
+            "WHERE s.hash = %s AND s.expires_at > %s AND NOT u.disabled", (_hash(raw), now))
+        if not row:
+            return None
+        if now - row.pop("_seen") > SEEN_EVERY:
+            self.db.execute("UPDATE sessions SET last_seen = %s WHERE hash = %s", (now, _hash(raw)))
+        return row
 
-    def read(self) -> dict:
-        with self._lock:
-            return self._read()
+    def delete_session(self, raw: str):
+        self.db.execute("DELETE FROM sessions WHERE hash = %s", (_hash(raw or ""),))
 
-    def change(self, fn):
-        """fn(data) mutates the state and may return a value; the result is saved atomically."""
-        with self._lock:
-            data = self._read()
-            out = fn(data)
-            self._write(data)
-            return out
+    def delete_sessions(self, uid: str):
+        self.db.execute("DELETE FROM sessions WHERE user_id = %s", (uid,))
 
     # ---- passkeys
 
-    def passkeys(self) -> list[dict]:
-        return self.read()["passkeys"]
+    def passkeys(self, uid: str) -> list[dict]:
+        return self.db.all("SELECT * FROM passkeys WHERE user_id = %s ORDER BY created", (uid,))
 
     def passkey(self, cred_id: str) -> dict | None:
-        return next((p for p in self.passkeys() if p["id"] == cred_id), None)
+        return self.db.one(
+            "SELECT p.* FROM passkeys p JOIN users u ON u.id = p.user_id "
+            "WHERE p.id = %s AND NOT u.disabled", (cred_id,))
 
-    def add_passkey(self, cred_id: str, public_key: str, sign_count: int, name: str) -> dict:
-        pk = {"id": cred_id, "public_key": public_key, "sign_count": sign_count,
-              "name": (name or "passkey").strip()[:60], "created": time.time(), "last_used": None}
-
-        def fn(d):
-            d["passkeys"] = [p for p in d["passkeys"] if p["id"] != cred_id] + [pk]
-        self.change(fn)
-        return pk
+    def add_passkey(self, uid: str, cred_id: str, public_key: str, sign_count: int,
+                    name: str) -> dict:
+        return self.db.one(
+            "INSERT INTO passkeys (id, user_id, public_key, sign_count, name, created) "
+            "VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (id) DO UPDATE SET "
+            "public_key = EXCLUDED.public_key, sign_count = EXCLUDED.sign_count, name = EXCLUDED.name "
+            "WHERE passkeys.user_id = EXCLUDED.user_id RETURNING *",
+            (cred_id, uid, public_key, sign_count, (name or "passkey").strip()[:60], time.time()))
 
     def touch_passkey(self, cred_id: str, sign_count: int):
-        def fn(d):
-            for p in d["passkeys"]:
-                if p["id"] == cred_id:
-                    p["sign_count"], p["last_used"] = sign_count, time.time()
-        self.change(fn)
+        self.db.execute("UPDATE passkeys SET sign_count = %s, last_used = %s WHERE id = %s",
+                        (sign_count, time.time(), cred_id))
 
-    def delete_passkey(self, cred_id: str) -> bool:
-        def fn(d):
-            before = len(d["passkeys"])
-            d["passkeys"] = [p for p in d["passkeys"] if p["id"] != cred_id]
-            return len(d["passkeys"]) != before
-        return self.change(fn)
+    def delete_passkey(self, cred_id: str, uid: str) -> bool:
+        return self.db.execute("DELETE FROM passkeys WHERE id = %s AND user_id = %s",
+                               (cred_id, uid)) > 0
 
-    # ---- clients and tokens
+    # ---- OAuth clients and tokens
 
-    def clients(self) -> list[dict]:
-        """Registered clients that hold a live token (i.e. apps that are actually connected)."""
-        d = self.read()
-        live: dict[str, dict] = {}
-        for t in d["tokens"].values():
-            if t["expires_at"] > time.time():
-                c = live.setdefault(t["client_id"], {"last_issued": 0})
-                c["last_issued"] = max(c["last_issued"], t["issued_at"])
-        out = []
-        for cid, info in live.items():
-            c = d["clients"].get(cid, {})
-            out.append({"client_id": cid, "name": c.get("client_name") or cid,
-                        "redirect_uris": c.get("redirect_uris", []),
-                        "last_authorized": info["last_issued"]})
-        return sorted(out, key=lambda c: -c["last_authorized"])
+    def client(self, client_id: str) -> dict | None:
+        row = self.db.one("SELECT info FROM oauth_clients WHERE client_id = %s", (client_id,))
+        return row["info"] if row else None
 
-    def revoke_client(self, client_id: str) -> bool:
-        def fn(d):
-            found = client_id in d["clients"]
-            d["clients"].pop(client_id, None)
-            d["tokens"] = {h: t for h, t in d["tokens"].items() if t["client_id"] != client_id}
-            return found
-        return self.change(fn)
+    def put_client(self, info: dict):
+        with self.db.tx() as c:
+            c.execute("INSERT INTO oauth_clients (client_id, info, issued_at) VALUES (%s, %s, %s) "
+                      "ON CONFLICT (client_id) DO UPDATE SET info = EXCLUDED.info",
+                      (info["client_id"], Jsonb(info), info.get("client_id_issued_at") or time.time()))
+            # Registration is open to anyone, so cap it: drop the oldest clients without tokens.
+            c.execute("DELETE FROM oauth_clients WHERE client_id IN ("
+                      " SELECT client_id FROM oauth_clients c WHERE NOT EXISTS"
+                      "  (SELECT 1 FROM oauth_tokens t WHERE t.client_id = c.client_id)"
+                      " ORDER BY issued_at DESC, client_id DESC OFFSET %s)", (MAX_CLIENTS,))
+
+    def clients(self, uid: str) -> list[dict]:
+        """The user's apps that hold a live token (i.e. apps that are actually connected)."""
+        rows = self.db.all(
+            "SELECT c.client_id, c.info, max(t.issued_at) AS last_authorized FROM oauth_tokens t "
+            "JOIN oauth_clients c ON c.client_id = t.client_id "
+            "WHERE t.user_id = %s AND t.expires_at > %s GROUP BY c.client_id, c.info "
+            "ORDER BY last_authorized DESC", (uid, time.time()))
+        return [{"client_id": r["client_id"], "name": r["info"].get("client_name") or r["client_id"],
+                 "redirect_uris": r["info"].get("redirect_uris", []),
+                 "last_authorized": r["last_authorized"]} for r in rows]
+
+    def revoke_client(self, client_id: str, uid: str) -> bool:
+        """Disconnects the app for this user; the registration goes once nobody uses it."""
+        with self.db.tx() as c:
+            n = c.execute("DELETE FROM oauth_tokens WHERE client_id = %s AND user_id = %s",
+                          (client_id, uid)).rowcount
+            c.execute("DELETE FROM oauth_clients c WHERE client_id = %s AND NOT EXISTS "
+                      "(SELECT 1 FROM oauth_tokens t WHERE t.client_id = c.client_id)", (client_id,))
+            return n > 0
+
+    def add_tokens(self, rows: list[dict]):
+        with self.db.tx() as c:
+            c.execute("DELETE FROM oauth_tokens WHERE expires_at < %s", (time.time(),))
+            for t in rows:
+                c.execute("INSERT INTO oauth_tokens (hash, kind, client_id, user_id, scopes, resource,"
+                          " issued_at, expires_at, pair) VALUES (%(hash)s, %(kind)s, %(client_id)s,"
+                          " %(user_id)s, %(scopes)s, %(resource)s, %(issued_at)s, %(expires_at)s,"
+                          " %(pair)s)", {**t, "scopes": Jsonb(t["scopes"])})
 
     def token(self, raw: str, kind: str) -> dict | None:
-        t = self.read()["tokens"].get(_hash(raw))
-        if t and t["kind"] == kind and t["expires_at"] > time.time():
-            return t
-        return None
+        """The token row (with user_id) if it is live and its user is not disabled."""
+        return self.db.one(
+            "SELECT t.* FROM oauth_tokens t JOIN users u ON u.id = t.user_id "
+            "WHERE t.hash = %s AND t.kind = %s AND t.expires_at > %s AND NOT u.disabled",
+            (_hash(raw or ""), kind, time.time()))
 
+    def revoke_token(self, raw: str):
+        """Revokes a token together with its access/refresh partner."""
+        with self.db.tx() as c:
+            t = c.execute("DELETE FROM oauth_tokens WHERE hash = %s RETURNING pair",
+                          (_hash(raw),)).fetchone()
+            if t and t["pair"]:
+                c.execute("DELETE FROM oauth_tokens WHERE hash = %s", (t["pair"],))
+
+    # ---- personal tokens (for clients that send an Authorization header, e.g. Claude Code)
+
+    def create_personal_token(self, uid: str, name: str) -> tuple[str, dict]:
+        raw = PERSONAL_PREFIX + secrets.token_urlsafe(32)
+        row = self.db.one("INSERT INTO personal_tokens (hash, user_id, name) VALUES (%s, %s, %s) "
+                          "RETURNING id, name, created, last_used",
+                          (_hash(raw), uid, (name or "token").strip()[:60]))
+        return raw, row
+
+    def personal_tokens(self, uid: str) -> list[dict]:
+        return self.db.all("SELECT id, name, created, last_used FROM personal_tokens "
+                           "WHERE user_id = %s ORDER BY created", (uid,))
+
+    def delete_personal_token(self, token_id: str, uid: str) -> bool:
+        return self.db.execute("DELETE FROM personal_tokens WHERE id = %s AND user_id = %s",
+                               (token_id, uid)) > 0
+
+    def personal_token_user(self, raw: str) -> dict | None:
+        if not raw.startswith(PERSONAL_PREFIX):
+            return None
+        row = self.db.one(
+            f"SELECT {_USER}, p.last_used AS _used FROM personal_tokens p JOIN users u "
+            "ON u.id = p.user_id WHERE p.hash = %s AND NOT u.disabled", (_hash(raw),))
+        if row and time.time() - (row.pop("_used") or 0) > SEEN_EVERY:
+            self.db.execute("UPDATE personal_tokens SET last_used = %s WHERE hash = %s",
+                            (time.time(), _hash(raw)))
+        return row
+
+    # ---- data from before users existed
+
+    def import_legacy(self, path: Path, owner: str) -> bool:
+        """Moves passkeys, clients and tokens from the old auth.json to `owner`. The file is
+        renamed to auth.json.imported afterwards, so this runs once."""
+        if not path.is_file():
+            return False
+        try:
+            data = json.loads(path.read_text())
+        except json.JSONDecodeError:
+            data = {}
+        with self.db.tx() as c:
+            for p in data.get("passkeys", []):
+                c.execute("INSERT INTO passkeys (id, user_id, public_key, sign_count, name, created,"
+                          " last_used) VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
+                          (p["id"], owner, p["public_key"], p.get("sign_count", 0),
+                           p.get("name") or "passkey", p.get("created") or time.time(), p.get("last_used")))
+            for cid, info in data.get("clients", {}).items():
+                c.execute("INSERT INTO oauth_clients (client_id, info, issued_at) VALUES (%s, %s, %s) "
+                          "ON CONFLICT DO NOTHING",
+                          (cid, Jsonb(info), info.get("client_id_issued_at") or time.time()))
+            for h, t in data.get("tokens", {}).items():
+                if t.get("expires_at", 0) <= time.time() or t.get("client_id") not in data.get("clients", {}):
+                    continue
+                c.execute("INSERT INTO oauth_tokens (hash, kind, client_id, user_id, scopes, resource,"
+                          " issued_at, expires_at, pair) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                          " ON CONFLICT DO NOTHING",
+                          (h, t["kind"], t["client_id"], owner, Jsonb(t.get("scopes") or [SCOPE]),
+                           t.get("resource"), t.get("issued_at", 0), t["expires_at"], t.get("pair")))
+        path.replace(path.with_name(path.name + ".imported"))
+        return True
 
 # ---------------------------------------------------------------- OAuth provider
 
@@ -208,20 +303,11 @@ class OAuthProvider:
     # ---- clients
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
-        c = self.state.read()["clients"].get(client_id)
+        c = self.state.client(client_id)
         return OAuthClientInformationFull.model_validate(c) if c else None
 
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
-        def fn(d):
-            d["clients"][client_info.client_id] = client_info.model_dump(mode="json", exclude_none=True)
-            if len(d["clients"]) > MAX_CLIENTS:
-                # Registration is open to anyone, so cap it: drop the oldest clients without tokens.
-                in_use = {t["client_id"] for t in d["tokens"].values()}
-                idle = sorted((c.get("client_id_issued_at") or 0, cid)
-                              for cid, c in d["clients"].items() if cid not in in_use)
-                for _, cid in idle[:len(d["clients"]) - MAX_CLIENTS]:
-                    del d["clients"][cid]
-        self.state.change(fn)
+        self.state.put_client(client_info.model_dump(mode="json", exclude_none=True))
 
     # ---- authorization
 
@@ -235,8 +321,8 @@ class OAuthProvider:
     def pending_request(self, req: str) -> dict | None:
         return self.pending.get(req)
 
-    def approve(self, req: str) -> str:
-        """Issues an authorization code and returns the client's redirect URL."""
+    def approve(self, req: str, user_id: str) -> str:
+        """Issues an authorization code for user_id and returns the client's redirect URL."""
         p = self.pending.pop(req)
         if not p:
             raise AuthorizeError("invalid_request", "the authorization request has expired")
@@ -247,7 +333,7 @@ class OAuthProvider:
             code_challenge=params.code_challenge, redirect_uri=params.redirect_uri,
             redirect_uri_provided_explicitly=params.redirect_uri_provided_explicitly,
             resource=params.resource)
-        self.codes.put(code.code, code)
+        self.codes.put(code.code, (code, user_id))
         return construct_redirect_uri(str(params.redirect_uri), code=code.code, state=params.state)
 
     def deny(self, req: str) -> str | None:
@@ -260,28 +346,30 @@ class OAuthProvider:
 
     async def load_authorization_code(self, client: OAuthClientInformationFull,
                                       authorization_code: str) -> AuthorizationCode | None:
-        code = self.codes.get(authorization_code)
-        return code if code and code.client_id == client.client_id else None
+        entry = self.codes.get(authorization_code)
+        return entry[0] if entry and entry[0].client_id == client.client_id else None
 
     async def exchange_authorization_code(self, client: OAuthClientInformationFull,
                                           authorization_code: AuthorizationCode) -> OAuthToken:
-        if not self.codes.pop(authorization_code.code):  # one-time use
+        entry = self.codes.pop(authorization_code.code)  # one-time use
+        if not entry:
             raise TokenError("invalid_grant", "authorization code already used")
-        return self._issue(client.client_id, authorization_code.scopes, authorization_code.resource)
+        return self._issue(client.client_id, authorization_code.scopes, authorization_code.resource,
+                           entry[1])
 
     # ---- tokens
 
-    def _issue(self, client_id: str, scopes: list[str], resource: str | None) -> OAuthToken:
+    def _issue(self, client_id: str, scopes: list[str], resource: str | None,
+               user_id: str) -> OAuthToken:
         access, refresh = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
         now = time.time()
-        base = {"client_id": client_id, "scopes": scopes, "resource": resource, "issued_at": now}
-
-        def fn(d):
-            d["tokens"][_hash(access)] = {**base, "kind": "access", "expires_at": now + ACCESS_TTL,
-                                          "pair": _hash(refresh)}
-            d["tokens"][_hash(refresh)] = {**base, "kind": "refresh", "expires_at": now + REFRESH_TTL,
-                                           "pair": _hash(access)}
-        self.state.change(fn)
+        base = {"client_id": client_id, "user_id": user_id, "scopes": scopes, "resource": resource,
+                "issued_at": now}
+        self.state.add_tokens([
+            {**base, "hash": _hash(access), "kind": "access", "expires_at": now + ACCESS_TTL,
+             "pair": _hash(refresh)},
+            {**base, "hash": _hash(refresh), "kind": "refresh", "expires_at": now + REFRESH_TTL,
+             "pair": _hash(access)}])
         return OAuthToken(access_token=access, expires_in=ACCESS_TTL, scope=" ".join(scopes),
                           refresh_token=refresh)
 
@@ -295,8 +383,11 @@ class OAuthProvider:
 
     async def exchange_refresh_token(self, client: OAuthClientInformationFull,
                                      refresh_token: RefreshToken, scopes: list[str]) -> OAuthToken:
-        await self.revoke_token(refresh_token)  # rotate: the old pair stops working
-        return self._issue(client.client_id, scopes, refresh_token.resource)
+        t = self.state.token(refresh_token.token, "refresh")
+        if not t:
+            raise TokenError("invalid_grant", "refresh token is no longer valid")
+        self.state.revoke_token(refresh_token.token)  # rotate: the old pair stops working
+        return self._issue(client.client_id, scopes, refresh_token.resource, t["user_id"])
 
     async def load_access_token(self, token: str) -> AccessToken | None:
         t = self.state.token(token, "access")
@@ -305,14 +396,10 @@ class OAuthProvider:
         return AccessToken(token=token, client_id=t["client_id"], scopes=t["scopes"],
                            expires_at=int(t["expires_at"]), resource=t.get("resource"))
 
-    def access_token_ok(self, token: str) -> bool:
-        return bool(token) and self.state.token(token, "access") is not None
+    def access_token_user(self, token: str) -> dict | None:
+        """The user an OAuth access token belongs to, or None."""
+        t = self.state.token(token, "access") if token else None
+        return self.state.user(t["user_id"]) if t else None
 
     async def revoke_token(self, token: AccessToken | RefreshToken) -> None:
-        h = _hash(token.token)
-
-        def fn(d):
-            t = d["tokens"].pop(h, None)
-            if t:
-                d["tokens"].pop(t.get("pair"), None)
-        self.state.change(fn)
+        self.state.revoke_token(token.token)

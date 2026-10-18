@@ -32,7 +32,12 @@ target and break the image-id provenance check.
   including `/.well-known/oauth-*`, `/authorize`, `/token`, `/register` and `/revoke`, which
   claude.ai uses to connect. `PUBLIC_URL` must be `https://stl.tilly.se` exactly: it is the
   OAuth issuer and the passkeys' relying party id.
-- Passkeys and OAuth tokens live in `/config/stl-mcp/data/auth.json`.
+- Users, passkeys, sessions and OAuth tokens live in Postgres. **Before the first deploy with
+  users**, tillyse needs a Postgres service on the `config_default` network and
+  `DATABASE_URL` (plus `ADMIN_EMAILS`) in `/config/secrets/stl-mcp.env`; without it the
+  container exits at startup and the deploy rolls back. On that first start the old
+  `/config/stl-mcp/data/auth.json` is imported into the admin account and renamed
+  `auth.json.imported`. Back the database up with `pg_dump` next to the data directory.
 
 The repo's own `docker-compose.yml` (with `build: .` and the optional Caddy profile) is for
 running stl-mcp on other machines; tillyse does not read it.

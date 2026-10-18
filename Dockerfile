@@ -3,6 +3,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY *.py ./
+COPY migrations ./migrations
 COPY web ./web
 COPY fonts ./fonts
 ENV STL_DIR=/data PORT=8765

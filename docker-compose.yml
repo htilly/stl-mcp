@@ -5,6 +5,8 @@ services:
     # local only by default – expose via a reverse proxy (the Caddy profile below or your own)
     ports: ["${BIND:-127.0.0.1}:8765:8765"]
     environment:
+      DATABASE_URL: postgresql://stl:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/stl
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-}
       MCP_TOKEN: ${MCP_TOKEN:?set MCP_TOKEN in .env}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8765}
       ALLOW_SCRIPT: ${ALLOW_SCRIPT:-0}
@@ -12,6 +14,33 @@ services:
       UI_PUBLIC: ${UI_PUBLIC:-0}
       OAUTH: ${OAUTH:-1}
     volumes: ["${DATA_DIR:-./data}:/data"]
+    depends_on:
+      postgres: {condition: service_healthy}
+
+  # Users, logins and tokens. Back it up with pg_dump (see README "Storage").
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: stl
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: stl
+    volumes: ["${PG_DATA_DIR:-./pgdata}:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "stl"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  # Throwaway database for the test suite: `docker compose --profile test up -d postgres-test`
+  postgres-test:
+    image: postgres:17-alpine
+    profiles: [test]
+    environment:
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: stl_test
+    ports: ["127.0.0.1:55432:5432"]
+    tmpfs: [/var/lib/postgresql/data]
 
   # Optional HTTPS with an automatic certificate: `docker compose --profile caddy up -d`
   # Requires DOMAIN in .env, DNS pointing here and free ports 80/443.
