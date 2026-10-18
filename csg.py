@@ -24,6 +24,7 @@ import manifold3d as mf
 import numpy as np
 import trimesh
 
+import fnshapes
 from templates import HELP as TEMPLATE_HELP, TEMPLATES
 
 M = mf.Manifold
@@ -43,6 +44,9 @@ _FUNCS = {"min": min, "max": max, "abs": abs, "round": round, "sqrt": math.sqrt,
           "sin": lambda d: math.sin(math.radians(d)), "cos": lambda d: math.cos(math.radians(d)),
           "tan": lambda d: math.tan(math.radians(d)), "floor": math.floor, "ceil": math.ceil}
 _CONST = {"pi": math.pi}
+# the extra functions of the per-vertex evaluator work in plain expressions too
+for _name, _fn in fnshapes.VFUNCS.items():
+    _FUNCS.setdefault(_name, lambda *a, _fn=_fn: float(_fn(*a)))
 
 
 def eval_expr(expr: str, env: dict):
@@ -172,30 +176,66 @@ def _polygon(n):
 
 
 def _profile(n):
-    """2D profile for extrude/revolve: polygon, circle, rect or another simple text-free shape."""
+    """2D profile for extrude/revolve/sweep/loft (the node's "profile", or its own "points")."""
     p = n.get("profile")
     if p is None:
         return _polygon(n)
-    kind = p.get("shape", "polygon")
+    return _profile_cs(p)
+
+
+def _profile_cs(p, depth=0):
+    if not isinstance(p, dict):
+        raise ValueError("profile must be an object")
+    if depth > 16:
+        raise ValueError("profile nested too deep")
     segs = _segs(p)
-    if kind == "polygon":
-        cs = _polygon(p)
-    elif kind == "circle":
-        cs = CS.circle(_radius(p), segs)
-    elif kind == "rect":
-        sx, sy = p["size"]
-        cs = CS.square((sx, sy), bool(p.get("center", False)))
-        if p.get("radius"):
-            r = float(p["radius"])
-            cs = cs.offset(-r, mf.JoinType.Miter).offset(r, mf.JoinType.Round, circular_segments=segs)
+    if "op" in p:
+        op = p["op"]
+        kids = [_profile_cs(c, depth + 1) for c in p.get("profiles", [])]
+        if not kids:
+            raise ValueError(f"profile op '{op}' requires 'profiles': [...]")
+        if op == "union":
+            cs = CS.batch_boolean(kids, mf.OpType.Add)
+        elif op == "difference":
+            cs = kids[0] - CS.batch_boolean(kids[1:], mf.OpType.Add) if len(kids) > 1 else kids[0]
+        elif op == "intersection":
+            cs = CS.batch_boolean(kids, mf.OpType.Intersect)
+        elif op == "hull":
+            cs = CS.batch_hull(kids)
+        else:
+            raise ValueError(f"unknown profile op '{op}' (union, difference, intersection, hull)")
     else:
-        raise ValueError(f"unknown profile '{kind}' (polygon, circle, rect)")
+        kind = p.get("shape", "polygon")
+        if kind == "polygon":
+            cs = _polygon(p)
+        elif kind == "circle":
+            cs = CS.circle(_radius(p), segs)
+        elif kind == "rect":
+            sx, sy = p["size"]
+            cs = CS.square((sx, sy), bool(p.get("center", False)))
+            if p.get("radius"):
+                r = float(p["radius"])
+                cs = cs.offset(-r, mf.JoinType.Miter).offset(r, mf.JoinType.Round, circular_segments=segs)
+        elif kind == "spline":
+            pts = p.get("points")
+            if not pts or len(pts) < 3:
+                raise ValueError("spline profile requires 'points': [[x,y], ...] (at least 3)")
+            curve = fnshapes._catmull(np.asarray(pts, np.float64), int(p.get("steps", 12)), True)
+            cs = CS([curve.tolist()], mf.FillRule.NonZero)
+        else:
+            raise ValueError(f"unknown profile '{kind}' (polygon, circle, rect, spline, or "
+                             f"op: union/difference/intersection/hull with 'profiles')")
     if p.get("offset"):
         cs = cs.offset(float(p["offset"]), mf.JoinType.Round, circular_segments=segs)
+    if p.get("rotate"):
+        cs = cs.rotate(float(p["rotate"]))
+    if p.get("translate"):
+        tx, ty = p["translate"][:2]
+        cs = cs.translate((float(tx), float(ty)))
     return cs
 
 
-def _shape(n) -> M:
+def _shape(n, env=None) -> M:
     kind = n["shape"]
     segs = _segs(n)
     center = bool(n.get("center", False))
@@ -242,10 +282,13 @@ def _shape(n) -> M:
                           tuple(n.get("scale_top", (1.0, 1.0))))
     if kind == "revolve":
         return _profile(n).revolve(segs, float(n.get("degrees", 360)))
+    if kind in fnshapes.SHAPES:
+        args = (_profile,) if kind in fnshapes.NEEDS_PROFILE else ()
+        return fnshapes.SHAPES[kind](n, env or {}, *args)
     if kind in TEMPLATES:
         return TEMPLATES[kind](n)
     raise ValueError(f"unknown shape '{kind}'. Available: box, cylinder, cone, sphere, tube, torus, "
-                     f"wedge, extrude, revolve, {', '.join(TEMPLATES)}")
+                     f"wedge, extrude, revolve, {', '.join(fnshapes.SHAPES)}, {', '.join(TEMPLATES)}")
 
 
 def _transform(m: M, n: dict) -> M:
@@ -292,9 +335,11 @@ def build_node(node, env: dict, depth: int = 0) -> M:
         raise ValueError(f"node must be an object, got {type(node).__name__}")
     if node.get("hidden"):
         return M()
-    n = resolve(node, env)
+    lazy = fnshapes.LAZY.get(node.get("shape"), ())
+    n = resolve({k: v for k, v in node.items() if k not in lazy}, env)
+    n.update({k: node[k] for k in lazy if k in node})        # per-vertex expressions, see fnshapes
     if "shape" in n:
-        m = _shape(n)
+        m = _shape(n, env)
     elif "op" in n:
         op = n["op"]
         kids = [build_node(c, env, depth + 1) for c in node.get("children", [])]
@@ -414,8 +459,11 @@ Shapes ("shape"):
   wedge    size:[x,y,z]  (right triangular prism)
   extrude  h, profile, twist?, scale_top?:[sx,sy]
   revolve  profile (in the xz plane: x=radius), degrees?
+  radial, heightmap, sweep, loft – expression/path shapes, see below
   profile: {"shape":"polygon","points":[[x,y],...],"holes":[[...]]} | {"shape":"circle","d":..}
-           | {"shape":"rect","size":[x,y],"radius"?, "center"?}   (+ "offset"?)
+           | {"shape":"rect","size":[x,y],"radius"?, "center"?} | {"shape":"spline","points":[..]}
+           | {"op":"union|difference|intersection|hull","profiles":[...]}
+           (+ "offset"?, "rotate"?: deg, "translate"?: [x,y])
 Operations ("op") with "children":[...]: union, difference (first minus the rest), intersection,
   hull, minkowski
 All nodes: translate:[x,y,z], rotate:[rx,ry,rz] (degrees), scale, mirror:[nx,ny,nz],
@@ -423,4 +471,4 @@ All nodes: translate:[x,y,z], rotate:[rx,ry,rz] (degrees), scale, mirror:[nx,ny,
   name:"optional label"
 Values can be expressions: "=w/2+wall", "=max(a,b)", "=sqrt(x)", "=cos(30)" (degrees).
 
-""" + TEMPLATE_HELP
+""" + fnshapes.HELP + "\n" + TEMPLATE_HELP
