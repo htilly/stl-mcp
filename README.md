@@ -300,6 +300,23 @@ from before users existed (`model.json`, files directly in `STL_DIR`) become the
 Users only reach their own models and files; someone else's look exactly like ones that do not
 exist (404). Admins reach everything.
 
+## Accounts and signup
+With `SIGNUP=1` anyone can create an account on the login page: a name and a passkey, nothing
+else. Each account gets its own private library and standalone files; admins (`ADMIN_EMAILS`,
+or `MCP_TOKEN`) see everything and the `/admin` pages. New users see a getting-started checklist,
+and the account dialog (🔑) shows how to connect claude.ai, ChatGPT or Claude Code, with personal
+tokens for clients that send a header.
+
+- **Bots:** set `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET` (Cloudflare Turnstile, free) and keep
+  the per-IP limit (`SIGNUPS_PER_HOUR`, default 5). Behind your own proxy set `TRUSTED_PROXY=1` so
+  the limit sees the real client address.
+- **Limits:** `MAX_MODELS_PER_USER` (100) and `MAX_DISK_MB_PER_USER` (500) apply to non-admins;
+  Claude gets a clear error when one is reached. Script models are admin-only.
+- **Leaving:** users delete their account and all its data from the account dialog. `/privacy`
+  says what is stored.
+
+`SIGNUP=1` requires `MCP_TOKEN`; without it every visitor would be the admin.
+
 ## Security
 Always set `MCP_TOKEN` and put the server behind HTTPS. The web interface requires a login
 (passkey or token, kept as a signed session cookie for 90 days) unless `UI_PUBLIC=1`, which makes it readable by everyone while changes still require a token.

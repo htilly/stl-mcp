@@ -22,7 +22,7 @@
   <label class="search"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-search"/></svg>
     <input type="search" id="q" placeholder="Search models" autocomplete="off" aria-label="Search models"></label>
   <span class="live" id="live" title="Updates automatically when Claude changes something"><span class="dot"></span><span class="label">Live</span></span>
-  <a class="btn icon quiet" href="/admin" title="Admin: print-check settings and design system" aria-label="Admin"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-settings"/></svg></a>
+  <a class="btn icon quiet" id="adminlink" hidden href="/admin" title="Admin: print-check settings and design system" aria-label="Admin"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-settings"/></svg></a>
   <button id="secbtn" class="icon quiet" hidden title="Account: passkeys, connecting Claude, tokens, logout" aria-label="Account"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-key"/></svg></button>
 </header>
 <main class="lib">
@@ -70,7 +70,7 @@
       <summary>claude.ai and the Claude apps</summary>
       <ol class="steps">
         <li>In claude.ai, open <b>Settings → Connectors</b> and click <b>Add custom connector</b>.</li>
-        <li>Name it <code class="mono">STL library</code>, paste the address above, leave the advanced
+        <li>Name it <code class="mono">autosmith</code>, paste the address above, leave the advanced
           settings empty and click <b>Add</b>.</li>
         <li>Click <b>Connect</b>. A page from this library opens; log in with your passkey if asked.</li>
         <li>Check that it sends you back to <b>https://claude.ai</b>, then click <b>Allow</b>.</li>
@@ -82,7 +82,7 @@
       <ol class="steps">
         <li>In ChatGPT, open <b>Settings → Apps &amp; Connectors → Advanced settings</b> and turn on
           <b>Developer mode</b> (on some plans an admin has to allow it).</li>
-        <li>Click <b>Create</b>, name it <code class="mono">STL library</code>, paste the address above
+        <li>Click <b>Create</b>, name it <code class="mono">autosmith</code>, paste the address above
           and choose <b>OAuth</b> as authentication. Leave client id and secret empty.</li>
         <li>A page from this library opens: log in with your passkey and click <b>Allow</b>.</li>
         <li>In a chat, turn the connector on and ask for a model.</li>
@@ -170,6 +170,7 @@ let auth = null;
 function renderAuth() {
   const u = auth.user;
   $("secbtn").hidden = !auth.login_required;
+  $("adminlink").hidden = u.role !== "admin";
   let dismissed = false;
   try { dismissed = localStorage.getItem("pk-banner-dismissed") === "1"; } catch {}
   const needPasskey = auth.login_required && auth.passkeys.length === 0 && passkeysSupported();
@@ -258,7 +259,7 @@ $("tokadd").addEventListener("click", async () => {
   const t = await api("/api/auth/tokens", { method: "POST", body: { name: $("tokname").value.trim() || "token" } });
   newToken = t.token;
   $("newtokval").textContent = t.token;
-  $("newtokcmd").textContent = `claude mcp add --transport http stl ${auth.mcp_url} --header "Authorization: Bearer ${t.token}"`;
+  $("newtokcmd").textContent = `claude mcp add --transport http autosmith ${auth.mcp_url} --header "Authorization: Bearer ${t.token}"`;
   $("newtok").hidden = false;
   $("tokname").value = "";
   loadAuth();

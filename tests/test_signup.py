@@ -262,3 +262,9 @@ def test_delete_account_removes_everything(client, joe, db):
 def test_bootstrap_admin_cannot_delete_itself(client):
     logged_in(client, server._admin())
     assert client.request("DELETE", "/api/auth/me", json={"confirm": "delete"}).status_code == 403
+
+
+def test_library_page_hides_admin_link_until_it_knows_the_role(client, joe):
+    page = logged_in(client, joe).get("/").text
+    assert 'id="adminlink" hidden' in page and '$("adminlink").hidden = u.role !== "admin"' in page
+    assert 'id="howto-chatgpt"' in page and 'id="tokadd"' in page and 'id="delacct"' in page
