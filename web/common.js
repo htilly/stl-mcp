@@ -111,7 +111,9 @@ export async function passkeyLogin() {
   o.challenge = b64u.dec(o.challenge);
   o.allowCredentials = descriptors(o.allowCredentials);
   const cred = await navigator.credentials.get({ publicKey: o });
-  return api("/auth/passkey/login/verify", { method: "POST", body: { flow, credential: credentialJSON(cred) } });
+  const res = await api("/auth/passkey/login/verify", { method: "POST", body: { flow, credential: credentialJSON(cred) } });
+  // "cross-platform": the passkey came from another device, usually a phone via the QR code
+  return { ...res, crossDevice: cred.authenticatorAttachment === "cross-platform" };
 }
 
 async function createPasskey(prefix, body, name) {
