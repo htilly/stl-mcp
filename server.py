@@ -1,4 +1,4 @@
-"""STL-MCP: MCP server (streamable HTTP) + web UI for parametric 3D models.
+"""autosmith (STL-MCP): MCP server (streamable HTTP) + web UI for parametric 3D models.
 
 Models are stored as recipes (kind + params) with version history. Claude creates and adjusts
 models via MCP; the web UI shows the library and a 3D view that updates live.
@@ -14,7 +14,12 @@ Environment variables:
                  needs PUBLIC_URL on https or localhost)
   UI_PUBLIC      1 = web UI + files readable without a token (changes require a token)
   FILES_PUBLIC   1 = only /files/* without a token (download links are clickable)
-  ALLOW_SCRIPT   1 = enable script models (runs arbitrary Python!)
+  ALLOW_SCRIPT   1 = enable script models (runs arbitrary Python!; admins only)
+  SIGNUP         1 = anyone can create an account with a passkey (needs MCP_TOKEN)
+  TURNSTILE_SITE_KEY / TURNSTILE_SECRET  Cloudflare Turnstile on the signup form (off when unset)
+  SIGNUPS_PER_HOUR  new accounts per client IP and hour (default 5)
+  TRUSTED_PROXY  1 = take the client IP from X-Forwarded-For (only behind your own proxy)
+  MAX_MODELS_PER_USER / MAX_DISK_MB_PER_USER  limits for non-admins (default 100 / 500)
   TINKERCAD_MAX_MB  size limit for Tinkercad import (default 25); larger files get a simplified copy
   MAX_UPLOAD_MB  max size for import/upload (default 100)
   ALLOW_PRIVATE_URLS 1 = import_file may fetch from private/local addresses
@@ -33,7 +38,9 @@ import json
 import os
 import re
 import secrets
+import shutil
 import socket
+import uuid
 import zipfile
 from pathlib import Path
 from urllib.parse import urlencode, urljoin, urlparse
@@ -63,7 +70,8 @@ import csg
 import geometry as g
 import printcheck
 import render
-from auth import CHALLENGE_TTL, SCOPE, SESSION_TTL, AuthState, Expiring, OAuthProvider
+from auth import (CHALLENGE_TTL, SCOPE, SESSION_TTL, AuthState, Expiring, OAuthProvider, RateLimiter,
+                  verify_turnstile)
 from db import Database
 from store import Store
 
@@ -82,6 +90,13 @@ TINKERCAD_MAX = int(float(os.environ.get("TINKERCAD_MAX_MB", "25")) * 1_000_000)
 MAX_UPLOAD = int(float(os.environ.get("MAX_UPLOAD_MB", "100")) * 1_000_000)
 ALLOW_PRIVATE_URLS = os.environ.get("ALLOW_PRIVATE_URLS") == "1"
 OAUTH = os.environ.get("OAUTH", "1") != "0"
+SIGNUP = os.environ.get("SIGNUP") == "1"
+TURNSTILE_SITE_KEY = os.environ.get("TURNSTILE_SITE_KEY", "")
+TURNSTILE_SECRET = os.environ.get("TURNSTILE_SECRET", "")
+SIGNUPS_PER_HOUR = int(os.environ.get("SIGNUPS_PER_HOUR", "5"))
+TRUSTED_PROXY = os.environ.get("TRUSTED_PROXY") == "1"
+MAX_MODELS_PER_USER = int(os.environ.get("MAX_MODELS_PER_USER", "100"))
+MAX_DISK_PER_USER = int(float(os.environ.get("MAX_DISK_MB_PER_USER", "500")) * 1_000_000)
 FILE_TYPES = {".stl": "model/stl", ".obj": "model/obj", ".mtl": "text/plain", ".zip": "application/zip"}
 
 db = Database(DATABASE_URL)
@@ -161,6 +176,37 @@ class Lib:
     def url(self, name: str) -> str:
         return f"{PUBLIC_URL}/f/{self.user['id']}/{name}"
 
+    @property
+    def limited(self) -> bool:
+        return self.user["role"] != "admin"
+
+    def disk_bytes(self) -> int:
+        """Bytes on disk for this user's models and standalone files."""
+        dirs = [store.dir / m["id"] for m in store.list(self.user["id"], everyone=False)]
+        dirs.append(OUT / "files" / self.user["id"])
+        return sum(f.stat().st_size for d in dirs if d.is_dir() for f in d.rglob("*") if f.is_file())
+
+    def usage(self) -> dict:
+        return {"models": len(store.list(self.user["id"], everyone=False)),
+                "disk_mb": round(self.disk_bytes() / 1e6, 1),
+                "max_models": MAX_MODELS_PER_USER if self.limited else None,
+                "max_disk_mb": round(MAX_DISK_PER_USER / 1e6) if self.limited else None}
+
+    def ensure_room(self, new_model: bool = False):
+        """Raises LimitError when a non-admin is at their model or disk limit."""
+        if not self.limited:
+            return
+        if new_model and len(store.list(self.user["id"], everyone=False)) >= MAX_MODELS_PER_USER:
+            raise LimitError(f"you have reached the limit of {MAX_MODELS_PER_USER} models - "
+                             "delete some before creating new ones")
+        if self.disk_bytes() >= MAX_DISK_PER_USER:
+            raise LimitError(f"you have used your {MAX_DISK_PER_USER // 1_000_000} MB of storage - "
+                             "delete models or files (delete_model, delete_file) to make room")
+
+
+class LimitError(ValueError):
+    pass
+
 
 def _lib(ctx: Context | None) -> Lib:
     return Lib(_mcp_user(ctx))
@@ -188,6 +234,7 @@ adjustments are easy: update_model(model_id, {"width": 60}).
 @mcp.tool(description=CREATE_MODEL_DOC)
 async def create_model(name: str, spec: dict, description: str = "", ctx: Context = None) -> dict:
     lib = _lib(ctx)
+    lib.ensure_room(new_model=True)
     m = await _run(lib.models.create, name, "csg", spec, description)
     return _summary(m)
 
@@ -215,6 +262,7 @@ async def create_enclosure(
     Adjust later with update_model(model_id, {"inner_z": 30, "/cutouts/0/width": 14}).
     """
     lib = _lib(ctx)
+    lib.ensure_room(new_model=True)
     params = {"inner_x": inner_x, "inner_y": inner_y, "inner_z": inner_z, "wall": wall,
               "floor": floor, "lid_thickness": lid_thickness, "corner_screws": corner_screws,
               "standoffs": standoffs or [], "cutouts": cutouts or [], "lid_holes": lid_holes or [],
@@ -229,6 +277,9 @@ async def create_from_script(name: str, code: str, description: str = "", ctx: C
     `parts` (dict name->mesh). Available: trimesh, numpy as np, g (blk/cyl/union/diff).
     Requires ALLOW_SCRIPT=1. Prefer create_model – it is safe and easier to adjust."""
     lib = _lib(ctx)
+    lib.ensure_room(new_model=True)
+    if lib.user["role"] != "admin":
+        raise PermissionError("script models are for admins only")
     m = await _run(lib.models.create, name, "script", {"code": code}, description)
     return _summary(m)
 
@@ -249,6 +300,7 @@ async def update_model(model_id: str, changes: dict | None = None, remove: list[
     Read the recipe with get_model first if you are unsure of the structure.
     """
     lib = _lib(ctx)
+    lib.ensure_room()
     m = await _run(lib.models.update, model_id, params=params, changes=changes, remove=remove,
                    note=note, name=name, description=description, resolves=resolves)
     return _summary(m)
@@ -313,6 +365,7 @@ def list_models(ctx: Context = None) -> list[dict]:
 async def revert_model(model_id: str, version: int, ctx: Context = None) -> dict:
     """Restores the model to an earlier version (created as a new version)."""
     lib = _lib(ctx)
+    lib.ensure_room()
     return _summary(await _run(lib.models.revert, model_id, version))
 
 
@@ -320,6 +373,7 @@ async def revert_model(model_id: str, version: int, ctx: Context = None) -> dict
 async def duplicate_model(model_id: str, name: str, ctx: Context = None) -> dict:
     """Copies a model to a new one (to try a variant without touching the original)."""
     lib = _lib(ctx)
+    lib.ensure_room(new_model=True)
     return _summary(await _run(lib.models.duplicate, model_id, name))
 
 
@@ -428,6 +482,7 @@ def import_file(name: str, url: str = "", data_base64: str = "", format: str = "
     empty. Zip with obj+mtl (Tinkercad's OBJ export) is unpacked. Dimensions are assumed to be mm.
     The user can also upload directly: curl -T file.stl -H "Authorization: Bearer ..." <server>/upload/file.stl"""
     lib = _lib(ctx)
+    lib.ensure_room()
     if bool(url) == bool(data_base64):
         raise ValueError("provide either url or data_base64")
     if url:
@@ -487,6 +542,7 @@ def modify_file(file: str, name: str = "", scale: float | list[float] | None = N
     Check bounds_mm with file_info first. add/subtract require a watertight model.
     max_triangles: simplify the mesh to at most this many triangles."""
     lib = _lib(ctx)
+    lib.ensure_room()
     mesh = g.modify(_load(lib, file), scale=scale, rotate=rotate, mirror=mirror,
                     place_on_bed=place_on_bed, center_xy=center_xy, add=add, subtract=subtract,
                     do_repair=repair)
@@ -499,6 +555,7 @@ def modify_file(file: str, name: str = "", scale: float | list[float] | None = N
 def split_file(file: str, ctx: Context = None) -> list[dict]:
     """Splits an STL into its loose parts: <name>_part1.stl, <name>_part2.stl, ... (largest first)."""
     lib = _lib(ctx)
+    lib.ensure_room()
     parts = sorted(_load(lib, file).split(only_watertight=False), key=lambda m: -len(m.faces))
     stem = Path(file).stem
     return [_save(lib, p, f"{stem}_part{i}") for i, p in enumerate(parts, 1)]
@@ -511,6 +568,7 @@ def export_obj(name: str, parts: list[dict], ctx: Context = None) -> dict:
     library are given as '<model_id>/<file>' (file per parts[...].url in get_model, e.g. 'box/v3/lid.stl').
     Creates <name>.obj, <name>.mtl and <name>.zip (both files; import the zip's contents)."""
     lib = _lib(ctx)
+    lib.ensure_room()
     name = _safe(name)
     loaded = [(_safe(Path(p["file"]).stem), _load(lib, p["file"]), p.get("color", "")) for p in parts]
     obj, mtl = g.to_obj(loaded, f"{name}.mtl")
@@ -556,6 +614,8 @@ oauth = OAuthProvider(AuthState(db))
 challenges = Expiring(CHALLENGE_TTL)  # WebAuthn challenges per login/registration attempt
 SESSION_COOKIE = "stl_session"
 PASSKEY_LOGIN_PATHS = ("/auth/passkey/login/options", "/auth/passkey/login/verify")
+SIGNUP_PATHS = ("/auth/config", "/auth/signup/options", "/auth/signup/verify", "/privacy")
+signups = RateLimiter(SIGNUPS_PER_HOUR, 3600)
 OAUTH_PATHS = ("/authorize", "/token", "/register", "/revoke")
 
 
@@ -573,7 +633,7 @@ def _oauth_routes() -> list:
         print(f"OAuth disabled: {e} (PUBLIC_URL={PUBLIC_URL})", flush=True)
         return []
     prm = create_protected_resource_routes(AnyHttpUrl(f"{PUBLIC_URL}/mcp"), [issuer],
-                                           scopes_supported=[SCOPE], resource_name="STL library")
+                                           scopes_supported=[SCOPE], resource_name="autosmith")
     # Some clients look for the resource metadata at the root instead of under /mcp.
     root_prm = Route("/.well-known/oauth-protected-resource", prm[0].endpoint, methods=["GET", "OPTIONS"])
     return routes + prm + [root_prm]
@@ -650,6 +710,7 @@ def _public_path(path: str, read: bool) -> bool:
     if _admin_path(path):
         return False  # admin is never public, not even with UI_PUBLIC
     return (path == "/health" or path.startswith("/static/") or path in PASSKEY_LOGIN_PATHS
+            or path in SIGNUP_PATHS
             or (bool(OAUTH_ROUTES) and (path in OAUTH_PATHS or path.startswith("/.well-known/oauth-")))
             or (FILES_PUBLIC and read and path.startswith(("/files/", "/f/")))
             or (UI_PUBLIC and read and (path == "/" or path.startswith("/m/")
@@ -699,15 +760,18 @@ def _passkey_view(p: dict) -> dict:
     return {k: p.get(k) for k in ("id", "name", "created", "last_used")}
 
 
-def _options(purpose: str, opts) -> JSONResponse:
-    flow = challenges.put(secrets.token_urlsafe(16), (purpose, opts.challenge))
+def _options(purpose: str, opts, extra: dict | None = None) -> JSONResponse:
+    flow = challenges.put(secrets.token_urlsafe(16), (purpose, opts.challenge, extra or {}))
     return JSONResponse({"flow": flow, "options": json.loads(webauthn.options_to_json(opts))})
 
 
-async def _flow(request, purpose: str) -> tuple[dict, bytes | None]:
+async def _flow(request, purpose: str, with_extra: bool = False):
+    """(body, challenge) of a WebAuthn attempt - plus the extra data when with_extra."""
     body = await request.json()
     entry = challenges.pop(str(body.get("flow", "")))
-    return body, entry[1] if entry and entry[0] == purpose else None
+    ok = entry and entry[0] == purpose
+    challenge, extra = (entry[1], entry[2]) if ok else (None, {})
+    return (body, challenge, extra) if with_extra else (body, challenge)
 
 
 async def passkey_login_options(_):
@@ -738,9 +802,9 @@ async def passkey_register_options(request):
     rp_id, _origin = _rp()
     existing = [PublicKeyCredentialDescriptor(id=webauthn.base64url_to_bytes(p["id"]))
                 for p in oauth.state.passkeys(user["id"])]
-    label = user["email"] or user["display_name"] or "STL library"
+    label = user["email"] or user["display_name"] or "autosmith"
     return _options("register", webauthn.generate_registration_options(
-        rp_id=rp_id, rp_name="STL library", user_id=user["id"].encode(), user_name=label,
+        rp_id=rp_id, rp_name="autosmith", user_id=user["id"].encode(), user_name=label,
         user_display_name=user["display_name"] or label, exclude_credentials=existing,
         authenticator_selection=AuthenticatorSelectionCriteria(
             resident_key=ResidentKeyRequirement.REQUIRED,
@@ -767,7 +831,7 @@ async def passkey_register_verify(request):
 
 
 def _user_view(u: dict) -> dict:
-    return {k: u.get(k) for k in ("id", "display_name", "email", "role")}
+    return {k: u.get(k) for k in ("id", "display_name", "email", "role", "bootstrap")}
 
 
 async def logout(request):
@@ -782,6 +846,8 @@ async def api_auth(request):
     user = _user(request)
     return JSONResponse({"user": _user_view(user),
                          "passkeys": [_passkey_view(p) for p in oauth.state.passkeys(user["id"])],
+                         "tokens": oauth.state.personal_tokens(user["id"]),
+                         "usage": await _run(Lib(user).usage),
                          "clients": oauth.state.clients(user["id"]) if OAUTH_ROUTES else [],
                          "oauth": bool(OAUTH_ROUTES), "mcp_url": f"{PUBLIC_URL}/mcp",
                          "login_required": bool(TOKEN)})
@@ -796,6 +862,120 @@ async def api_auth_passkey(request):
 async def api_auth_client(request):
     if not oauth.state.revoke_client(request.path_params["id"], _user(request)["id"]):
         return JSONResponse({"error": "no such app"}, status_code=404)
+    return JSONResponse({"ok": True})
+
+
+# ---- signup (open when SIGNUP=1): display name + Turnstile, then a passkey is the account
+
+def _client_ip(request) -> str:
+    if TRUSTED_PROXY:
+        # the proxy appends the address it saw; anything before it came from the client
+        fwd = [p.strip() for p in request.headers.get("x-forwarded-for", "").split(",") if p.strip()]
+        if fwd:
+            return fwd[-1]
+    return request.client.host if request.client else ""
+
+
+async def auth_config(_):
+    """What the login page offers."""
+    return JSONResponse({"signup": SIGNUP, "turnstile_site_key": TURNSTILE_SITE_KEY if SIGNUP else "",
+                         "providers": []})
+
+
+async def signup_options(request):
+    if not SIGNUP:
+        return JSONResponse({"error": "signup is closed"}, status_code=403)
+    body = await request.json()
+    name = str(body.get("display_name") or "").strip()
+    if not 1 <= len(name) <= 80:
+        return JSONResponse({"error": "enter a name (at most 80 characters)"}, status_code=400)
+    ip = _client_ip(request)
+    if not signups.allowed(ip):
+        return JSONResponse({"error": "too many new accounts from your network - try again later"},
+                            status_code=429)
+    if not await _run(verify_turnstile, TURNSTILE_SECRET, str(body.get("turnstile") or ""), ip):
+        return JSONResponse({"error": "the bot check failed - reload the page and try again"},
+                            status_code=400)
+    uid = str(uuid.uuid4())
+    return _options("signup", webauthn.generate_registration_options(
+        rp_id=_rp()[0], rp_name="autosmith", user_id=uid.encode(), user_name=name,
+        user_display_name=name,
+        authenticator_selection=AuthenticatorSelectionCriteria(
+            resident_key=ResidentKeyRequirement.REQUIRED,
+            user_verification=UserVerificationRequirement.PREFERRED)),
+        {"uid": uid, "display_name": name})
+
+
+async def signup_verify(request):
+    if not SIGNUP:
+        return JSONResponse({"error": "signup is closed"}, status_code=403)
+    body, challenge, extra = await _flow(request, "signup", with_extra=True)
+    if not challenge:
+        return JSONResponse({"error": "the attempt expired - try again"}, status_code=400)
+    rp_id, origin = _rp()
+    try:
+        v = webauthn.verify_registration_response(
+            credential=body.get("credential"), expected_challenge=challenge,
+            expected_rp_id=rp_id, expected_origin=origin)
+    except Exception as e:  # noqa: BLE001 – the reason is shown on the signup form
+        return JSONResponse({"error": f"passkey registration failed: {e}"}, status_code=400)
+    if not signups.hit(_client_ip(request)):
+        return JSONResponse({"error": "too many new accounts from your network - try again later"},
+                            status_code=429)
+    st = oauth.state
+    user = await _run(st.create_user, extra["display_name"], None, "member", extra["uid"])
+    pk = await _run(st.add_passkey, user["id"], bytes_to_base64url(v.credential_id),
+                    bytes_to_base64url(v.credential_public_key), v.sign_count,
+                    str(body.get("name") or "passkey"))
+    if not pk:  # the authenticator reused a credential id that belongs to someone else
+        await _run(st.delete_user, user["id"])
+        return JSONResponse({"error": "this passkey already belongs to an account - log in instead"},
+                            status_code=409)
+    return _set_session(JSONResponse({"ok": True, "user": _user_view(user)}), user)
+
+
+async def page_privacy(_):
+    return FileResponse(WEB / "privacy.html")
+
+
+# ---- the account: name, personal tokens, deletion
+
+async def api_auth_me(request):
+    """PATCH {display_name}: rename. DELETE {confirm: "delete"}: delete the account and its data."""
+    user = _user(request)
+    body = await request.json()
+    if request.method == "PATCH":
+        name = str(body.get("display_name") or "").strip()
+        if not 1 <= len(name) <= 80:
+            return JSONResponse({"error": "enter a name (at most 80 characters)"}, status_code=400)
+        return JSONResponse({"user": _user_view(await _run(oauth.state.rename_user, user["id"], name))})
+    if body.get("confirm") != "delete":
+        return JSONResponse({"error": 'send {"confirm": "delete"} to delete the account'}, status_code=400)
+    if user["bootstrap"]:
+        return JSONResponse({"error": "the bootstrap admin account cannot be deleted"}, status_code=403)
+
+    def wipe():
+        n = store.delete_owner(user["id"])
+        shutil.rmtree(OUT / "files" / user["id"], ignore_errors=True)
+        oauth.state.delete_user(user["id"])
+        return n
+    n = await _run(wipe)
+    resp = JSONResponse({"ok": True, "deleted_models": n})
+    resp.delete_cookie(SESSION_COOKIE)
+    return resp
+
+
+async def api_auth_tokens(request):
+    """POST {name}: a new personal token, shown once."""
+    body = await request.json()
+    raw, row = await _run(oauth.state.create_personal_token, _user(request)["id"],
+                          str(body.get("name") or "token"))
+    return JSONResponse({"token": raw, **row})
+
+
+async def api_auth_token(request):
+    if not oauth.state.delete_personal_token(request.path_params["id"], _user(request)["id"]):
+        return JSONResponse({"error": "no such token"}, status_code=404)
     return JSONResponse({"ok": True})
 
 
@@ -823,7 +1003,7 @@ async def oauth_consent(request):
         who = user["email"] or user["display_name"] or "your account"
         return _consent_page(
             f"<h2>Connect {e(p['client_name'])}?</h2>"
-            f"<p>It will be able to read, create and change the models in your STL library "
+            f"<p>It will be able to read, create and change the models in your autosmith library "
             f"(signed in as <strong>{e(who)}</strong>).</p>"
             f"<p class=\"hint\">After approving you are sent back to "
             f"<strong>{e(dest.scheme)}://{e(dest.netloc)}</strong>. Only approve if you just "
@@ -904,6 +1084,7 @@ async def api_model(request):
                 m = lib.models.comment_action(mid, body["id"], action.removeprefix("comment_"),
                                          body.get("text", ""))
             elif action == "duplicate":
+                lib.ensure_room(new_model=True)
                 m = await _run(lib.models.duplicate, mid, body.get("name") or f"{mid} copy")
             else:
                 return JSONResponse({"error": "unknown action"}, status_code=400)
@@ -1032,8 +1213,10 @@ async def upload(request):
         if len(body) > MAX_UPLOAD:
             return JSONResponse({"error": f"larger than {MAX_UPLOAD // 1_000_000} MB"}, status_code=413)
     try:
+        lib = _req_lib(request)
+        lib.ensure_room()
         mesh = g.load_mesh(bytes(body), fname.suffix.lstrip(".") or "stl")
-        return JSONResponse(_save(_req_lib(request), mesh, _safe(fname.stem)))
+        return JSONResponse(_save(lib, mesh, _safe(fname.stem)))
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
 
@@ -1044,6 +1227,8 @@ async def health(_):
 
 def startup():
     """Schema migrations, the bootstrap admin, and a one-time import of the pre-users auth.json."""
+    if SIGNUP and not TOKEN:
+        raise RuntimeError("SIGNUP=1 needs MCP_TOKEN: without it every visitor would be the admin")
     applied = db.migrate()
     if applied:
         print(f"database migrations applied: {', '.join(applied)}", flush=True)
@@ -1096,6 +1281,13 @@ app = Starlette(
         Route("/auth/passkey/register/options", passkey_register_options, methods=["POST"]),
         Route("/auth/passkey/register/verify", passkey_register_verify, methods=["POST"]),
         Route("/auth/logout", logout, methods=["POST"]),
+        Route("/auth/config", auth_config),
+        Route("/auth/signup/options", signup_options, methods=["POST"]),
+        Route("/auth/signup/verify", signup_verify, methods=["POST"]),
+        Route("/privacy", page_privacy),
+        Route("/api/auth/me", api_auth_me, methods=["PATCH", "DELETE"]),
+        Route("/api/auth/tokens", api_auth_tokens, methods=["POST"]),
+        Route("/api/auth/tokens/{id}", api_auth_token, methods=["DELETE"]),
         Route("/api/auth", api_auth),
         Route("/api/auth/passkeys/{id}", api_auth_passkey, methods=["DELETE"]),
         Route("/api/auth/clients/{id}", api_auth_client, methods=["DELETE"]),

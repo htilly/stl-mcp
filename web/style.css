@@ -1,4 +1,4 @@
-/* stl-mcp web UI. Tokens and components are documented in docs/DESIGN.md and shown live at
+/* autosmith web UI. Tokens and components are documented in docs/DESIGN.md and shown live at
    /admin/design. Change a value here, not in a page: every page reads these tokens. */
 
 @font-face {
@@ -30,6 +30,7 @@
   --layout: #2340c0;         /* accent: machinist's layout blue */
   --layout-ink: #ffffff;
   --layout-wash: #e4e8fa;    /* selected rows, banners */
+  --ember: #e8782a;          /* brand spark: the logo and little else */
   --pei: #e2ad45;            /* comments and pins: PEI build plate */
   --pei-ink: #2a2110;
   --fault: #b8322a;
@@ -60,7 +61,7 @@
     --aluminium: #111418; --sheet: #181c22; --inset: #1f242b;
     --graphite: #e6e9ed; --scribe: #8f99a6; --rule: #2a3038; --rule-strong: #46505c;
     --layout: #8197ff; --layout-ink: #0d1124; --layout-wash: #1e2546;
-    --pei: #e8b552; --fault: #f0735f; --sound: #52c486;
+    --pei: #e8b552; --ember: #ff9a55; --fault: #f0735f; --sound: #52c486;
     --stage: #15181d; --stage-grid: #232830; --stage-grid-major: #353c47;
     --lift: 0 12px 32px rgb(0 0 0 / .5), 0 1px 3px rgb(0 0 0 / .4);
     color-scheme: dark;
@@ -70,7 +71,7 @@
   --aluminium: #111418; --sheet: #181c22; --inset: #1f242b;
   --graphite: #e6e9ed; --scribe: #8f99a6; --rule: #2a3038; --rule-strong: #46505c;
   --layout: #8197ff; --layout-ink: #0d1124; --layout-wash: #1e2546;
-  --pei: #e8b552; --fault: #f0735f; --sound: #52c486;
+  --pei: #e8b552; --ember: #ff9a55; --fault: #f0735f; --sound: #52c486;
   --stage: #15181d; --stage-grid: #232830; --stage-grid-major: #353c47;
   --lift: 0 12px 32px rgb(0 0 0 / .5), 0 1px 3px rgb(0 0 0 / .4);
   color-scheme: dark;
@@ -129,7 +130,10 @@ header.top .grow { flex: 1; }
   font-size: var(--t-md); font-weight: 700; font-stretch: 112%; letter-spacing: -.01em;
   color: var(--graphite); white-space: nowrap;
 }
-.wordmark .i { width: 22px; height: 22px; --mark-fill: var(--layout); stroke-width: 1.7; }
+.wordmark .i { width: 34px; height: 34px; --mark-fill: var(--layout); --mark-gap: var(--sheet); --mark-spark: var(--ember); }
+.wordmark .name, .wordmark > span { font-weight: 500; }
+.wordmark b { font-weight: 800; }
+.wordmark small { font-size: inherit; font-weight: 500; color: var(--scribe); }
 a.wordmark:hover { text-decoration: none; }
 .crumb { display: inline-flex; align-items: center; gap: var(--s2); color: var(--scribe); min-width: 0; }
 .crumb b { color: var(--graphite); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -402,7 +406,8 @@ textarea.recipe { font-family: var(--mono); font-size: 11.5px; width: 100%; min-
   border-radius: var(--r-panel); overflow: hidden;
 }
 .gate .panel > .body { padding: var(--s6) var(--s5) var(--s5); }
-.gate .wordmark { margin-bottom: var(--s6); }
+.gate .wordmark { margin-bottom: var(--s6); font-size: var(--t-lg); }
+.gate .wordmark .i { width: 48px; height: 48px; }
 .gate h2 { font-size: var(--t-lg); margin-bottom: var(--s2); }
 .gate p { color: var(--scribe); }
 .gate form { margin-top: var(--s4); }
@@ -416,6 +421,43 @@ textarea.recipe { font-family: var(--mono); font-size: 11.5px; width: 100%; min-
 .gate form.row { margin-top: var(--s5); flex-wrap: nowrap; }
 .gate form.row button { flex: 1; height: 40px; }
 .gate .warn { margin-top: var(--s3); }
+.gate .stack { display: flex; flex-direction: column; gap: var(--s2); margin-top: var(--s5); }
+.gate .stack button { width: 100%; }
+.gate label { display: block; margin: var(--s3) 0 6px; }
+.gate input[type=text] { width: 100%; }
+.gate .or {
+  display: flex; align-items: center; gap: var(--s3); margin: var(--s5) 0 0;
+  color: var(--scribe); font-size: var(--t-sm);
+}
+.gate .or::before, .gate .or::after { content: ""; flex: 1; border-top: 1px solid var(--rule); }
+#turnstile:not(:empty) { margin-top: var(--s3); min-height: 65px; }
+
+/* long-form text (privacy) inside a gate panel */
+.prose h3 { font-size: var(--t-base); font-weight: 650; margin: var(--s5) 0 var(--s2); }
+.prose ul { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; color: var(--scribe); }
+.prose b { color: var(--graphite); }
+
+/* getting started: the empty library's checklist */
+ol.start { list-style: none; margin: var(--s4) 0 0; padding: 0; counter-reset: step; }
+ol.start > li {
+  counter-increment: step; position: relative; padding: 0 0 var(--s4) 40px; color: var(--scribe);
+}
+ol.start > li::before {
+  content: counter(step); position: absolute; left: 0; top: -2px;
+  width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%;
+  border: 1px solid var(--rule); background: var(--sheet); color: var(--graphite);
+  font-size: var(--t-sm); font-weight: 600;
+}
+ol.start > li.done::before { content: "✓"; background: var(--layout-wash); border-color: var(--layout); color: var(--layout); }
+ol.start > li > b { display: block; color: var(--graphite); margin-bottom: 4px; }
+ol.start .row { margin-top: var(--s2); }
+
+/* a secret shown once (a new personal token) */
+.secret {
+  margin: var(--s2) 0 var(--s3); padding: var(--s3); background: var(--inset);
+  border: 1px solid var(--rule); border-radius: var(--r-panel);
+}
+.secret code { display: block; overflow-wrap: anywhere; margin: 6px 0; }
 
 dialog {
   background: var(--sheet); color: var(--graphite); border: 1px solid var(--rule); border-radius: var(--r-panel);

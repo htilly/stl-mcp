@@ -105,13 +105,30 @@ export async function passkeyLogin() {
   return api("/auth/passkey/login/verify", { method: "POST", body: { flow, credential: credentialJSON(cred) } });
 }
 
-export async function passkeyRegister(name) {
-  const { flow, options: o } = await api("/auth/passkey/register/options", { method: "POST", body: {} });
+async function createPasskey(prefix, body, name) {
+  const { flow, options: o } = await api(`${prefix}/options`, { method: "POST", body });
   o.challenge = b64u.dec(o.challenge);
   o.user.id = b64u.dec(o.user.id);
   o.excludeCredentials = descriptors(o.excludeCredentials);
   const cred = await navigator.credentials.create({ publicKey: o });
-  return api("/auth/passkey/register/verify", { method: "POST", body: { flow, name, credential: credentialJSON(cred) } });
+  return api(`${prefix}/verify`, { method: "POST", body: { flow, name, credential: credentialJSON(cred) } });
+}
+
+// Adds a passkey to the logged-in account.
+export const passkeyRegister = (name) => createPasskey("/auth/passkey/register", {}, name);
+
+// Creates a new account whose login is this passkey (open signup).
+export const passkeySignup = (displayName, turnstile, name) =>
+  createPasskey("/auth/signup", { display_name: displayName, turnstile }, name);
+
+// Copies text and briefly says so on the button.
+export async function copyText(btn, text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    const label = btn.textContent;
+    btn.textContent = "Copied";
+    setTimeout(() => { btn.textContent = label; }, 1500);
+  } catch {}
 }
 
 // ---- icons: the sprite in /static/icons.svg (see docs/DESIGN.md#icons)

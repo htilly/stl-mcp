@@ -1,4 +1,6 @@
-# stl-mcp
+# autosmith.eu
+
+*STL, made by AI.* (repo and service name: `stl-mcp`)
 
 Self-hosted MCP server where Claude creates and iteratively adjusts 3D models for printing (mm),
 with a web interface for viewing, rotating and browsing the models.
@@ -147,7 +149,7 @@ Once, about a minute. The connector then also works in the Claude apps on your p
    `https://stl.tilly.se/`), log in with the token once and click **Add passkey** in the banner
    (or under 🔑 in the header). Without a passkey you can still log in with the token in step 5.
 2. In claude.ai, open **Settings → Connectors** and click **Add custom connector**.
-3. Name: `STL library`. URL: `https://<your-url>/mcp` (here: `https://stl.tilly.se/mcp`).
+3. Name: `autosmith`. URL: `https://<your-url>/mcp` (here: `https://stl.tilly.se/mcp`).
    Leave the advanced settings (OAuth client id/secret) empty. Click **Add**.
 4. Click **Connect** next to the new connector. A page from your server opens.
 5. If you are not logged in there, click **Log in with passkey** (or use the token).
