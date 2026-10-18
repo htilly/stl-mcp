@@ -8,7 +8,7 @@
 <link rel="icon" href="/static/favicon.ico" sizes="48x48">
 <link rel="apple-touch-icon" href="/static/brand/apple-touch-icon.png">
 <link rel="manifest" href="/static/brand/site.webmanifest">
-<meta name="theme-color" content="#14181f">
+<meta name="theme-color" content="#0f172a">
 <meta property="og:site_name" content="autosmith.eu">
 <meta property="og:title" content="autosmith: STL, made by AI">
 <meta property="og:image" content="/static/brand/og-image.png">
@@ -47,7 +47,7 @@
     .styles td.spec { white-space: normal; }
   }
   .ref > header { margin-bottom: var(--s6); max-width: 64ch; }
-  .ref > header h1 { font-size: var(--t-xl); font-stretch: 96%; letter-spacing: -.015em; margin-bottom: var(--s2); }
+  .ref > header h1 { font-size: var(--t-xl); letter-spacing: -.015em; margin-bottom: var(--s2); }
   .ref > header p { color: var(--scribe); }
   .ref section { padding: var(--s6) 0; border-top: 1px solid var(--rule); }
   .ref section > h2 { font-size: var(--t-lg); margin-bottom: var(--s2); }
@@ -144,16 +144,14 @@
         <div class="glyphs">ABCDEFGHIJKLMNOPQRSTUVWXYZ<br>abcdefghijklmnopqrstuvwxyz<br>0123456789 × ± ° ³ Ø ≤ ≥ → … “ ” – —</div>
         <h3>Weight</h3>
         <div class="ramp" id="weights"></div>
-        <h3>Width</h3>
-        <div class="ramp" id="widths"></div>
       </div>
       <dl class="tb full" style="grid-auto-flow:row;grid-template-columns:1fr;align-self:start">
-        <div><dt>Family</dt><dd>Archivo</dd></div>
+        <div><dt>Family</dt><dd>Plus Jakarta Sans</dd></div>
         <div><dt>Role</dt><dd>Interface: everything except code</dd></div>
-        <div><dt>File</dt><dd class="mono">archivo-latin-wdth-normal.woff2</dd></div>
-        <div><dt>Axes</dt><dd>Weight 100–900, width 62–125%</dd></div>
-        <div><dt>In use</dt><dd>400, 500, 600, 650, 700; widths 78, 96, 100, 112%</dd></div>
-        <div><dt>Status</dt><dd id="st-archivo">Checking</dd></div>
+        <div><dt>File</dt><dd class="mono">plus-jakarta-sans-latin-wght-normal.woff2</dd></div>
+        <div><dt>Axes</dt><dd>Weight 200–800</dd></div>
+        <div><dt>In use</dt><dd>400, 500, 600, 650, 700, 800</dd></div>
+        <div><dt>Status</dt><dd id="st-sans">Checking</dd></div>
       </dl>
     </div>
     <div class="demo">
@@ -354,8 +352,6 @@ $("parts").innerHTML = PART_COLORS.map((c, i) => `<div class="sw"><div class="ch
   <dl class="tb"><div><dt>Part</dt><dd>${i + 1}</dd></div><div><dt>Value</dt><dd class="mono">${c}</dd></div></dl></div>`).join("");
 $("weights").innerHTML = [300, 400, 500, 600, 650, 700, 800].map((w) =>
   `<div><span class="ts-label">${w}</span><span style="font-weight:${w}">Revision 12 of 12</span></div>`).join("");
-$("widths").innerHTML = [62, 78, 96, 100, 112, 125].map((w) =>
-  `<div><span class="ts-label">${w}%</span><span style="font-stretch:${w}%;font-weight:600">Revision 12 of 12</span></div>`).join("");
 
 function drawStyles() {
   $("styles").innerHTML = STYLES.map(([cls, name, sample, use]) =>
@@ -374,7 +370,7 @@ function drawStyles() {
 async function fontStatus() {
   await document.fonts.ready;
   const ok = (spec) => document.fonts.check(spec) && [...document.fonts].some((f) => spec.includes(f.family.replace(/"/g, "")) && f.status === "loaded");
-  $("st-archivo").textContent = ok('600 16px "Archivo"') ? "Loaded" : "Not loaded: falling back to system-ui";
+  $("st-sans").textContent = ok('600 16px "Plus Jakarta Sans"') ? "Loaded" : "Not loaded: falling back to system-ui";
   $("st-mono").textContent = ok('400 16px "Plex Mono"') ? "Loaded" : "Not loaded: falling back to ui-monospace";
 }
 

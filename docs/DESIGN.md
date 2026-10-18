@@ -1,7 +1,7 @@
 # Design system: autosmith
 
-autosmith.eu: *STL, made by AI.* The name pairs the forge (a smith) with automation; the mark is an anvil
-built from the triangles an STL file is made of, with one ember spark.
+autosmith.eu: *STL, made by AI.* The name pairs the forge (a smith) with automation; the mark is a stack of
+chevrons, a part rising layer by layer, in an Electric Blue to Teal gradient.
 
 The web UI is a workbench for parts that Claude builds and you print. It should read like a
 measuring tool: calm, exact, and quiet enough that the model on screen is the loudest thing.
@@ -32,21 +32,21 @@ dark set applies automatically (`prefers-color-scheme`) or with `<html data-them
 
 | Token | Light | Dark | Use |
 |---|---|---|---|
-| `--aluminium` | `#e8ebee` | `#111418` | Page background |
-| `--sheet` | `#fcfdfd` | `#181c22` | Panels, cards, header, dialogs |
-| `--inset` | `#f2f4f6` | `#1f242b` | Inputs, code, hovered rows |
-| `--graphite` | `#1a1f27` | `#e6e9ed` | Text |
-| `--scribe` | `#5b6673` | `#8f99a6` | Secondary text, title block labels |
-| `--rule` | `#d5dae0` | `#2a3038` | Borders and title block rules |
-| `--rule-strong` | `#aab3bd` | `#46505c` | Hovered borders, inactive dots |
-| `--layout` | `#2340c0` | `#8197ff` | Accent: primary action, selection, focus. Machinist's layout blue |
-| `--layout-wash` | `#e4e8fa` | `#1e2546` | Selected rows, active toggles, banners |
-| `--ember` | `#e8782a` | `#ff9a55` | Brand spark in the logo. Never used for UI state |
+| `--aluminium` | `#f8fafc` | `#0b1220` | Page background |
+| `--sheet` | `#ffffff` | `#0f172a` | Panels, cards, header, dialogs |
+| `--inset` | `#f1f5f9` | `#172033` | Inputs, code, hovered rows |
+| `--graphite` | `#0f172a` | `#f1f5f9` | Text |
+| `--scribe` | `#64748b` | `#94a3b8` | Secondary text, title block labels |
+| `--rule` | `#e2e8f0` | `#1e293b` | Borders and title block rules |
+| `--rule-strong` | `#cbd5e1` | `#334155` | Hovered borders, inactive dots |
+| `--layout` | `#2563eb` | `#60a5fa` | Accent: primary action, selection, focus. Electric Blue (`#3b82f6`, `--brand`) darkened for text contrast |
+| `--layout-wash` | `#e0ebff` | `#172554` | Selected rows, active toggles, banners |
+| `--ember` | `#06b6d4` | `#22d3ee` | Brand Teal: logo gradient end, small accents. Never used for UI state |
 | `--pei` | `#e2ad45` | `#e8b552` | Comments and pins. The gold of a PEI build plate |
 | `--fault` | `#b8322a` | `#f0735f` | Print-check warnings, destructive actions, errors |
 | `--sound` | `#2a7d4f` | `#52c486` | Live connection, current revision |
-| `--stage` | `#e3e6ea` | `#15181d` | 3D viewport background (read by `viewer.html`) |
-| `--stage-grid`, `--stage-grid-major` | `#d2d6dc`, `#b4bbc5` | `#232830`, `#353c47` | Build plate grid in the viewport |
+| `--stage` | `#eef2f7` | `#0d1424` | 3D viewport background (read by `viewer.html`) |
+| `--stage-grid`, `--stage-grid-major` | `#dde4ec`, `#c3ccd8` | `#18233a`, `#2a3a58` | Build plate grid in the viewport |
 | `--plate` | `#f6f7f9` | same | Behind preview PNGs; matches `render.BG` |
 
 Rules of use:
@@ -68,11 +68,10 @@ the 3D view you see always agree. Change both together.
 
 | Role | Face | Notes |
 |---|---|---|
-| Interface | **Archivo** (variable, weight 100–900, width 62–125%) | Self-hosted in `web/fonts/`, OFL |
+| Interface | **Plus Jakarta Sans** (variable, weight 200–800) | Self-hosted in `web/fonts/`, OFL |
 | Code, ids, parameters | **IBM Plex Mono** 400 / 500 | Only for things you would copy into code |
 
-Archivo's width axis does structural work: title block labels are set condensed
-(`font-stretch: 78%`), the wordmark slightly expanded (112%). Body text stays at 100%.
+The brand typeface is Plus Jakarta Sans; headings use weight 700 with slightly tight tracking.
 
 Scale (px), from the classical 11 / 12 / 14 / 16 / 21 / 28 steps:
 
@@ -127,7 +126,7 @@ gives the 14 px size. An icon-only button needs `class="icon"` and an `aria-labe
 
 | Id | Meaning |
 |---|---|
-| `i-mark` | The autosmith mark: a faceted anvil with an ember spark (64 × 64, multi-tone) |
+| `i-mark` | The autosmith mark: the layered isometric brand mark (64 × 64, multi-tone) |
 | `i-search` | Search |
 | `i-key` | Passkeys and login security |
 | `i-settings` | Admin: print-check settings |
@@ -148,13 +147,13 @@ one exception), and keep each to a few paths.
 ## Brand
 
 Files in [`web/brand/`](../web/brand): `mark.svg` (light/dark aware), `logo.svg` / `logo-dark.svg`
-(lockup with `autosmith.eu`, text as paths), `icon.svg` (app tile), `og-image.svg|png` (1200 × 630 social
+(primary lockup with tagline, text as Plus Jakarta Sans outlines), `icon.svg` (app tile), `og-image.svg|png` (1200 × 630 social
 card), PNG app icons, `apple-touch-icon.png` and `site.webmanifest`. The browser tab icon is
 [`web/favicon.svg`](../web/favicon.svg) (same as `mark.svg`) with `favicon.ico` as fallback.
 
-- Wordmark: lowercase **auto** (weight 500) + **smith** (800) in Archivo at 112% width. `.eu` is set in `--scribe`, only in lockups.
+- Wordmark: lowercase **auto** in `--graphite` + **smith** in Electric Blue, Plus Jakarta Sans 700. `.eu` is set in `--scribe`, only in lockups.
 - Clear space: the height of the spark on every side. Minimum mark size 16 px.
-- The mark's facets are one blue at ten opacities; do not recolour them per state. The spark is the only `--ember` use.
+- The mark is traced from the brand board (three layered facets, blue to cyan); do not redraw or recolour it. The sprite symbol `i-mark` carries its own gradients.
 
 ## Components
 

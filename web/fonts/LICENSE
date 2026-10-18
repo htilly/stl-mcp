@@ -1,7 +1,7 @@
 Fonts in this directory are licensed under the SIL Open Font License, Version 1.1
 (https://openfontlicense.org), and were taken from the Fontsource packages on npm.
 
-- archivo-latin-wdth-normal.woff2: Archivo (variable, wght 100-900, wdth 62-125)
-  Copyright 2020 The Archivo Project Authors (https://github.com/Omnibus-Type/Archivo)
+- plus-jakarta-sans-latin-wght-normal.woff2: Plus Jakarta Sans (variable, wght 200-800)
+  Copyright 2020 The Plus Jakarta Sans Project Authors (https://github.com/tokotype/PlusJakartaSans)
 - ibm-plex-mono-latin-*.woff2: IBM Plex Mono
   Copyright 2017 IBM Corp. (https://github.com/IBM/plex)
