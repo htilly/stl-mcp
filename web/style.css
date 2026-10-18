@@ -257,6 +257,7 @@ a.btn.quiet { background: transparent; border-color: transparent; color: var(--s
 a.btn.quiet:hover { background: var(--inset); color: var(--graphite); }
 .btn.icon { width: 32px; padding: 0; }
 
+.foot { text-align: center; color: var(--scribe); font-size: var(--t-sm); padding: var(--s5) var(--s5) var(--s6); }
 .empty { color: var(--scribe); padding: 12vh var(--s5) var(--s7); max-width: 560px; margin: 0 auto; }
 .empty h2 { color: var(--graphite); font-size: var(--t-lg); margin-bottom: var(--s3); }
 .empty pre { background: var(--sheet); border: 1px solid var(--rule); padding: var(--s3); border-radius: var(--r-panel); overflow-x: auto; }

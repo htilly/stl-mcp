@@ -130,6 +130,7 @@ gives the 14 px size. An icon-only button needs `class="icon"` and an `aria-labe
 | `i-search` | Search |
 | `i-key` | Passkeys and login security |
 | `i-settings` | Admin: print-check settings |
+| `i-heart` | Donate button (shown when `DONATE_URL` is set) |
 | `i-swatch` | Admin: design system |
 | `i-type` | Typography |
 | `i-comment` | Comments, comment mode |

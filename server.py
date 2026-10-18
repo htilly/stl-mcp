@@ -18,6 +18,7 @@ Environment variables:
   SIGNUP         1 = anyone can create an account with a passkey (needs MCP_TOKEN)
   TURNSTILE_SITE_KEY / TURNSTILE_SECRET  Cloudflare Turnstile on the signup form (off when unset)
   SIGNUPS_PER_HOUR  new accounts per client IP and hour (default 5)
+  DONATE_URL     https link for the Donate button (e.g. https://paypal.me/yourname); hidden when unset
   TRUSTED_PROXY  1 = take the client IP from X-Forwarded-For (only behind your own proxy)
   MAX_MODELS_PER_USER / MAX_DISK_MB_PER_USER  limits for non-admins (default 100 / 500)
   TINKERCAD_MAX_MB  size limit for Tinkercad import (default 25); larger files get a simplified copy
@@ -95,6 +96,9 @@ SIGNUP = os.environ.get("SIGNUP") == "1"
 TURNSTILE_SITE_KEY = os.environ.get("TURNSTILE_SITE_KEY", "")
 TURNSTILE_SECRET = os.environ.get("TURNSTILE_SECRET", "")
 SIGNUPS_PER_HOUR = int(os.environ.get("SIGNUPS_PER_HOUR", "5"))
+DONATE_URL = os.environ.get("DONATE_URL", "").strip()
+if not DONATE_URL.startswith("https://"):
+    DONATE_URL = ""
 TRUSTED_PROXY = os.environ.get("TRUSTED_PROXY") == "1"
 MAX_MODELS_PER_USER = int(os.environ.get("MAX_MODELS_PER_USER", "100"))
 MAX_DISK_PER_USER = int(float(os.environ.get("MAX_DISK_MB_PER_USER", "500")) * 1_000_000)
@@ -889,8 +893,11 @@ def _client_ip(request) -> str:
 
 async def auth_config(_):
     """What the login page offers."""
-    return JSONResponse({"signup": SIGNUP, "turnstile_site_key": TURNSTILE_SITE_KEY if SIGNUP else "",
-                         "providers": _providers()})
+    cfg = {"signup": SIGNUP, "turnstile_site_key": TURNSTILE_SITE_KEY if SIGNUP else "",
+           "providers": _providers()}
+    if DONATE_URL:
+        cfg["donate_url"] = DONATE_URL
+    return JSONResponse(cfg)
 
 
 def _providers() -> list[dict]:
