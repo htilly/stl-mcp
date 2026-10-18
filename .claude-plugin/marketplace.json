@@ -1,0 +1,11 @@
+{
+  "name": "stl-mcp",
+  "owner": { "name": "Henrik Tilly" },
+  "plugins": [
+    {
+      "name": "stl-watch",
+      "source": "./plugins/stl-watch",
+      "description": "Wakes Claude Code the moment you comment on a model in the autosmith web UI."
+    }
+  ]
+}
