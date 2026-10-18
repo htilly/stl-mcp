@@ -32,15 +32,43 @@ target and break the image-id provenance check.
   including `/.well-known/oauth-*`, `/authorize`, `/token`, `/register` and `/revoke`, which
   claude.ai uses to connect. `PUBLIC_URL` must be `https://stl.tilly.se` exactly: it is the
   OAuth issuer and the passkeys' relying party id.
-- Users, passkeys, sessions and OAuth tokens live in Postgres. **Before the first deploy with
-  users**, tillyse needs a Postgres service on the `config_default` network and
-  `DATABASE_URL` (plus `ADMIN_EMAILS`) in `/config/secrets/stl-mcp.env`; without it the
-  container exits at startup and the deploy rolls back. On that first start the old
-  `/config/stl-mcp/data/auth.json` is imported into the admin account and renamed
-  `auth.json.imported`. Back the database up with `pg_dump` next to the data directory.
+- Users, passkeys, sessions, OAuth tokens and the model metadata live in Postgres. See
+  "Going live with users" below before deploying a version that has them.
 
 The repo's own `docker-compose.yml` (with `build: .` and the optional Caddy profile) is for
 running stl-mcp on other machines; tillyse does not read it.
+
+## Going live with users (one time)
+
+From the "users" release on (PRs #11-#15), the server needs Postgres and refuses to start without
+it, so the deploy rolls back until this is done. On tillyse, outside this repo:
+
+1. **Postgres.** Add a `stl-mcp-db` service to `/config/docker-compose.yml` (`postgres:17-alpine`,
+   on `config_default`, data in `/config/stl-mcp/pgdata`, `restart: unless-stopped`), and start it.
+2. **Secrets** in `/config/secrets/stl-mcp.env`:
+   - `DATABASE_URL=postgresql://stl:<password>@stl-mcp-db:5432/stl`
+   - `ADMIN_EMAILS=<your email>`: the bootstrap admin, the one `MCP_TOKEN` logs in as.
+   - `TRUSTED_PROXY=1`: SWAG sets `X-Forwarded-For`. Without it, the signup limit counts every
+     visitor as SWAG's own address.
+3. **Back up first.** Copy `/config/stl-mcp/data` before the first deploy. On first start the
+   server moves `auth.json`, every `models/*/model.json` and the loose files in `data/` into the
+   admin account. The originals are renamed `*.imported`, not deleted.
+4. **Deploy** (merge to `main`). The startup log shows `database migrations applied: ...` and the
+   import counts. Check that passkey login and the claude.ai connector still work.
+5. **Backups.** Add a daily `pg_dump` (for example `docker exec stl-mcp-db pg_dump -U stl stl |
+   gzip > /config/backups/stl-mcp-$(date +%F).sql.gz`) next to the copy of `data/`. A restore
+   needs both.
+
+Opening up to everyone is a separate step, once the above runs fine:
+
+6. **Turnstile.** In Cloudflare create a Turnstile widget for `stl.tilly.se` and set
+   `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET`.
+7. **Sign in with providers** (optional; each one appears when its values are set). Redirect URI:
+   `https://stl.tilly.se/auth/sso/<google|github|apple>/callback`. See the README section
+   "Sign in with Google, GitHub or Apple".
+8. **`SIGNUP=1`.** Optionally set `MAX_MODELS_PER_USER` and `MAX_DISK_MB_PER_USER`. Keep
+   `ALLOW_SCRIPT=0` and `FILES_PUBLIC=0`. Watch new accounts under Admin → Users. Disable or
+   delete them there, and set `SIGNUP=0` to close signup again.
 
 ## Rolling back manually
 

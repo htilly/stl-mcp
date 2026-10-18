@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Users · autosmith</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/static/favicon.ico" sizes="48x48">
+<link rel="apple-touch-icon" href="/static/brand/apple-touch-icon.png">
+<link rel="manifest" href="/static/brand/site.webmanifest">
+<meta name="theme-color" content="#14181f">
+<meta property="og:site_name" content="autosmith.eu">
+<meta property="og:title" content="autosmith: STL, made by AI">
+<meta property="og:image" content="/static/brand/og-image.png">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <a class="wordmark" href="/" title="Back to the library"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-mark"/></svg><span class="name">auto<b>smith</b></span></a>
+  <span class="crumb admin-crumb">/ <b>Admin</b></span>
+  <nav class="tabs" aria-label="Admin pages">
+    <a href="/admin"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-settings"/></svg>Print check</a>
+    <a href="/admin/users" aria-current="page"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-key"/></svg>Users</a>
+    <a href="/admin/design"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-swatch"/></svg>Design system</a>
+  </nav>
+</header>
+<main class="admin">
+  <h1>Users</h1>
+  <p class="msg" id="summary"></p>
+  <div class="row"><label class="search grow"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-search"/></svg>
+    <input type="search" id="q" placeholder="Search name or email" autocomplete="off" aria-label="Search users"></label></div>
+  <div id="users"></div>
+  <p class="msg" id="msg"></p>
+</main>
+<script type="module">
+import { api, ago, esc } from "/static/common.js";
+
+const $ = (id) => document.getElementById(id);
+const say = (t, err) => { $("msg").textContent = t; $("msg").className = "msg" + (err ? " err" : ""); };
+let users = [], me = null;
+
+function draw() {
+  const term = $("q").value.trim().toLowerCase();
+  const list = users.filter((u) => !term || `${u.display_name} ${u.email || ""}`.toLowerCase().includes(term));
+  const admins = users.filter((u) => u.role === "admin").length;
+  $("summary").textContent = `${users.length} users, ${admins} admin${admins === 1 ? "" : "s"}. ` +
+    (signup ? "Signup is open." : "Signup is closed (SIGNUP=0).");
+  $("users").innerHTML = list.map((u) => {
+    const self = me && u.id === me.id;
+    const locked = u.bootstrap || self;
+    const ways = [u.bootstrap ? "server token" : "", u.passkeys ? `${u.passkeys} passkey${u.passkeys === 1 ? "" : "s"}` : "",
+      ...u.providers].filter(Boolean).join(", ") || "no way to log in";
+    return `<section class="group user${u.disabled ? " off" : ""}" data-id="${esc(u.id)}">
+      <h2>${esc(u.display_name || "(no name)")}
+        ${u.role === "admin" ? '<span class="pill">admin</span>' : ""}
+        ${u.bootstrap ? '<span class="pill">bootstrap</span>' : ""}
+        ${u.disabled ? '<span class="pill">disabled</span>' : ""}
+        ${self ? '<span class="pill">you</span>' : ""}</h2>
+      <p class="help">${esc(u.email || "no email")} · joined ${ago(u.created)} · ${u.last_login ? `last login ${ago(u.last_login)}` : "never logged in"}</p>
+      <dl class="tb full">
+        <div><dt>Models</dt><dd>${u.models}</dd></div>
+        <div><dt>Storage</dt><dd>${u.disk_mb} MB</dd></div>
+        <div><dt>Logs in with</dt><dd title="${esc(ways)}">${esc(ways)}</dd></div>
+        <div><dt>Apps · tokens</dt><dd>${u.apps} · ${u.tokens}</dd></div>
+      </dl>
+      <div class="row acts">
+        <button class="sm" data-act="role" data-role="${u.role === "admin" ? "member" : "admin"}" ${u.role === "admin" && locked ? "disabled" : ""}>
+          ${u.role === "admin" ? "Make member" : "Make admin"}</button>
+        <button class="sm" data-act="${u.disabled ? "enable" : "disable"}" ${locked ? "disabled" : ""}>${u.disabled ? "Enable" : "Disable"}</button>
+        <button class="sm" data-act="logout" title="End all sessions and revoke connected apps and tokens">Log out everywhere</button>
+        <div class="grow"></div>
+        <button class="sm danger" data-act="delete" ${locked ? "disabled" : ""}>Delete</button>
+      </div></section>`;
+  }).join("") || `<p class="msg">No users match.</p>`;
+}
+
+let signup = false;
+async function load() {
+  const [list, auth] = await Promise.all([api("/api/admin/users"), api("/api/auth")]);
+  users = list.users; signup = list.signup; me = auth.user;
+  draw();
+}
+
+const QUESTIONS = {
+  disable: "Disable this user? They are logged out everywhere and cannot log in until enabled again.",
+  logout: "Log this user out everywhere? Their connected apps and tokens stop working.",
+};
+
+$("users").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-act]");
+  if (!b) return;
+  const id = b.closest("[data-id]").dataset.id;
+  const u = users.find((x) => x.id === id);
+  const act = b.dataset.act;
+  try {
+    if (act === "delete") {
+      const typed = prompt(`Delete ${u.display_name || "this user"} with all ${u.models} models and files? Type "delete" to confirm.`);
+      if (typed !== "delete") return;
+      await api(`/api/admin/users/${encodeURIComponent(id)}`, { method: "DELETE", body: { confirm: "delete" } });
+      say(`Deleted ${u.display_name || "the user"}.`);
+    } else {
+      if (QUESTIONS[act] && !confirm(QUESTIONS[act])) return;
+      await api(`/api/admin/users/${encodeURIComponent(id)}`, { method: "POST", body: { action: act, role: b.dataset.role } });
+      say("Saved.");
+    }
+    await load();
+  } catch (err) { say(err.message, true); }
+});
+$("q").addEventListener("input", draw);
+load().catch((err) => say(err.message, true));
+</script>
+</body>
+</html>
