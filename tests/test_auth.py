@@ -614,4 +614,4 @@ def test_passkey_login_then_approve_oauth(client):
 def test_library_page_has_claude_connect_guide(client):
     login(client)
     page = client.get("/").text
-    assert 'id="howto"' in page and 'id="copymcp"' in page and "Add custom connector" in page
+    assert 'id="wiz"' in page and 'data-wizact="copyurl"' in page and "Add custom connector" in page
