@@ -163,6 +163,39 @@ class AuthState:
             "ON CONFLICT DO NOTHING", ((email or "").strip().lower() or None,))
         return self.db.one(f"SELECT {_USER} FROM users u WHERE u.bootstrap")
 
+    def user_by_email(self, email: str) -> dict | None:
+        return self.db.one(f"SELECT {_USER} FROM users u WHERE lower(u.email) = lower(%s)", (email,))
+
+    def set_role(self, uid: str, role: str):
+        self.db.execute("UPDATE users SET role = %s WHERE id = %s", (role, uid))
+
+    def set_email(self, uid: str, email: str) -> bool:
+        """Sets a (verified) email if the user has none and nobody else uses it."""
+        return self.db.execute(
+            "UPDATE users SET email = lower(%s) WHERE id = %s AND email IS NULL AND NOT EXISTS "
+            "(SELECT 1 FROM users WHERE lower(email) = lower(%s))", (email, uid, email)) > 0
+
+    # ---- sign-in identities (Google, GitHub, Apple)
+
+    def identity_user(self, provider: str, subject: str) -> dict | None:
+        """The user an identity belongs to (disabled users included: the caller refuses them)."""
+        return self.db.one(f"SELECT {_USER} FROM identities i JOIN users u ON u.id = i.user_id "
+                           "WHERE i.provider = %s AND i.subject = %s", (provider, subject))
+
+    def add_identity(self, uid: str, provider: str, subject: str, email: str | None) -> bool:
+        """Links an identity to uid; False if it already belongs to someone (else nothing changes)."""
+        return self.db.execute(
+            "INSERT INTO identities (provider, subject, user_id, email) VALUES (%s, %s, %s, %s) "
+            "ON CONFLICT DO NOTHING", (provider, subject, uid, email)) > 0
+
+    def identities(self, uid: str) -> list[dict]:
+        return self.db.all("SELECT provider, email, created FROM identities WHERE user_id = %s "
+                           "ORDER BY created", (uid,))
+
+    def delete_identity(self, uid: str, provider: str) -> bool:
+        return self.db.execute("DELETE FROM identities WHERE user_id = %s AND provider = %s",
+                               (uid, provider)) > 0
+
     def touch_login(self, uid: str):
         self.db.execute("UPDATE users SET last_login = %s WHERE id = %s", (time.time(), uid))
 
