@@ -180,7 +180,7 @@ card), PNG app icons, `apple-touch-icon.png` and `site.webmanifest`. The browser
 | `.secret` | A value shown only once (a new personal token), with a copy button |
 | `dialog` | Modal: the account (name, passkeys, connecting Claude, apps, tokens, deletion) |
 | `.tabs` | Links between admin pages; the current one has `aria-current="page"` |
-| `.admin` | Settings page layout |
+| `.admin` | Settings page layout; `.admin .user` is one account on the Users page |
 
 ## Writing
 

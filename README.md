@@ -314,6 +314,8 @@ tokens for clients that send a header.
   Claude gets a clear error when one is reached. Script models are admin-only.
 - **Leaving:** users delete their account and all its data from the account dialog. `/privacy`
   says what is stored.
+- **Admin → Users** (`/admin/users`) lists every account with its models, storage and ways in, and
+  can make admins, disable, log out everywhere or delete.
 
 `SIGNUP=1` requires `MCP_TOKEN`; without it every visitor would be the admin.
 

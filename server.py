@@ -706,7 +706,8 @@ def _set_session(resp: Response, user: dict) -> Response:
 
 
 def _admin_path(path: str) -> bool:
-    return path == "/admin" or path.startswith(("/admin/", "/api/settings")) or path == "/api/recheck"
+    return (path == "/admin" or path.startswith(("/admin/", "/api/settings", "/api/admin/"))
+            or path == "/api/recheck")
 
 
 def _public_path(path: str, read: bool) -> bool:
@@ -1075,15 +1076,71 @@ async def api_auth_me(request):
     if user["bootstrap"]:
         return JSONResponse({"error": "the bootstrap admin account cannot be deleted"}, status_code=403)
 
-    def wipe():
-        n = store.delete_owner(user["id"])
-        shutil.rmtree(OUT / "files" / user["id"], ignore_errors=True)
-        oauth.state.delete_user(user["id"])
-        return n
-    n = await _run(wipe)
+    n = await _run(_delete_account, user["id"])
     resp = JSONResponse({"ok": True, "deleted_models": n})
     resp.delete_cookie(SESSION_COOKIE)
     return resp
+
+
+def _delete_account(uid: str) -> int:
+    """Deletes a user with all their models and files. Returns how many models went."""
+    n = store.delete_owner(uid)
+    shutil.rmtree(OUT / "files" / uid, ignore_errors=True)
+    oauth.state.delete_user(uid)
+    return n
+
+
+# ---- admin: the users list
+
+async def page_admin_users(_):
+    return FileResponse(WEB / "users.html")
+
+
+async def api_admin_users(_):
+    def collect():
+        out = []
+        for u in oauth.state.users():
+            lib = Lib(u)
+            out.append({**{k: u[k] for k in ("id", "display_name", "email", "role", "bootstrap",
+                                              "disabled", "created", "last_login", "passkeys",
+                                              "providers", "tokens", "apps")},
+                        "models": len(store.list(u["id"], everyone=False)),
+                        "disk_mb": round(lib.disk_bytes() / 1e6, 1)})
+        return out
+    return JSONResponse({"users": await _run(collect), "signup": SIGNUP})
+
+
+async def api_admin_user(request):
+    """POST {action: role (+role) | disable | enable | logout}; DELETE {confirm: "delete"}."""
+    me, uid, st = _user(request), request.path_params["id"], oauth.state
+    target = await _run(st.user, uid)
+    if not target:
+        return JSONResponse({"error": "no such user"}, status_code=404)
+    body = await request.json()
+    action = body.get("action") if request.method == "POST" else "delete"
+    if action in ("disable", "delete") or (action == "role" and body.get("role") != "admin"):
+        if target["bootstrap"]:
+            return JSONResponse({"error": "the bootstrap admin cannot be changed this way"}, status_code=403)
+        if target["id"] == me["id"]:
+            return JSONResponse({"error": "you cannot do that to your own account"}, status_code=403)
+    if action == "role":
+        if body.get("role") not in ("admin", "member"):
+            return JSONResponse({"error": "role must be admin or member"}, status_code=400)
+        await _run(st.set_role, uid, body["role"])
+    elif action in ("disable", "enable"):
+        await _run(st.set_disabled, uid, action == "disable")
+        if action == "disable":
+            await _run(st.revoke_logins, uid)
+    elif action == "logout":
+        await _run(st.revoke_logins, uid)
+    elif action == "delete":
+        if body.get("confirm") != "delete":
+            return JSONResponse({"error": 'send {"confirm": "delete"}'}, status_code=400)
+        n = await _run(_delete_account, uid)
+        return JSONResponse({"ok": True, "deleted_models": n})
+    else:
+        return JSONResponse({"error": "unknown action"}, status_code=400)
+    return JSONResponse({"ok": True, "user": _user_view(await _run(st.user, uid))})
 
 
 async def api_auth_tokens(request):
@@ -1390,6 +1447,9 @@ app = Starlette(
         Route("/api/events", api_events),
         Route("/admin", page_admin),
         Route("/admin/design", page_admin_design),
+        Route("/admin/users", page_admin_users),
+        Route("/api/admin/users", api_admin_users),
+        Route("/api/admin/users/{id}", api_admin_user, methods=["POST", "DELETE"]),
         Route("/api/settings", api_settings, methods=["GET", "POST"]),
         Route("/api/recheck", api_recheck, methods=["POST"]),
         Route("/files/{name}", flat_files),
