@@ -21,7 +21,7 @@
   <div class="grow lib-only"></div>
   <label class="search"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-search"/></svg>
     <input type="search" id="q" placeholder="Search models" autocomplete="off" aria-label="Search models"></label>
-  <span class="live" id="live" title="Updates automatically when Claude changes something"><span class="dot"></span><span class="label">Live</span></span>
+  <span class="live" id="live" title="Connecting…"><span class="dot"></span><span class="label">Live</span></span>
   <a class="btn sm" id="donate" hidden target="_blank" rel="noopener noreferrer" title="Support autosmith with a donation (PayPal)"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-heart"/></svg>Donate</a>
   <a class="btn icon quiet" id="adminlink" hidden href="/admin" title="Admin: print-check settings and design system" aria-label="Admin"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-settings"/></svg></a>
   <button id="secbtn" class="icon quiet" hidden title="Account: passkeys, connecting Claude, tokens, logout" aria-label="Account"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-key"/></svg></button>
@@ -199,6 +199,7 @@ function renderAuth() {
   $("dangersec").hidden = !auth.login_required || u.bootstrap;
   $("pklist").innerHTML = auth.passkeys.map((p) => `<li>
     <span><b>${esc(p.name)}</b> <span class="hint">added ${ago(p.created)}${p.last_used ? `, used ${ago(p.last_used)}` : ""}</span></span>
+    <button class="sm" data-rename="${esc(p.id)}" data-name="${esc(p.name)}">Rename</button>
     <button class="danger sm" data-pk="${esc(p.id)}">Remove</button></li>`).join("")
     || `<li class="hint">No passkeys yet.</li>`;
   $("appsec").hidden = !auth.oauth && !auth.login_required;
@@ -265,6 +266,16 @@ $("renamebtn").addEventListener("click", async () => {
   loadAuth();
 });
 $("pklist").addEventListener("click", async (e) => {
+  const rid = e.target.dataset.rename;
+  if (rid) {
+    const name = (prompt("Name this passkey", e.target.dataset.name) || "").trim();
+    if (!name || name === e.target.dataset.name) return;
+    try {
+      await api(`/api/auth/passkeys/${encodeURIComponent(rid)}`, { method: "PATCH", body: { name } });
+      loadAuth();
+    } catch (err) { pkerr.textContent = err.message; pkerr.hidden = false; }
+    return;
+  }
   const id = e.target.dataset.pk;
   if (!id || !confirm("Remove this passkey? You can no longer log in with it.")) return;
   try {
