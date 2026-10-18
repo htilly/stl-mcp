@@ -303,3 +303,22 @@ def test_account_dialog_lists_identities_and_providers(client, fake):
     data = me(client)
     assert [p["id"] for p in data["providers"]] == ["google", "apple", "github"]
     assert data["identities"][0]["provider"] == "google"
+
+
+def test_callback_from_another_browser_is_refused(client, fake):
+    """Login CSRF: an attacker starts a sign-in with their own account and lures the victim
+    to the callback URL. The flow is tied to the browser that started it, so nothing happens."""
+    q, _ = start(client, "google")  # the attacker's browser
+    google_person(fake, "c1", "g-attacker", email="mallory@example.com", nonce=q["nonce"][0])
+    victim = TestClient(server.app, follow_redirects=False)
+    r = victim.get("/auth/sso/google/callback", params={"code": "c1", "state": q["state"][0]})
+    assert r.status_code == 303 and "another+browser" in r.headers["location"]
+    assert server.SESSION_COOKIE not in r.cookies
+    assert server.oauth.state.identity_user("google", "g-attacker") is None
+
+
+def test_sso_browser_cookie_is_short_lived_and_scoped(client):
+    r = client.get("/auth/sso/google/start")
+    cookie = r.headers["set-cookie"]
+    assert cookie.startswith(f"{server.SSO_COOKIE}=") and "HttpOnly" in cookie
+    assert "Path=/auth/sso/" in cookie and "Max-Age=600" in cookie

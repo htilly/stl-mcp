@@ -31,6 +31,9 @@ M = mf.Manifold
 CS = mf.CrossSection
 
 DEFAULT_SEGMENTS = 64
+MAX_TRIANGLES = 5_000_000  # per node and in total: a recipe cannot make the server build forever
+MAX_EXPR_LEN = 1000
+MAX_NUMBER = 1e12          # no dimension, count or angle needs more; stops runaway arithmetic
 
 # ---------------------------------------------------------------- expressions
 
@@ -51,6 +54,14 @@ for _name, _fn in fnshapes.VFUNCS.items():
 
 def eval_expr(expr: str, env: dict):
     """Safe arithmetic: + - * / // % **, comparisons, a if c else b, min/max/sqrt/sin(degrees)..."""
+    if len(expr) > MAX_EXPR_LEN:
+        raise ValueError(f"expression too long (max {MAX_EXPR_LEN} characters)")
+
+    def checked(v):
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and not abs(v) <= MAX_NUMBER:
+            raise ValueError(f"number out of range in the expression '{expr}'")
+        return v
+
     def ev(n):
         if isinstance(n, ast.Expression):
             return ev(n.body)
@@ -66,7 +77,7 @@ def eval_expr(expr: str, env: dict):
             l, r = ev(n.left), ev(n.right)
             if isinstance(n.op, ast.Pow) and abs(r) > 16:
                 raise ValueError("exponent too large")
-            return _BIN[type(n.op)](l, r)
+            return checked(_BIN[type(n.op)](l, r))
         if isinstance(n, ast.UnaryOp) and type(n.op) in _UN:
             return _UN[type(n.op)](ev(n.operand))
         if isinstance(n, ast.Compare) and len(n.ops) == 1 and type(n.ops[0]) in _CMP:
@@ -75,7 +86,7 @@ def eval_expr(expr: str, env: dict):
             return ev(n.body) if ev(n.test) else ev(n.orelse)
         if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in _FUNCS \
                 and not n.keywords:
-            return _FUNCS[n.func.id](*[ev(a) for a in n.args])
+            return checked(_FUNCS[n.func.id](*[ev(a) for a in n.args]))
         raise ValueError(f"disallowed expression: '{expr}'")
     return ev(ast.parse(expr, mode="eval"))
 
@@ -314,6 +325,7 @@ def _array(m: M, n: dict) -> M:
         step = _vec3(a.get("step", [0, 0, 0]), "array.step")
         if cnt[0] * cnt[1] * cnt[2] > 2000:
             raise ValueError("array: too many copies (max 2000)")
+        _budget(m.num_tri() * cnt[0] * cnt[1] * cnt[2])
         m = M.batch_boolean([m.translate((i * step[0], j * step[1], k * step[2]))
                              for i in range(cnt[0]) for j in range(cnt[1]) for k in range(cnt[2])],
                             mf.OpType.Add)
@@ -322,10 +334,17 @@ def _array(m: M, n: dict) -> M:
         c = int(p["count"])
         if c > 720:
             raise ValueError("polar: too many copies (max 720)")
+        _budget(m.num_tri() * c)
         deg = float(p.get("degrees", 360))
         stepd = deg / c if abs(deg - 360) < 1e-9 else (deg / (c - 1) if c > 1 else 0)
         m = M.batch_boolean([m.rotate((0, 0, i * stepd)) for i in range(c)], mf.OpType.Add)
     return m
+
+
+def _budget(triangles: int):
+    if triangles > MAX_TRIANGLES:
+        raise ValueError(f"the model gets too detailed (over {MAX_TRIANGLES:,} triangles) - use fewer "
+                         "copies or segments")
 
 
 def build_node(node, env: dict, depth: int = 0) -> M:
@@ -361,7 +380,9 @@ def build_node(node, env: dict, depth: int = 0) -> M:
             raise ValueError(f"unknown op '{op}' (union, difference, intersection, hull, minkowski)")
     else:
         raise ValueError("node must have 'shape' or 'op'")
+    _budget(m.num_tri())
     m = _array(m, n)
+    _budget(m.num_tri())
     return _transform(m, n)
 
 
@@ -386,9 +407,11 @@ def build(spec: dict) -> dict[str, trimesh.Trimesh]:
         parts = {"model": spec["root"]}
     else:
         raise ValueError("spec requires 'root' (a node) or 'parts' ({name: node})")
-    out = {}
+    out, total = {}, 0
     for name, node in parts.items():
         m = build_node(node, env)
+        total += m.num_tri()
+        _budget(total)
         if m.is_empty():
             raise ValueError(f"part '{name}' came out empty – check dimensions and boolean operations")
         out[name] = to_trimesh(m)

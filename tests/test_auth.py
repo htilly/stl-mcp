@@ -399,8 +399,9 @@ def test_logout_revokes_the_session_server_side(client):
 def test_personal_token_logs_in_as_its_user(client):
     joe = server.oauth.state.create_user("Joe", "joe@example.com")
     raw, _ = server.oauth.state.create_personal_token(joe["id"], "cli")
-    r = client.get("/api/auth", headers={"Authorization": f"Bearer {raw}"})
-    assert r.status_code == 200 and r.json()["user"]["email"] == "joe@example.com"
+    server.store.create("joes-box", "csg", {"root": {"shape": "box", "size": [5, 5, 5]}}, owner=joe["id"])
+    r = client.get("/api/models", headers={"Authorization": f"Bearer {raw}"})
+    assert r.status_code == 200 and [m["id"] for m in r.json()["models"]] == ["joes-box"]
 
 
 def test_admin_pages_need_the_admin_role(client):
@@ -433,13 +434,16 @@ def test_oauth_token_belongs_to_the_user_who_approved(client):
     code = parse_qs(urlparse(r.headers["location"]).query)["code"][0]
     tok = exchange(client, c, verifier, code).json()
     client.cookies.clear()
-    me = client.get("/api/auth", headers={"Authorization": f"Bearer {tok['access_token']}"}).json()
-    assert me["user"]["id"] == joe["id"]
+    server.store.create("joes-box", "csg", {"root": {"shape": "box", "size": [5, 5, 5]}}, owner=joe["id"])
+
+    def models(access):
+        r = client.get("/api/models", headers={"Authorization": f"Bearer {access}"})
+        return [m["id"] for m in r.json()["models"]]
+    assert models(tok["access_token"]) == ["joes-box"]
     # and refreshing keeps the owner
     r = client.post("/token", data={"grant_type": "refresh_token", "client_id": c["client_id"],
                                     "refresh_token": tok["refresh_token"]})
-    me = client.get("/api/auth", headers={"Authorization": f"Bearer {r.json()['access_token']}"}).json()
-    assert me["user"]["id"] == joe["id"]
+    assert models(r.json()["access_token"]) == ["joes-box"]
 
 
 def test_auth_api_requires_login_even_with_ui_public(client, monkeypatch):

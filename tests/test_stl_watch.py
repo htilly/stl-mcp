@@ -47,12 +47,15 @@ def test_announcer_forgets_deleted_models():
 
 
 def test_token_prefers_environment(monkeypatch):
+    monkeypatch.setattr(stl_watch, "URL_SET", True)
     monkeypatch.setenv("STL_MCP_TOKEN", "  from-env  ")
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("keychain must not be used"))
     assert stl_watch.token() == "from-env"
 
 
 def test_token_falls_back_to_keychain(monkeypatch):
+    monkeypatch.setattr(stl_watch, "URL_SET", True)
+    monkeypatch.setattr(stl_watch, "oauth_token", lambda: None)
     monkeypatch.delenv("STL_MCP_TOKEN", raising=False)
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(
         a, 0, stdout="from-keychain\n", stderr=""))
@@ -61,6 +64,8 @@ def test_token_falls_back_to_keychain(monkeypatch):
 
 @pytest.mark.parametrize("failure", ["missing", "empty"])
 def test_token_missing_exits_without_printing_a_secret(monkeypatch, failure):
+    monkeypatch.setattr(stl_watch, "URL_SET", True)
+    monkeypatch.setattr(stl_watch, "oauth_token", lambda: None)
     monkeypatch.delenv("STL_MCP_TOKEN", raising=False)
 
     def fake_run(*a, **k):
@@ -72,6 +77,17 @@ def test_token_missing_exits_without_printing_a_secret(monkeypatch, failure):
     with pytest.raises(SystemExit) as e:
         stl_watch.token()
     assert "STL_MCP_TOKEN" in str(e.value)
+
+
+def test_env_and_keychain_tokens_need_an_explicit_url(monkeypatch):
+    """A server's own MCP_TOKEN must never be sent to the default server by accident."""
+    monkeypatch.setattr(stl_watch, "URL_SET", False)
+    monkeypatch.setattr(stl_watch, "oauth_token", lambda: None)
+    monkeypatch.setenv("STL_MCP_TOKEN", "from-env")
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("keychain must not be used"))
+    assert stl_watch.find_token() is None
+    monkeypatch.setattr(stl_watch, "oauth_token", lambda: "from-login")
+    assert stl_watch.find_token() == "from-login"  # the login is tied to the server it was made on
 
 
 def test_base_url_defaults_and_is_overridable(monkeypatch):
@@ -184,6 +200,7 @@ def test_environment_token_overrides_login(oauth_env, monkeypatch):
     http, path = oauth_env
     _approve_in_browser(http, path, monkeypatch)
     stl_watch.cmd_login()
+    monkeypatch.setattr(stl_watch, "URL_SET", True)
     monkeypatch.setenv("STL_MCP_TOKEN", "from-env")
     assert stl_watch.token() == "from-env"
 

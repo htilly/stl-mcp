@@ -1,14 +1,17 @@
-mcp>=1.30,<2
-trimesh
-manifold3d
-numpy
-uvicorn
-starlette
-pillow
-fonttools
-scipy
-networkx
-fast-simplification
-httpx
-webauthn>=3,<4
-psycopg[binary,pool]>=3.2,<4
+# Pinned to the versions in the production image: every push to main deploys a fresh build, so
+# an upstream release must not reach it unreviewed. Bump deliberately (and run the tests).
+mcp==1.30.0
+trimesh==5.1.1
+manifold3d==3.5.4
+numpy==2.5.4
+uvicorn==0.54.0
+starlette==1.9.0
+pillow==13.0.0
+fonttools==4.67.0
+scipy==1.18.1
+networkx==3.7
+fast-simplification==0.2.0
+httpx==0.28.1
+webauthn==3.0.1
+psycopg[binary,pool]==3.3.6
+psycopg-pool==3.3.3

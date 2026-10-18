@@ -1,5 +1,6 @@
 """Geometry helpers (mm). All shapes are built with trimesh + manifold3d."""
 import io
+import os
 import zipfile
 
 import numpy as np
@@ -124,6 +125,9 @@ def enclosure(inner_x, inner_y, inner_z, wall=2.4, floor=2.4, lid_t=2.4,
 # ---------------------------------------------------------------- import / modify / export
 
 IMPORT_FORMATS = ("stl", "obj", "glb", "ply", "off")
+MAX_UNZIPPED = int(float(os.environ.get("MAX_UNZIPPED_MB", "200")) * 1_000_000)
+MAX_ZIP_MEMBERS = 1000
+MAX_FACES = int(os.environ.get("MAX_IMPORT_FACES", "5000000"))
 
 
 def load_mesh(data: bytes, fmt: str | None = None) -> trimesh.Trimesh:
@@ -131,11 +135,22 @@ def load_mesh(data: bytes, fmt: str | None = None) -> trimesh.Trimesh:
     Scenes are merged into one mesh; colors/textures are discarded."""
     if data[:2] == b"PK":
         with zipfile.ZipFile(io.BytesIO(data)) as z:
-            names = [n for n in z.namelist() if n.rsplit(".", 1)[-1].lower() in IMPORT_FORMATS]
-            if not names:
+            infos = z.infolist()
+            if len(infos) > MAX_ZIP_MEMBERS:
+                raise ValueError(f"the zip file has too many entries (max {MAX_ZIP_MEMBERS})")
+            found = [i for i in infos if i.filename.rsplit(".", 1)[-1].lower() in IMPORT_FORMATS]
+            if not found:
                 raise ValueError("the zip file contains no stl/obj/glb/ply/off")
-            fmt = names[0].rsplit(".", 1)[-1].lower()
-            data = z.read(names[0])
+            info = found[0]
+            too_big = ValueError(f"the file in the zip is larger than {MAX_UNZIPPED // 1_000_000} MB "
+                                 "unpacked")
+            if info.file_size > MAX_UNZIPPED:
+                raise too_big
+            fmt = info.filename.rsplit(".", 1)[-1].lower()
+            with z.open(info) as f:  # the header can lie about the size: never read past the limit
+                data = f.read(MAX_UNZIPPED + 1)
+            if len(data) > MAX_UNZIPPED:
+                raise too_big
     fmt = (fmt or "stl").lower().lstrip(".")
     if fmt not in IMPORT_FORMATS:
         raise ValueError(f"format {fmt} is not supported ({', '.join(IMPORT_FORMATS)})")
@@ -152,6 +167,8 @@ def load_mesh(data: bytes, fmt: str | None = None) -> trimesh.Trimesh:
         loaded = trimesh.util.concatenate(meshes) if meshes else None
     if not isinstance(loaded, trimesh.Trimesh) or len(loaded.faces) == 0:
         raise ValueError("the file contains no mesh")
+    if len(loaded.faces) > MAX_FACES:
+        raise ValueError(f"the mesh has too many triangles (max {MAX_FACES:,})")
     return trimesh.Trimesh(loaded.vertices, loaded.faces)
 
 

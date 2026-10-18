@@ -16,6 +16,7 @@ import json
 import secrets
 import threading
 import time
+from collections import OrderedDict
 from pathlib import Path
 
 import httpx
@@ -29,6 +30,7 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from db import Database
 
 SESSION_TTL = 60 * 60 * 24 * 90
+SESSION_IDLE = 60 * 60 * 24 * 30  # a session unused this long stops working
 ACCESS_TTL = 60 * 60 * 24
 REFRESH_TTL = 60 * 60 * 24 * 90
 CODE_TTL = 5 * 60
@@ -47,19 +49,38 @@ def _hash(token: str) -> str:
 # ---------------------------------------------------------------- short-lived values
 
 class Expiring:
-    """In-memory dict whose entries disappear after ttl seconds; pop() is one-time use."""
+    """In-memory dict whose entries disappear after ttl seconds; pop() is one-time use.
 
-    def __init__(self, ttl: int):
-        self.ttl = ttl
-        self._items: dict[str, tuple[float, object]] = {}
+    Holds at most max_items live entries (the oldest go first), so public endpoints that store
+    something per request cannot grow it without bound."""
+
+    def __init__(self, ttl: int, max_items: int = 10_000):
+        self.ttl, self.max_items = ttl, max_items
+        self._items: OrderedDict[str, tuple[float, object]] = OrderedDict()
         self._lock = threading.Lock()
+
+    def _expire(self, now: float):
+        # Every entry has the same ttl, so insertion order is expiry order.
+        while self._items:
+            key, (expires, _) = next(iter(self._items.items()))
+            if expires > now:
+                break
+            del self._items[key]
 
     def put(self, key: str, value) -> str:
         with self._lock:
             now = time.time()
-            self._items = {k: v for k, v in self._items.items() if v[0] > now}
+            self._expire(now)
+            self._items.pop(key, None)
             self._items[key] = (now + self.ttl, value)
+            while len(self._items) > self.max_items:
+                self._items.popitem(last=False)
         return key
+
+    def __len__(self) -> int:
+        with self._lock:
+            self._expire(time.time())
+            return len(self._items)
 
     def get(self, key: str):
         with self._lock:
@@ -240,7 +261,8 @@ class AuthState:
         now = time.time()
         row = self.db.one(
             f"SELECT {_USER}, s.last_seen AS _seen FROM sessions s JOIN users u ON u.id = s.user_id "
-            "WHERE s.hash = %s AND s.expires_at > %s AND NOT u.disabled", (_hash(raw), now))
+            "WHERE s.hash = %s AND s.expires_at > %s AND s.last_seen > %s AND NOT u.disabled",
+            (_hash(raw), now, now - SESSION_IDLE))
         if not row:
             return None
         if now - row.pop("_seen") > SEEN_EVERY:

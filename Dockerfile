@@ -1,4 +1,5 @@
 FROM python:3.12-slim
+RUN useradd --system --uid 10001 --user-group --home-dir /app --no-create-home app
 WORKDIR /app
 # OpenSCAD for create_from_openscad (sandboxed, see openscad.py) and BOSL2, pinned to a commit.
 # The libraries dir is read-only for the server; OPENSCADPATH points only there.
@@ -18,6 +19,7 @@ COPY *.py ./
 COPY migrations ./migrations
 COPY web ./web
 COPY fonts ./fonts
+COPY docker-entrypoint.sh /usr/local/bin/
 ENV STL_DIR=/data PORT=8765
 # Baked in by CI (docker/build-push-action build-args). server.py prints it in the
 # startup marker, and the deploy job requires it to match the commit.
@@ -25,4 +27,6 @@ ARG GIT_SHA=""
 ENV GIT_SHA=$GIT_SHA
 VOLUME /data
 EXPOSE 8765
+# Starts as root only to fix the ownership of /data, then runs as "app" (docker-entrypoint.sh).
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["python", "server.py"]
