@@ -126,12 +126,13 @@ header.top {
   position: sticky; top: 0; z-index: 5;
 }
 header.top .grow { flex: 1; }
+header.top > .btn, header.top > button, header.top > .live { flex: none; }
 .wordmark {
   display: inline-flex; align-items: center; gap: var(--s2);
   font-size: var(--t-md); font-weight: 700; letter-spacing: -.02em;
   color: var(--graphite); white-space: nowrap;
 }
-.wordmark .i { width: 34px; height: 34px; --mark-fill: var(--brand); --mark-gap: var(--sheet); --mark-spark: var(--ember); }
+.wordmark .i { flex: none; width: 34px; height: 34px; --mark-fill: var(--brand); --mark-gap: var(--sheet); --mark-spark: var(--ember); }
 .wordmark .name, .wordmark > span { font-weight: 700; }
 .wordmark b { font-weight: 700; color: var(--brand); }
 .wordmark small { font-size: inherit; font-weight: 500; color: var(--scribe); }
@@ -594,6 +595,10 @@ h3.sub { font-size: var(--t-base); margin: 0 0 var(--s2); }
 }
 @media (max-width: 520px) {
   .wordmark .name { display: none; }
+  header.top { gap: var(--s2); padding: 0 var(--s3); }
+  header.top .btn .lbl { display: none; }
+  header.top .btn.sm:has(.lbl) { width: 32px; padding: 0; justify-content: center; }
+  .live { display: none; }
   .card .tb > div:nth-child(3) { display: none; }
   .card .tb { grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); }
 }

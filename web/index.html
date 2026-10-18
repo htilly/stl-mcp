@@ -21,12 +21,13 @@
   <div class="grow lib-only"></div>
   <label class="search"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-search"/></svg>
     <input type="search" id="q" placeholder="Search models" autocomplete="off" aria-label="Search models"></label>
-  <a class="btn sm" href="/gallery" title="Public models from everyone"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-globe"/></svg>Gallery</a>
+  <a class="btn sm" href="/gallery" title="Public models from everyone" aria-label="Gallery"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-globe"/></svg><span class="lbl">Gallery</span></a>
   <button class="btn sm" id="newmodel" title="Build a new model by hand in the editor">New model</button>
   <span class="live" id="live" title="Connecting…"><span class="dot"></span><span class="label">Live</span></span>
   <a class="btn sm" id="donate" hidden target="_blank" rel="noopener noreferrer" title="Support autosmith with a donation (PayPal)"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-heart"/></svg>Donate</a>
   <a class="btn icon quiet" id="adminlink" hidden href="/admin" title="Admin: print-check settings and design system" aria-label="Admin"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-settings"/></svg></a>
   <button id="secbtn" class="icon quiet" hidden title="Account: passkeys, connecting Claude, tokens, logout" aria-label="Account"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-key"/></svg></button>
+  <button id="logouttop" class="icon quiet" hidden title="Log out" aria-label="Log out"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-logout"/></svg></button>
 </header>
 <main class="lib">
   <div class="banner" id="pkbanner" hidden>
@@ -205,6 +206,7 @@ function renderWiz() {
 function renderAuth() {
   const u = auth.user;
   $("secbtn").hidden = !auth.login_required;
+  $("logouttop").hidden = !auth.login_required;
   $("adminlink").hidden = u.role !== "admin";
   let dismissed = false;
   try { dismissed = localStorage.getItem("pk-banner-dismissed") === "1"; } catch {}
@@ -375,10 +377,12 @@ $("delacct").addEventListener("click", async () => {
   await api("/api/auth/me", { method: "DELETE", body: { confirm: "delete" } });
   location.href = "/";
 });
-$("logout").addEventListener("click", async () => {
+async function logout() {
   await api("/auth/logout", { method: "POST", body: {} });
   location.reload();
-});
+}
+$("logout").addEventListener("click", logout);
+$("logouttop").addEventListener("click", logout);
 loadAuth();
 </script>
 </body>
