@@ -262,8 +262,8 @@ Tinkercad has no public API, so exchange happens via files:
   or let Claude fetch it with `import_file` (url). Then keep building with `modify_file`.
   `import_file` only fetches from public addresses unless `ALLOW_PRIVATE_URLS=1`.
 
-Imported and modified files are standalone files in `STL_DIR` (`/files/<name>`). They do not show up
-in the web library.
+Imported and modified files are standalone files, private to the user who made them
+(`STL_DIR/files/<user id>/`, served at `/f/<user id>/<name>`). They do not show up in the web library.
 
 ## Print check and admin settings
 Every build runs a fast, approximate print check per part. Problems are **warnings only** (nothing
@@ -290,13 +290,19 @@ Users, sessions, passkeys and tokens live in Postgres (`DATABASE_URL`, schema in
 back it up with `docker compose exec postgres pg_dump -U stl stl > backup.sql`. An `auth.json` from
 before users existed is imported into the admin account at startup and renamed `auth.json.imported`.
 
-`STL_DIR/models/<id>/model.json` (recipe and history) and `v<N>/<part>.stl`. The 50 most recent
-versions keep their files. Older versions can be recreated with `revert_model`.
+Every model belongs to a user. Its recipe, version history and comments are in Postgres (table
+`models`); the built files are in `STL_DIR/models/<id>/v<N>/<part>.stl`. The 50 most recent versions
+keep their files. Older versions can be recreated with `revert_model`. Models and standalone files
+from before users existed (`model.json`, files directly in `STL_DIR`) become the admin's at startup.
+
+Users only reach their own models and files; someone else's look exactly like ones that do not
+exist (404). Admins reach everything.
 
 ## Security
 Always set `MCP_TOKEN` and put the server behind HTTPS. The web interface requires a login
 (passkey or token, kept as a signed session cookie for 90 days) unless `UI_PUBLIC=1`, which makes it readable by everyone while changes still require a token.
-`FILES_PUBLIC=1` only makes the STL links clickable without a token (model ids are guessable). Keep
+`FILES_PUBLIC=1` only makes the STL links clickable without a token (model ids are guessable); for
+anonymous visitors, `UI_PUBLIC` and `FILES_PUBLIC` cover the admin's library only. Keep
 `ALLOW_SCRIPT` off if the server is reachable from outside. `/upload/*` always requires a token when
 `MCP_TOKEN` is set. The CSG spec is safe to let Claude write.
 

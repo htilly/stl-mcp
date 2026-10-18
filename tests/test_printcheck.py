@@ -182,8 +182,8 @@ PLATE = {"root": {"shape": "box", "size": [30, 30, 0.6]}}
 SOLID = {"root": {"shape": "box", "size": [30, 30, 10]}}
 
 
-def test_build_stores_warnings_per_part(tmp_path):
-    st = Store(tmp_path)
+def test_build_stores_warnings_per_part(tmp_path, db):
+    st = Store(tmp_path, db)
     m = st.create("plate", "csg", PLATE)
     warnings = Store.current(m)["parts"]["model"]["warnings"]
     assert "thin_walls" in {w["code"] for w in warnings}
@@ -191,21 +191,21 @@ def test_build_stores_warnings_per_part(tmp_path):
     assert Store.current(m2)["parts"]["model"]["warnings"] == []
 
 
-def test_build_uses_current_settings(tmp_path):
-    st = Store(tmp_path)
+def test_build_uses_current_settings(tmp_path, db):
+    st = Store(tmp_path, db)
     st.settings.update({"min_wall_mm": 0.3})
     m = st.create("plate", "csg", PLATE)
     assert Store.current(m)["parts"]["model"]["warnings"] == []
 
 
-def test_warnings_never_block_a_build(tmp_path):
-    m = Store(tmp_path).create("huge", "csg", {"root": {"shape": "box", "size": [400, 400, 400]}})
+def test_warnings_never_block_a_build(tmp_path, db):
+    m = Store(tmp_path, db).create("huge", "csg", {"root": {"shape": "box", "size": [400, 400, 400]}})
     codes_ = {w["code"] for w in Store.current(m)["parts"]["model"]["warnings"]}
     assert "exceeds_build_volume" in codes_
 
 
-def test_recheck_applies_new_settings_without_new_version(tmp_path):
-    st = Store(tmp_path)
+def test_recheck_applies_new_settings_without_new_version(tmp_path, db):
+    st = Store(tmp_path, db)
     st.create("plate", "csg", PLATE)
     st.settings.update({"min_wall_mm": 0.3})
     rev = st.revision
@@ -216,8 +216,8 @@ def test_recheck_applies_new_settings_without_new_version(tmp_path):
     assert st.revision > rev
 
 
-def test_recheck_single_model_and_unknown(tmp_path):
-    st = Store(tmp_path)
+def test_recheck_single_model_and_unknown(tmp_path, db):
+    st = Store(tmp_path, db)
     st.create("a", "csg", SOLID)
     st.create("b", "csg", SOLID)
     assert st.recheck("a") == 1

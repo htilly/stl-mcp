@@ -20,7 +20,7 @@ from auth import AuthState
 from db import Database
 from store import Store
 
-TABLES = "users, oauth_clients"  # everything else hangs off these (ON DELETE CASCADE)
+TABLES = "users, oauth_clients, models"  # everything else hangs off these (ON DELETE CASCADE)
 
 
 @pytest.fixture(scope="session")
@@ -47,9 +47,9 @@ def db(test_db, monkeypatch):
 
 
 @pytest.fixture
-def out_dir(tmp_path, monkeypatch):
+def out_dir(tmp_path, monkeypatch, db):
     """Point the server (standalone files AND the model library) at a fresh, empty directory."""
     monkeypatch.setattr(server, "DATA", tmp_path)
     monkeypatch.setattr(server, "OUT", tmp_path)
-    monkeypatch.setattr(server, "store", Store(tmp_path, allow_script=False))
+    monkeypatch.setattr(server, "store", Store(tmp_path, db, allow_script=False))
     return tmp_path

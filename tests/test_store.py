@@ -17,8 +17,8 @@ PRIMITIVE = {"shape": "box", "x": 10, "y": 20, "z": 30}
 
 
 @pytest.fixture
-def st(tmp_path):
-    return Store(tmp_path)
+def st(tmp_path, db):
+    return Store(tmp_path, db)
 
 
 # ---- JSON pointers
@@ -103,7 +103,7 @@ def test_create_builds_all_kinds(st, tmp_path, kind, params, parts):
     for info in v["parts"].values():
         assert (tmp_path / "models" / "thing" / info["file"]).is_file()
         assert info["watertight"] and info["triangles"] > 0
-    assert (tmp_path / "models" / "thing" / "model.json").is_file()
+    assert not (tmp_path / "models" / "thing" / "model.json").exists()  # metadata is in Postgres
 
 
 def test_create_primitive_sits_on_plate(st):
@@ -133,21 +133,27 @@ def test_create_empty_part_error(st):
         st.create("e", "csg", {"parts": {}})
 
 
-def test_get_list_and_persistence(st, tmp_path):
+def test_get_list_and_persistence(st, tmp_path, db):
     a = st.create("A", "primitive", PRIMITIVE)
     b = st.create("B", "primitive", PRIMITIVE)
     assert st.get("a")["name"] == "A"
     assert [m["id"] for m in st.list()] == [b["id"], a["id"]]  # newest first
-    reopened = Store(tmp_path)
+    reopened = Store(tmp_path, db)
     assert reopened.get("a") == st.get("a")
 
 
-def test_list_skips_corrupt_json(st):
-    st.create("ok", "primitive", PRIMITIVE)
+def test_import_legacy_model_json_once_and_skips_corrupt(st):
+    owner = st.db.one("INSERT INTO users (display_name) VALUES ('a') RETURNING id")["id"]
+    m = st.create("ok", "primitive", PRIMITIVE)
+    st.db.execute("DELETE FROM models")  # as if it only existed on disk
+    (st.dir / "ok" / "model.json").write_text(json.dumps({k: v for k, v in m.items() if k != "owner"}))
     bad = st.dir / "broken"
     bad.mkdir()
     (bad / "model.json").write_text("{not json")
-    assert [m["id"] for m in st.list()] == ["ok"]
+    assert st.import_legacy(owner) == 1
+    assert [x["id"] for x in st.list()] == ["ok"] and st.get("ok")["owner"] == owner
+    assert (st.dir / "ok" / "model.json.imported").exists()
+    assert st.import_legacy(owner) == 0
 
 
 @pytest.mark.parametrize("mid", ["../etc", "A B", "", "x" * 61])
@@ -175,14 +181,14 @@ def test_script_kind_disabled_by_default(st):
         st.create("s", "script", {"code": "result = g.blk(1,1,1,0,0,0)"})
 
 
-def test_script_kind_enabled(tmp_path):
-    st = Store(tmp_path, allow_script=True)
+def test_script_kind_enabled(tmp_path, db):
+    st = Store(tmp_path, db, allow_script=True)
     m = st.create("s", "script", {"code": "result = g.blk(2,3,4,0,0,0)"})
     assert m["versions"][0]["parts"]["model"]["extents_mm"] == [2.0, 3.0, 4.0]
 
 
-def test_script_kind_named_parts_and_errors(tmp_path):
-    st = Store(tmp_path, allow_script=True)
+def test_script_kind_named_parts_and_errors(tmp_path, db):
+    st = Store(tmp_path, db, allow_script=True)
     m = st.create("s", "script", {"code": "parts = {'x': g.blk(1,1,1,0,0,0), 'y': g.blk(2,2,2,0,0,0)}"})
     assert set(m["versions"][0]["parts"]) == {"x", "y"}
     with pytest.raises(RuntimeError, match="boom"):
@@ -412,9 +418,58 @@ def test_comments_survive_new_versions(st):
     st.add_comment("m", "keep me")
     m = st.update("m", changes={"w": 30})
     assert [c["text"] for c in m["comments"]] == ["keep me"]
-    assert json.loads((st.dir / "m" / "model.json").read_text())["comments"][0]["text"] == "keep me"
+    assert Store(st.dir.parent, st.db).get("m")["comments"][0]["text"] == "keep me"
 
 
 def test_stats_helper():
     s = store._stats(trimesh.creation.box(extents=(10, 10, 10)))
     assert s["watertight"] and s["volume_cm3"] == 1.0 and s["triangles"] == 12
+
+
+# ---- owners and views
+
+def _user(db, name, role="member"):
+    return db.one("INSERT INTO users (display_name, role) VALUES (%s, %s) RETURNING id, role",
+                  (name, role))
+
+
+def test_view_only_reaches_own_models(st):
+    a, b = _user(st.db, "a"), _user(st.db, "b")
+    va, vb = st.view(a), st.view(b)
+    m = va.create("Mine", "primitive", PRIMITIVE)
+    assert m["owner"] == a["id"] and [x["id"] for x in va.list()] == ["mine"]
+    assert vb.list() == []
+    for call in (lambda: vb.get("mine"), lambda: vb.update("mine", name="x"),
+                 lambda: vb.revert("mine", 1), lambda: vb.set_current("mine", 1),
+                 lambda: vb.duplicate("mine", "stolen"), lambda: vb.add_comment("mine", "hi"),
+                 lambda: vb.comment_action("mine", "c1", "resolve"), lambda: vb.delete("mine"),
+                 lambda: vb.recheck("mine"), lambda: vb.file("mine", m["versions"][0]["parts"]["model"]["file"])):
+        with pytest.raises(KeyError, match="does not exist"):
+            call()
+    assert st.get("mine")["name"] == "Mine"
+
+
+def test_admin_view_reaches_everything_and_copies_become_the_copiers(st):
+    a, boss = _user(st.db, "a"), _user(st.db, "boss", "admin")
+    st.view(a).create("Mine", "primitive", PRIMITIVE)
+    vb = st.view(boss)
+    assert [x["id"] for x in vb.list()] == ["mine"] and vb.get("mine")
+    copy = vb.duplicate("mine", "boss copy")
+    assert copy["owner"] == boss["id"]
+    assert [x["id"] for x in st.view(a).list()] == ["mine"]
+
+
+def test_revision_per_owner(st):
+    a, b, boss = _user(st.db, "a"), _user(st.db, "b"), _user(st.db, "boss", "admin")
+    ra, rb, rboss = st.revision_for(a), st.revision_for(b), st.revision_for(boss)
+    st.view(a).create("Mine", "primitive", PRIMITIVE)
+    assert st.revision_for(a) > ra and st.last_changed_for(a) == "mine"
+    assert st.revision_for(b) == rb and st.last_changed_for(b) is None
+    assert st.revision_for(boss) > rboss
+
+
+def test_delete_owner_removes_models_and_files(st):
+    a = _user(st.db, "a")
+    st.view(a).create("Mine", "primitive", PRIMITIVE)
+    assert st.delete_owner(a["id"]) == 1
+    assert st.list() == [] and not (st.dir / "mine").exists()

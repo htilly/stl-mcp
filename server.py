@@ -84,7 +84,8 @@ ALLOW_PRIVATE_URLS = os.environ.get("ALLOW_PRIVATE_URLS") == "1"
 OAUTH = os.environ.get("OAUTH", "1") != "0"
 FILE_TYPES = {".stl": "model/stl", ".obj": "model/obj", ".mtl": "text/plain", ".zip": "application/zip"}
 
-store = Store(DATA, allow_script=ALLOW_SCRIPT)
+db = Database(DATABASE_URL)
+store = Store(DATA, db, allow_script=ALLOW_SCRIPT)
 
 mcp = FastMCP(
     "stl-maker",
@@ -144,6 +145,27 @@ def _comment_view(c: dict) -> dict:
     return {k: c[k] for k in keep if k in c and c[k] not in (None, [])}
 
 
+class Lib:
+    """What one user can reach: their models (admins: all) and their standalone files."""
+
+    def __init__(self, user: dict):
+        self.user = user
+        self.models = store.view(user)
+
+    @property
+    def dir(self) -> Path:
+        d = OUT / "files" / self.user["id"]
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def url(self, name: str) -> str:
+        return f"{PUBLIC_URL}/f/{self.user['id']}/{name}"
+
+
+def _lib(ctx: Context | None) -> Lib:
+    return Lib(_mcp_user(ctx))
+
+
 async def _run(fn, *a, **kw):
     """Runs heavy builds in a thread so the server (and web UI) stays responsive."""
     return await anyio.to_thread.run_sync(lambda: fn(*a, **kw))
@@ -164,8 +186,9 @@ adjustments are easy: update_model(model_id, {"width": 60}).
 
 
 @mcp.tool(description=CREATE_MODEL_DOC)
-async def create_model(name: str, spec: dict, description: str = "") -> dict:
-    m = await _run(store.create, name, "csg", spec, description)
+async def create_model(name: str, spec: dict, description: str = "", ctx: Context = None) -> dict:
+    lib = _lib(ctx)
+    m = await _run(lib.models.create, name, "csg", spec, description)
     return _summary(m)
 
 
@@ -180,6 +203,7 @@ async def create_enclosure(
     lid_holes: list[dict] | None = None,
     lid_slots: list[dict] | None = None,
     description: str = "",
+    ctx: Context = None,
 ) -> dict:
     """Creates a box + lid (parts 'body' and 'lid'). Dimensions in mm.
 
@@ -190,27 +214,29 @@ async def create_enclosure(
     corner_screws: 4 corner posts for M3 self-tapping screws.
     Adjust later with update_model(model_id, {"inner_z": 30, "/cutouts/0/width": 14}).
     """
+    lib = _lib(ctx)
     params = {"inner_x": inner_x, "inner_y": inner_y, "inner_z": inner_z, "wall": wall,
               "floor": floor, "lid_thickness": lid_thickness, "corner_screws": corner_screws,
               "standoffs": standoffs or [], "cutouts": cutouts or [], "lid_holes": lid_holes or [],
               "lid_slots": lid_slots or []}
-    m = await _run(store.create, name, "enclosure", params, description)
+    m = await _run(lib.models.create, name, "enclosure", params, description)
     return _summary(m)
 
 
 @mcp.tool()
-async def create_from_script(name: str, code: str, description: str = "") -> dict:
+async def create_from_script(name: str, code: str, description: str = "", ctx: Context = None) -> dict:
     """Advanced: Python that sets `result` (trimesh.Trimesh), `parts` (list -> union) or
     `parts` (dict name->mesh). Available: trimesh, numpy as np, g (blk/cyl/union/diff).
     Requires ALLOW_SCRIPT=1. Prefer create_model – it is safe and easier to adjust."""
-    m = await _run(store.create, name, "script", {"code": code}, description)
+    lib = _lib(ctx)
+    m = await _run(lib.models.create, name, "script", {"code": code}, description)
     return _summary(m)
 
 
 @mcp.tool()
 async def update_model(model_id: str, changes: dict | None = None, remove: list[str] | None = None,
                        params: dict | None = None, note: str = "", name: str | None = None,
-                       description: str | None = None, resolves: list[str] | None = None) -> dict:
+                       description: str | None = None, resolves: list[str] | None = None, ctx: Context = None) -> dict:
     """Adjusts a model and creates a new version (the web view updates immediately).
 
     changes: {"key": value} – for CSG models this sets vars[key], otherwise the parameter.
@@ -222,24 +248,27 @@ async def update_model(model_id: str, changes: dict | None = None, remove: list[
     resolves: comment ids (e.g. ["c2"]) that the change addresses – marked resolved with a reply.
     Read the recipe with get_model first if you are unsure of the structure.
     """
-    m = await _run(store.update, model_id, params=params, changes=changes, remove=remove,
+    lib = _lib(ctx)
+    m = await _run(lib.models.update, model_id, params=params, changes=changes, remove=remove,
                    note=note, name=name, description=description, resolves=resolves)
     return _summary(m)
 
 
 @mcp.tool()
-def get_model(model_id: str) -> dict:
+def get_model(model_id: str, ctx: Context = None) -> dict:
     """Gets the model's current recipe (params), dimensions per part, version history and open
     comments. A comment has text, point (mm, in the part's coordinates = the STL file's), part,
     version and near_nodes (JSON pointers to the nearest nodes in the recipe)."""
-    return _summary(store.get(model_id), full=True)
+    lib = _lib(ctx)
+    return _summary(lib.models.get(model_id), full=True)
 
 
 @mcp.tool()
-def reply_to_comment(model_id: str, comment_id: str, text: str, resolve: bool = False) -> dict:
+def reply_to_comment(model_id: str, comment_id: str, text: str, resolve: bool = False, ctx: Context = None) -> dict:
     """Replies to a comment from the web UI (e.g. a follow-up question), and marks it resolved if resolve=True.
     The reply shows up immediately in the 3D view. Use update_model(..., resolves=[id]) when you have changed the model."""
-    m = store.comment_action(model_id, comment_id, "resolve" if resolve else "reply", text,
+    lib = _lib(ctx)
+    m = lib.models.comment_action(model_id, comment_id, "resolve" if resolve else "reply", text,
                              author="claude")
     c = Store._comment(m, comment_id)
     return {**_comment_view(c), "status": c["status"]}
@@ -247,10 +276,11 @@ def reply_to_comment(model_id: str, comment_id: str, text: str, resolve: bool = 
 
 @mcp.tool()
 async def render_model(model_id: str, version: int | None = None,
-                       views: list[str] | None = None) -> list:
+                       views: list[str] | None = None, ctx: Context = None) -> list:
     """Renders the model to an image so you can inspect it visually.
     views: choose from iso, front, top, right, back_iso (default iso, front, top, right)."""
-    m = store.get(model_id)
+    lib = _lib(ctx)
+    m = lib.models.get(model_id)
     v = Store.version(m, version) if version else Store.current(m)
     if v.get("pruned"):
         raise ValueError("the version's files have been pruned – use revert_model first")
@@ -258,7 +288,7 @@ async def render_model(model_id: str, version: int | None = None,
 
     def work():
         import trimesh
-        parts = {n: trimesh.load(store.file(model_id, p["file"])) for n, p in v["parts"].items()}
+        parts = {n: trimesh.load(lib.models.file(model_id, p["file"])) for n, p in v["parts"].items()}
         return render.render_png(parts, vw)
     png = await _run(work)
     info = _summary(m)
@@ -267,10 +297,11 @@ async def render_model(model_id: str, version: int | None = None,
 
 
 @mcp.tool()
-def list_models() -> list[dict]:
+def list_models(ctx: Context = None) -> list[dict]:
     """Lists all models in the library (most recently changed first)."""
+    lib = _lib(ctx)
     out = []
-    for m in store.list():
+    for m in lib.models.list():
         cur = Store.current(m)
         out.append({"model_id": m["id"], "name": m["name"], "kind": cur["kind"],
                     "version": cur["version"], "parts": list(cur["parts"]),
@@ -279,21 +310,24 @@ def list_models() -> list[dict]:
 
 
 @mcp.tool()
-async def revert_model(model_id: str, version: int) -> dict:
+async def revert_model(model_id: str, version: int, ctx: Context = None) -> dict:
     """Restores the model to an earlier version (created as a new version)."""
-    return _summary(await _run(store.revert, model_id, version))
+    lib = _lib(ctx)
+    return _summary(await _run(lib.models.revert, model_id, version))
 
 
 @mcp.tool()
-async def duplicate_model(model_id: str, name: str) -> dict:
+async def duplicate_model(model_id: str, name: str, ctx: Context = None) -> dict:
     """Copies a model to a new one (to try a variant without touching the original)."""
-    return _summary(await _run(store.duplicate, model_id, name))
+    lib = _lib(ctx)
+    return _summary(await _run(lib.models.duplicate, model_id, name))
 
 
 @mcp.tool()
-def delete_model(model_id: str) -> str:
+def delete_model(model_id: str, ctx: Context = None) -> str:
     """Deletes a model and its entire history."""
-    store.delete(model_id)
+    lib = _lib(ctx)
+    lib.models.delete(model_id)
     return f"deleted {model_id}"
 
 
@@ -313,16 +347,12 @@ def _safe(name: str) -> str:
     return n[:60]
 
 
-def _url(name: str) -> str:
-    return f"{PUBLIC_URL}/files/{name}"
-
-
-def _save(mesh, name: str) -> dict:
-    path = OUT / f"{name}.stl"
+def _save(lib: Lib, mesh, name: str) -> dict:
+    path = lib.dir / f"{name}.stl"
     mesh.export(path)
     info = {
         "file": path.name,
-        "url": _url(path.name),
+        "url": lib.url(path.name),
         "watertight": bool(mesh.is_watertight),
         "extents_mm": [round(float(v), 2) for v in mesh.extents],
         "bounds_mm": [[round(float(v), 2) for v in b] for b in mesh.bounds],
@@ -335,28 +365,28 @@ def _save(mesh, name: str) -> dict:
         info["print_warnings"] = [w["message"] for w in warnings]
     if info["size_bytes"] > TINKERCAD_MAX:
         small = g.simplify_to(mesh, TINKERCAD_MAX)
-        sp = OUT / f"{name}_tinkercad.stl"
+        sp = lib.dir / f"{name}_tinkercad.stl"
         small.export(sp)
         info["tinkercad"] = {"note": f"over Tinkercad's limit ({TINKERCAD_MAX / 1e6:g} MB), "
                                      "simplified copy created",
-                             "file": sp.name, "url": _url(sp.name), "triangles": len(small.faces),
+                             "file": sp.name, "url": lib.url(sp.name), "triangles": len(small.faces),
                              "size_bytes": sp.stat().st_size}
     return info
 
 
-def _out_file(file: str, suffixes=tuple(FILE_TYPES)) -> Path:
-    p = OUT / Path(file).name
+def _out_file(lib: Lib, file: str, suffixes=tuple(FILE_TYPES)) -> Path:
+    p = lib.dir / Path(file).name
     if p.suffix not in suffixes or not p.is_file():
         raise FileNotFoundError(file)
     return p
 
 
-def _load(file: str):
+def _load(lib: Lib, file: str):
     """Flat file ('box.stl') or a model's file ('<model_id>/v2/body.stl')."""
     if "/" in file:
         mid, rel = file.split("/", 1)
-        return g.load_mesh(store.file(mid, rel).read_bytes(), "stl")
-    return g.load_mesh(_out_file(file, (".stl",)).read_bytes(), "stl")
+        return g.load_mesh(lib.models.file(mid, rel).read_bytes(), "stl")
+    return g.load_mesh(_out_file(lib, file, (".stl",)).read_bytes(), "stl")
 
 
 def _check_public(host: str):
@@ -392,11 +422,12 @@ def _fetch(url: str) -> tuple[bytes, str]:
 
 
 @mcp.tool()
-def import_file(name: str, url: str = "", data_base64: str = "", format: str = "") -> dict:
+def import_file(name: str, url: str = "", data_base64: str = "", format: str = "", ctx: Context = None) -> dict:
     """Imports a model (e.g. exported from Tinkercad) and saves it as <name>.stl.
     Provide url (http/https) OR data_base64. format: stl, obj, glb, ply, off; guessed from the url if
     empty. Zip with obj+mtl (Tinkercad's OBJ export) is unpacked. Dimensions are assumed to be mm.
     The user can also upload directly: curl -T file.stl -H "Authorization: Bearer ..." <server>/upload/file.stl"""
+    lib = _lib(ctx)
     if bool(url) == bool(data_base64):
         raise ValueError("provide either url or data_base64")
     if url:
@@ -406,13 +437,14 @@ def import_file(name: str, url: str = "", data_base64: str = "", format: str = "
         data = base64.b64decode(data_base64, validate=True)
         if len(data) > MAX_UPLOAD:
             raise ValueError(f"the file is larger than {MAX_UPLOAD // 1_000_000} MB")
-    return _save(g.load_mesh(data, format or "stl"), _safe(name))
+    return _save(lib, g.load_mesh(data, format or "stl"), _safe(name))
 
 
 @mcp.tool()
-def file_info(file: str) -> dict:
+def file_info(file: str, ctx: Context = None) -> dict:
     """Dimensions, bounds, volume and watertightness of an STL file on the server."""
-    mesh = _load(file)
+    lib = _lib(ctx)
+    mesh = _load(lib, file)
     return {"file": Path(file).name, "watertight": bool(mesh.is_watertight),
             "extents_mm": [round(float(v), 2) for v in mesh.extents],
             "bounds_mm": [[round(float(v), 2) for v in b] for b in mesh.bounds],
@@ -421,19 +453,20 @@ def file_info(file: str) -> dict:
 
 
 @mcp.tool()
-def check_print(model_id: str | None = None, file: str | None = None) -> dict:
+def check_print(model_id: str | None = None, file: str | None = None, ctx: Context = None) -> dict:
     """Print check (watertight, disconnected shells, thin walls, overhangs, build volume) of a
     library model's current version (model_id) or a standalone STL file (file), using the
     thresholds configured in the admin UI. Warnings only - nothing is changed."""
+    lib = _lib(ctx)
     if bool(model_id) == bool(file):
         raise ValueError("give exactly one of model_id or file")
     settings = store.settings.get()
     if file:
-        warnings = {"model": printcheck.check(_load(file), settings)}
+        warnings = {"model": printcheck.check(_load(lib, file), settings)}
     else:
         import trimesh
-        cur = Store.current(store.get(model_id))
-        warnings = {n: printcheck.check(trimesh.load(store.file(model_id, p["file"]), force="mesh"),
+        cur = Store.current(lib.models.get(model_id))
+        warnings = {n: printcheck.check(trimesh.load(lib.models.file(model_id, p["file"]), force="mesh"),
                                         settings) for n, p in cur["parts"].items()}
     return {"ok": not any(warnings.values()), "warnings": warnings, "settings": settings}
 
@@ -443,7 +476,7 @@ def modify_file(file: str, name: str = "", scale: float | list[float] | None = N
                 rotate: list[float] | None = None, mirror: str = "", place_on_bed: bool = True,
                 center_xy: bool = False, add: list[dict] | None = None,
                 subtract: list[dict] | None = None, repair: bool = False,
-                max_triangles: int = 0) -> dict:
+                max_triangles: int = 0, ctx: Context = None) -> dict:
     """Builds on an existing STL (e.g. imported from Tinkercad). Saved as <name>.stl
     (default: overwrites the file). Order: repair, scale, rotate, mirror, center_xy/place_on_bed,
     add, subtract, max_triangles.
@@ -453,57 +486,62 @@ def modify_file(file: str, name: str = "", scale: float | list[float] | None = N
     rotate: [rx,ry,rz]}]. E.g. screw hole: {shape: cylinder, diameter: 3.4, height: 20, at: [10,10,5]}.
     Check bounds_mm with file_info first. add/subtract require a watertight model.
     max_triangles: simplify the mesh to at most this many triangles."""
-    mesh = g.modify(_load(file), scale=scale, rotate=rotate, mirror=mirror,
+    lib = _lib(ctx)
+    mesh = g.modify(_load(lib, file), scale=scale, rotate=rotate, mirror=mirror,
                     place_on_bed=place_on_bed, center_xy=center_xy, add=add, subtract=subtract,
                     do_repair=repair)
     if max_triangles and len(mesh.faces) > max_triangles:
         mesh = mesh.simplify_quadric_decimation(face_count=max_triangles)
-    return _save(mesh, _safe(name or Path(file).stem))
+    return _save(lib, mesh, _safe(name or Path(file).stem))
 
 
 @mcp.tool()
-def split_file(file: str) -> list[dict]:
+def split_file(file: str, ctx: Context = None) -> list[dict]:
     """Splits an STL into its loose parts: <name>_part1.stl, <name>_part2.stl, ... (largest first)."""
-    parts = sorted(_load(file).split(only_watertight=False), key=lambda m: -len(m.faces))
+    lib = _lib(ctx)
+    parts = sorted(_load(lib, file).split(only_watertight=False), key=lambda m: -len(m.faces))
     stem = Path(file).stem
-    return [_save(p, f"{stem}_part{i}") for i, p in enumerate(parts, 1)]
+    return [_save(lib, p, f"{stem}_part{i}") for i, p in enumerate(parts, 1)]
 
 
 @mcp.tool()
-def export_obj(name: str, parts: list[dict]) -> dict:
+def export_obj(name: str, parts: list[dict], ctx: Context = None) -> dict:
     """Merges STL files into one colored OBJ (one object + color per part) for Tinkercad etc.
     parts: [{file: 'box_body.stl', color: 'red' | '#rrggbb' (optional)}]. Parts from the model
     library are given as '<model_id>/<file>' (file per parts[...].url in get_model, e.g. 'box/v3/lid.stl').
     Creates <name>.obj, <name>.mtl and <name>.zip (both files; import the zip's contents)."""
+    lib = _lib(ctx)
     name = _safe(name)
-    loaded = [(_safe(Path(p["file"]).stem), _load(p["file"]), p.get("color", "")) for p in parts]
+    loaded = [(_safe(Path(p["file"]).stem), _load(lib, p["file"]), p.get("color", "")) for p in parts]
     obj, mtl = g.to_obj(loaded, f"{name}.mtl")
     if len(obj) > TINKERCAD_MAX:
         ratio = TINKERCAD_MAX / len(obj) * 0.9
         loaded = [(n, m.simplify_quadric_decimation(face_count=max(4, int(len(m.faces) * ratio))), c)
                   for n, m, c in loaded]
         obj, mtl = g.to_obj(loaded, f"{name}.mtl")
-    (OUT / f"{name}.obj").write_text(obj)
-    (OUT / f"{name}.mtl").write_text(mtl)
-    with zipfile.ZipFile(OUT / f"{name}.zip", "w", zipfile.ZIP_DEFLATED) as z:
+    (lib.dir / f"{name}.obj").write_text(obj)
+    (lib.dir / f"{name}.mtl").write_text(mtl)
+    with zipfile.ZipFile(lib.dir / f"{name}.zip", "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr(f"{name}.obj", obj)
         z.writestr(f"{name}.mtl", mtl)
-    return {"obj": _url(f"{name}.obj"), "mtl": _url(f"{name}.mtl"), "zip": _url(f"{name}.zip"),
+    return {"obj": lib.url(f"{name}.obj"), "mtl": lib.url(f"{name}.mtl"), "zip": lib.url(f"{name}.zip"),
             "parts": [n for n, _, _ in loaded], "size_bytes": len(obj),
             "triangles": sum(len(m.faces) for _, m, _ in loaded)}
 
 
 @mcp.tool()
-def list_files() -> list[dict]:
+def list_files(ctx: Context = None) -> list[dict]:
     """Lists all files (stl, obj, mtl, zip) on the server with links."""
-    return [{"file": p.name, "url": _url(p.name), "size_bytes": p.stat().st_size}
-            for p in sorted(OUT.iterdir()) if p.suffix in FILE_TYPES and p.is_file()]
+    lib = _lib(ctx)
+    return [{"file": p.name, "url": lib.url(p.name), "size_bytes": p.stat().st_size}
+            for p in sorted(lib.dir.iterdir()) if p.suffix in FILE_TYPES and p.is_file()]
 
 
 @mcp.tool()
-def delete_file(file: str) -> str:
+def delete_file(file: str, ctx: Context = None) -> str:
     """Deletes a file (filename only, e.g. 'box_lid.stl')."""
-    p = _out_file(file)
+    lib = _lib(ctx)
+    p = _out_file(lib, file)
     p.unlink()
     return f"deleted {p.name}"
 
@@ -514,7 +552,6 @@ def delete_file(file: str) -> str:
 # access token>, ?token=<MCP_TOKEN> (sets a session cookie), or the session cookie set after a
 # passkey login. MCP_TOKEN is the bootstrap admin. See auth.py for the OAuth flow.
 
-db = Database(DATABASE_URL)
 oauth = OAuthProvider(AuthState(db))
 challenges = Expiring(CHALLENGE_TTL)  # WebAuthn challenges per login/registration attempt
 SESSION_COOKIE = "stl_session"
@@ -580,10 +617,19 @@ def _user(request) -> dict:
     return request.state.user
 
 
-def _mcp_user(ctx: Context) -> dict:
-    """The user an MCP tool call is made for (set on the HTTP request by the Auth middleware)."""
-    req = ctx.request_context.request
+def _req_lib(request) -> Lib:
+    """The library a web request sees. Anonymous reads (UI_PUBLIC/FILES_PUBLIC) see the admin's."""
+    return Lib(request.state.user or _admin())
+
+
+def _mcp_user(ctx: Context | None) -> dict:
+    """The user an MCP tool call is made for (set on the HTTP request by the Auth middleware).
+    A call without a request (a direct Python call) runs as the admin only in local single-user
+    mode, i.e. when MCP_TOKEN is not set - the same rule the middleware applies."""
+    req = ctx.request_context.request if ctx is not None else None
     user = getattr(req.state, "user", None) if req is not None else None
+    if not user and req is None and not TOKEN:
+        user = _admin()
     if not user:
         raise PermissionError("not logged in")
     return user
@@ -605,7 +651,7 @@ def _public_path(path: str, read: bool) -> bool:
         return False  # admin is never public, not even with UI_PUBLIC
     return (path == "/health" or path.startswith("/static/") or path in PASSKEY_LOGIN_PATHS
             or (bool(OAUTH_ROUTES) and (path in OAUTH_PATHS or path.startswith("/.well-known/oauth-")))
-            or (FILES_PUBLIC and read and path.startswith("/files/"))
+            or (FILES_PUBLIC and read and path.startswith(("/files/", "/f/")))
             or (UI_PUBLIC and read and (path == "/" or path.startswith("/m/")
                                         or (path.startswith("/api/")
                                             and not path.startswith("/api/auth")))))
@@ -817,9 +863,10 @@ async def page_model(_):
     return FileResponse(WEB / "viewer.html")
 
 
-async def api_models(_):
+async def api_models(request):
+    lib = _req_lib(request)
     out = []
-    for m in store.list():
+    for m in lib.models.list():
         cur = Store.current(m)
         out.append({"id": m["id"], "name": m["name"], "description": m.get("description", ""),
                     "updated": m["updated"], "version": cur["version"], "kind": cur["kind"],
@@ -827,46 +874,47 @@ async def api_models(_):
                     "warnings": sum(len(p.get("warnings", [])) for p in cur["parts"].values()),
                     "parts": {n: {"url": f"/files/{m['id']}/{p['file']}",
                                   "extents_mm": p["extents_mm"]} for n, p in cur["parts"].items()}})
-    return JSONResponse({"models": out, "revision": store.revision})
+    return JSONResponse({"models": out, "revision": store.revision_for(lib.user)})
 
 
 async def api_model(request):
     mid = request.path_params["id"]
+    lib = _req_lib(request)
     try:
         if request.method == "DELETE":
-            store.delete(mid)
+            lib.models.delete(mid)
             return JSONResponse({"ok": True})
         if request.method == "POST":
             body = await request.json()
             action = body.get("action")
             if action == "set_current":
-                m = store.set_current(mid, int(body["version"]))
+                m = lib.models.set_current(mid, int(body["version"]))
             elif action == "revert":
-                m = await _run(store.revert, mid, int(body["version"]))
+                m = await _run(lib.models.revert, mid, int(body["version"]))
             elif action == "rename":
-                m = store.update(mid, name=body.get("name"), description=body.get("description"))
+                m = lib.models.update(mid, name=body.get("name"), description=body.get("description"))
             elif action == "update":
-                m = await _run(store.update, mid, params=body.get("params"),
+                m = await _run(lib.models.update, mid, params=body.get("params"),
                                changes=body.get("changes"), note=body.get("note", "from the web UI"))
             elif action == "comment_add":
-                await _run(store.add_comment, mid, body.get("text", ""), body.get("point"),
+                await _run(lib.models.add_comment, mid, body.get("text", ""), body.get("point"),
                            body.get("normal"), body.get("part"), body.get("version"))
-                m = store.get(mid)
+                m = lib.models.get(mid)
             elif action in ("comment_resolve", "comment_reopen", "comment_reply", "comment_delete"):
-                m = store.comment_action(mid, body["id"], action.removeprefix("comment_"),
+                m = lib.models.comment_action(mid, body["id"], action.removeprefix("comment_"),
                                          body.get("text", ""))
             elif action == "duplicate":
-                m = await _run(store.duplicate, mid, body.get("name") or f"{mid} copy")
+                m = await _run(lib.models.duplicate, mid, body.get("name") or f"{mid} copy")
             else:
                 return JSONResponse({"error": "unknown action"}, status_code=400)
             return JSONResponse({"ok": True, "id": m["id"]})
-        m = store.get(mid)
+        m = lib.models.get(mid)
     except Exception as e:  # noqa: BLE001 – the error is shown in the UI
         return _err(e)
     for v in m["versions"]:
         for p in v["parts"].values():
             p["url"] = f"/files/{m['id']}/{p['file']}"
-    m["revision"] = store.revision
+    m["revision"] = store.revision_for(lib.user)
     return JSONResponse(m)
 
 
@@ -901,18 +949,20 @@ async def api_recheck(request):
 
 
 async def api_events(request):
-    """Server-sent events: sends {revision, id} whenever something in the library changes."""
+    """Server-sent events: sends {revision, id} whenever something in the viewer's library changes."""
+    user = _req_lib(request).user
+
     async def gen():
-        last = store.revision
+        last = store.revision_for(user)
         yield f"data: {json.dumps({'revision': last})}\n\n"
         idle = 0
         while not await request.is_disconnected():
             await asyncio.sleep(0.5)
             idle += 1
-            if store.revision != last:
-                last = store.revision
+            if store.revision_for(user) != last:
+                last = store.revision_for(user)
                 idle = 0
-                yield f"data: {json.dumps({'revision': last, 'id': store.last_changed})}\n\n"
+                yield f"data: {json.dumps({'revision': last, 'id': store.last_changed_for(user)})}\n\n"
             elif idle >= 30:
                 idle = 0
                 yield ": ping\n\n"
@@ -922,7 +972,7 @@ async def api_events(request):
 
 async def files(request):
     try:
-        p = store.file(request.path_params["id"], request.path_params["rel"])
+        p = _req_lib(request).models.file(request.path_params["id"], request.path_params["rel"])
     except KeyError:
         return PlainTextResponse("not found", status_code=404)
     return FileResponse(p, media_type="model/stl", filename=f"{request.path_params['id']}_{p.name}",
@@ -932,8 +982,9 @@ async def files(request):
 async def preview(request):
     """PNG preview (the same rendering Claude sees)."""
     mid = request.path_params["id"]
+    lib = _req_lib(request)
     try:
-        m = store.get(mid)
+        m = lib.models.get(mid)
         v = Store.current(m)
         cache = store.dir / mid / f"v{v['version']}" / "preview.png"
         if cache.is_file():
@@ -941,7 +992,7 @@ async def preview(request):
 
         def work():
             import trimesh
-            parts = {n: trimesh.load(store.file(mid, p["file"])) for n, p in v["parts"].items()}
+            parts = {n: trimesh.load(lib.models.file(mid, p["file"])) for n, p in v["parts"].items()}
             png = render.render_png(parts, ("iso",), size=360, footer_text=False)
             cache.write_bytes(png)
             return png
@@ -951,11 +1002,25 @@ async def preview(request):
     return Response(png, media_type="image/png")
 
 
-async def flat_files(request):
-    p = OUT / Path(request.path_params["name"]).name
+def _serve_file(d: Path, name: str):
+    p = d / Path(name).name
     if p.suffix not in FILE_TYPES or not p.is_file():
         return PlainTextResponse("not found", status_code=404)
     return FileResponse(p, media_type=FILE_TYPES[p.suffix], filename=p.name)
+
+
+async def user_files(request):
+    """A user's standalone file: /f/<user id>/<name>. Only the owner and admins (or anyone with
+    FILES_PUBLIC; user ids are random)."""
+    uid, user = request.path_params["uid"], request.state.user
+    if not FILES_PUBLIC and not (user and (user["id"] == uid or user["role"] == "admin")):
+        return PlainTextResponse("not found", status_code=404)
+    return _serve_file(OUT / "files" / Path(uid).name, request.path_params["name"])
+
+
+async def flat_files(request):
+    """Old links (/files/<name>) from before users: the admin's files."""
+    return await _run(lambda: _serve_file(Lib(_admin()).dir, request.path_params["name"]))
 
 
 async def upload(request):
@@ -968,7 +1033,7 @@ async def upload(request):
             return JSONResponse({"error": f"larger than {MAX_UPLOAD // 1_000_000} MB"}, status_code=413)
     try:
         mesh = g.load_mesh(bytes(body), fname.suffix.lstrip(".") or "stl")
-        return JSONResponse(_save(mesh, _safe(fname.stem)))
+        return JSONResponse(_save(_req_lib(request), mesh, _safe(fname.stem)))
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
 
@@ -982,8 +1047,23 @@ def startup():
     applied = db.migrate()
     if applied:
         print(f"database migrations applied: {', '.join(applied)}", flush=True)
-    if oauth.state.import_legacy(DATA / "auth.json", _admin()["id"]):
+    admin = _admin()
+    if oauth.state.import_legacy(DATA / "auth.json", admin["id"]):
         print("imported auth.json into the database (renamed to auth.json.imported)", flush=True)
+    n = store.import_legacy(admin["id"])
+    moved = _move_legacy_files(Lib(admin))
+    if n or moved:
+        print(f"imported {n} models and {moved} standalone files into the admin's library", flush=True)
+
+
+def _move_legacy_files(lib: Lib) -> int:
+    """Standalone files from before users lived directly in STL_DIR; they become the admin's."""
+    n = 0
+    for p in OUT.iterdir():
+        if p.is_file() and p.suffix in FILE_TYPES:
+            p.replace(lib.dir / p.name)
+            n += 1
+    return n
 
 
 @contextlib.asynccontextmanager
@@ -1007,6 +1087,7 @@ app = Starlette(
         Route("/api/settings", api_settings, methods=["GET", "POST"]),
         Route("/api/recheck", api_recheck, methods=["POST"]),
         Route("/files/{name}", flat_files),
+        Route("/f/{uid}/{name}", user_files),
         Route("/files/{id}/{rel:path}", files),
         Route("/upload/{name}", upload, methods=["PUT", "POST"]),
         Route("/health", health),
