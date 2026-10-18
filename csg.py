@@ -88,11 +88,34 @@ def resolve(value, env: dict):
 
 
 def resolve_vars(vars_: dict) -> dict:
-    """Variables may refer to earlier variables (in order)."""
+    """Variables may refer to each other in any order (the storage may not keep key order)."""
+    vars_ = vars_ or {}
     env: dict = {}
-    for k, v in (vars_ or {}).items():
-        env[k] = resolve(v, env)
-    return env
+    active: list = []
+
+    class _Lazy(dict):
+        def __contains__(self, k):
+            return k in vars_ or k in env
+
+        def __getitem__(self, k):
+            return get(k)
+
+    def get(k):
+        if k in env:
+            return env[k]
+        if k in active:
+            raise ValueError("circular variable reference: " + " -> ".join(active[active.index(k):] + [k]))
+        active.append(k)
+        try:
+            env[k] = resolve(vars_[k], lazy)
+        finally:
+            active.pop()
+        return env[k]
+
+    lazy = _Lazy()
+    for k in vars_:
+        get(k)
+    return {k: env[k] for k in vars_}
 
 
 # ---------------------------------------------------------------- shapes

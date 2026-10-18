@@ -25,7 +25,7 @@
   <a class="wordmark" href="/" title="Back to the library"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-mark"/></svg><span class="name">auto<b>smith</b></span></a>
   <span class="crumb">/ <b id="crumb"></b></span>
   <div class="grow"></div>
-  <span class="live" id="live" title="The view updates automatically when Claude changes the model"><span class="dot"></span><span class="label">Live</span></span>
+  <span class="live" id="live" title="Connecting…"><span class="dot"></span><span class="label">Live</span></span>
 </header>
 <div class="viewer-layout">
   <div id="stage">
@@ -308,9 +308,13 @@ function renderSide() {
             style="background:${PART_COLORS[i % PART_COLORS.length]}"></button>
       <div><div class="pname">${esc(name)}</div>
         <div class="dims">${fmt(p.extents_mm)}, ${p.volume_cm3} cm³</div>
-        ${warnHtml(p)}</div>
+        ${warnHtml(p, name)}</div>
       <a class="btn sm" href="${p.url}" download title="Download ${esc(name)} as STL">${icon("download", "sm")}STL</a>
     </div>`).join("");
+  document.querySelectorAll(".fixbtn").forEach((b) => b.onclick = () => {
+    const part = b.dataset.part, w = ver.parts[part].warnings?.[+b.dataset.i];
+    if (w) startFix(part, w);
+  });
   document.querySelectorAll(".swatch").forEach((s) => s.onclick = () => {
     const n = s.dataset.part;
     hidden.has(n) ? hidden.delete(n) : hidden.add(n);
@@ -471,6 +475,23 @@ function setCommentMode(on) {
   $("commentmode").classList.toggle("on", on);
   stage.classList.toggle("commenting", on);
   if (!on) closePopup();
+}
+
+// "Fix" on a print-check warning: the same as placing a comment, prefilled and anchored at the problem.
+function startFix(part, w) {
+  const obj = group.children.find((o) => o.name === part);
+  const near = w.detail?.near_mm;
+  if (!obj) return;
+  hidden.delete(part); obj.visible = true;
+  const local = Array.isArray(near) ? new THREE.Vector3(...near)
+    : new THREE.Box3().setFromObject(obj.children[0]).getCenter(new THREE.Vector3()).sub(obj.position);
+  pending = { world: local.clone().add(obj.position), point: local.toArray(), normal: null, part };
+  const pop = $("cpop");
+  pop.hidden = false;
+  pop.style.left = "16px"; pop.style.top = "16px";
+  $("ctext").value = `Fix this print problem in "${part}": ${w.message}. Keep the design intent and resolve this comment.`;
+  $("ctext").focus();
+  renderPins();
 }
 
 function closePopup() {
