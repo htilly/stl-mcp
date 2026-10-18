@@ -3,27 +3,34 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Settings</title>
+<title>Print-check settings · STL library</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <header class="top">
-  <a href="/">← Library</a>
-  <h1>Print-check settings</h1>
+  <a class="wordmark" href="/" title="Back to the library"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-mark"/></svg><span class="name">STL library</span></a>
+  <span class="crumb admin-crumb">/ <b>Admin</b></span>
+  <nav class="tabs" aria-label="Admin pages">
+    <a href="/admin" aria-current="page"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-settings"/></svg>Print check</a>
+    <a href="/admin/design"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-swatch"/></svg>Design system</a>
+  </nav>
 </header>
 <main class="admin">
+  <h1>Print-check settings</h1>
   <p class="msg">Thresholds for the print check that runs on every build. Problems are shown as warnings and
      returned to Claude; nothing is ever blocked. A blue dot marks values that differ from the defaults.</p>
   <div id="groups"></div>
   <div class="actions">
     <button class="primary" id="save">Save</button>
+    <div class="grow"></div>
     <button id="resetall" class="danger">Reset all to defaults</button>
     <button id="recheck" title="Re-run the checks on the current version of every model">Re-check all models</button>
     <span class="msg" id="msg"></span>
   </div>
 </main>
 <script type="module">
-import { api, esc } from "/static/common.js";
+import { api, esc, icon } from "/static/common.js";
 
 let state = null;
 const $ = (id) => document.getElementById(id);
@@ -43,8 +50,8 @@ function draw() {
       return `<div class="field${values[k] !== defaults[k] ? " changed" : ""}" data-field="${k}">
         <label class="lbl" for="${k}">${esc(d.label)}</label>
         <div class="ctl">${input.replace("data-key", `id="${k}" data-key`)}
-          <button type="button" data-reset="${k}" title="Back to the default (${defaults[k]})"
-                  ${values[k] === defaults[k] ? "disabled" : ""}>↺</button></div>
+          <button type="button" data-reset="${k}" class="icon quiet" title="Back to the default (${defaults[k]})" aria-label="Reset ${esc(d.label)} to default"
+                  ${values[k] === defaults[k] ? "disabled" : ""}>${icon("restore")}</button></div>
         ${d.help ? `<p class="help">${esc(d.help)} <span class="dflt">Default: ${esc(defaults[k])}${esc(d.unit ? " " + d.unit : "")}.</span></p>` : ""}
       </div>`;
     }).join("")}</section>`).join("");
@@ -61,7 +68,7 @@ function collect() {
 async function load() { state = await api("/api/settings"); draw(); }
 
 $("groups").addEventListener("click", async (e) => {
-  const k = e.target.dataset?.reset;
+  const k = e.target.closest("[data-reset]")?.dataset.reset;
   if (!k) return;
   try { state = await api("/api/settings", { method: "POST", body: { reset: [k] } }); draw(); say(`Reset ${k}.`); }
   catch (err) { say(err.message, true); }

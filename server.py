@@ -556,7 +556,7 @@ def _set_session(resp: Response) -> Response:
 
 
 def _public_path(path: str, read: bool) -> bool:
-    if path == "/admin" or path.startswith("/api/settings") or path == "/api/recheck":
+    if path == "/admin" or path.startswith(("/admin/", "/api/settings")) or path == "/api/recheck":
         return False  # admin is never public, not even with UI_PUBLIC
     return (path == "/health" or path.startswith("/static/") or path in PASSKEY_LOGIN_PATHS
             or (bool(OAUTH_ROUTES) and (path in OAUTH_PATHS or path.startswith("/.well-known/oauth-")))
@@ -808,6 +808,11 @@ async def page_admin(_):
     return FileResponse(WEB / "admin.html")
 
 
+async def page_admin_design(_):
+    """The design system reference (docs/DESIGN.md), rendered from the live style.css."""
+    return FileResponse(WEB / "design.html")
+
+
 async def api_settings(request):
     """GET: values + defaults + schema. POST {values: {...}} saves; POST {reset: true | [keys]} resets."""
     try:
@@ -916,6 +921,7 @@ app = Starlette(
         Route("/api/models/{id}/preview.png", preview),
         Route("/api/events", api_events),
         Route("/admin", page_admin),
+        Route("/admin/design", page_admin_design),
         Route("/api/settings", api_settings, methods=["GET", "POST"]),
         Route("/api/recheck", api_recheck, methods=["POST"]),
         Route("/files/{name}", flat_files),

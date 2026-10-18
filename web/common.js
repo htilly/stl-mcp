@@ -63,7 +63,7 @@ export const PART_COLORS = ["#4f8cff", "#ff9a3c", "#5ac878", "#e65a78", "#aa78ff
 // Print-check warnings of one part ({warnings: [{severity, message}]}); older versions only have `watertight`.
 export function warnHtml(p) {
   const ws = p.warnings ?? (p.watertight ? [] : [{ message: "not watertight - may cause problems in the slicer" }]);
-  return ws.map((w) => `<div class="warn" title="${esc(w.code ?? "")}">⚠ ${esc(w.message)}</div>`).join("");
+  return ws.map((w) => `<div class="warn" title="${esc(w.code ?? "")}">${icon("warning", "sm")}<span>${esc(w.message)}</span></div>`).join("");
 }
 
 // ---- passkeys (WebAuthn). The server sends options as JSON with base64url binaries.
@@ -113,3 +113,7 @@ export async function passkeyRegister(name) {
   const cred = await navigator.credentials.create({ publicKey: o });
   return api("/auth/passkey/register/verify", { method: "POST", body: { flow, name, credential: credentialJSON(cred) } });
 }
+
+// ---- icons: the sprite in /static/icons.svg (see docs/DESIGN.md#icons)
+export const icon = (name, cls = "") =>
+  `<svg class="i${cls ? " " + cls : ""}" aria-hidden="true"><use href="/static/icons.svg#i-${name}"/></svg>`;
