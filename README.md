@@ -17,6 +17,10 @@ with a web interface for viewing, rotating and browsing the models.
 
 - **Comments**: click a point on the model and write what should change. Claude sees the
   point and which part of the recipe is located there.
+- **Web editor** at `/edit/<id>` (**New model** in the library, **Edit** in the 3D view): build a
+  model by hand or change one Claude made. Every recipe opens, including multi-part ones, templates
+  and expressions; only the values you change are written
+  ([details](#building-by-hand-in-the-editor)).
 - **Design system**: colours, type, icons and components are documented in
   [`docs/DESIGN.md`](docs/DESIGN.md) and shown live in the admin section at `/admin/design`.
 - **Templates**: screw holes (M2–M8, countersunk/cylindrical, nut trap), heat inserts, screw bosses,
@@ -125,6 +129,36 @@ Use `STL_MCP_TOKEN` (or the keychain item `stl-mcp-token`) to authenticate with 
 
 The script needs only the standard library and never prints a token. It runs while that session
 is open; comments made while nothing is watching simply wait.
+
+## Building by hand in the editor
+Not everything is easiest to say in words. Press **New model** in the library (or **Edit** on an
+existing model) to open the editor at `/edit/<id>`.
+
+- Click a shape (box, cylinder, sphere, cone, tube, torus, wedge, text, or a template such as a
+  screw hole) to add it, or drag it onto the workplane. Screw holes and inserts are added as holes, on
+  top of the selected shape.
+- Select a shape in the view or in the **Recipe** tree and use **Move**, **Rotate** or **Resize**
+  (snap to the grid; **Magnet** snaps edges and centres to other shapes), or type exact values in the
+  side panel. Every field takes a number or an expression such as `=w/2 + wall`, and `+=5` moves by 5.
+  ↑/↓ steps a value. Variables are edited in the side panel too.
+- The tree shows the whole recipe: drag rows to reorder or to move them into a group, hide parts of
+  it, **Group**/**Ungroup**, and **+ Part** for a separate STL. Alt-click in the view selects the group
+  around a shape.
+- Tick **Hole** (or press <kbd>H</kbd>) to make a shape cut out of the solids instead of adding to them.
+  **Result** shows the built model with the holes cut. **Drop** puts the selection on the workplane,
+  **Duplicate** copies it.
+- **Measure** (<kbd>M</kbd>): click two points (corners snap), or shift-click two faces for the distance
+  between them. **Workplane** (<kbd>P</kbd>): click a face to build on it. With several shapes
+  selected, **Align** lines them up or spaces them evenly.
+- Undo/redo, **Save** (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>S</kbd>) builds a new version, **Export STL**
+  downloads the last saved one.
+
+The editor writes the same recipe Claude uses, so you can start by hand and ask Claude to refine it
+("round the corners", "add four M3 holes"), or the other way round. It edits the recipe in place: only
+the values you change are written, and everything else (expressions, arrays, templates, keys it
+doesn't know) is saved exactly as it was. Shapes the browser can't draw itself are meshed by the
+server. If Claude changes the model while you are editing, a banner lets you load its version or keep
+yours.
 
 ## Running
 ```
