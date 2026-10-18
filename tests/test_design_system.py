@@ -100,3 +100,11 @@ def test_text_styles_are_defined_and_documented():
     assert len(used) == 9
     for cls in used:
         assert re.search(rf"\.{cls}\s*\{{", css) and f"`.{cls}`" in doc
+
+
+def test_static_assets_revalidate(client):
+    # not fingerprinted: a CDN must not keep serving the previous deploy's CSS
+    r = client.get("/static/style.css")
+    assert r.status_code == 200
+    assert r.headers["cache-control"] == "no-cache"
+    assert r.headers.get("etag")
