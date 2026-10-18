@@ -518,6 +518,17 @@ Google/GitHub/Apple, OAuth authorize and registration) are limited per client IP
 (`AUTH_REQUESTS_PER_MINUTE`, default 30), and a Google/GitHub/Apple sign-in only completes in the
 browser that started it.
 
+Model builds (CSG, enclosures, primitives and the editor's previews) run in a throwaway worker
+process each, never in the server: started with a bare environment (no database URL or tokens),
+in an empty temp dir, as its own process group that is killed after `BUILD_TIMEOUT` seconds
+(default 60), and on Linux with rlimits on address space (`BUILD_MEM_MB`, default 3072), CPU
+seconds (`BUILD_CPU_SECONDS`, default four times the timeout), file size and open files. At most
+`BUILD_WORKERS` (default 4) run at once server-wide, and builds happen outside the library lock,
+so one slow model does not hold up anyone else's. Per user, builds are limited to
+`BUILDS_PER_MINUTE` (default 20; create, update, revert, duplicate) and editor previews to
+`MESHES_PER_MINUTE` (default 240), with `BUILDS_AT_ONCE_PER_USER` (default 2) running at a time;
+beyond that the web API answers 429.
+
 Pages are sent with a Content-Security-Policy, `X-Frame-Options: DENY`, `nosniff` and
 `Referrer-Policy: same-origin` (plus HSTS on https). Security events (failed logins, refused
 tokens, tokens created or deleted, connected apps, role changes and account deletions) are logged

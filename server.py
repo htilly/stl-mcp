@@ -58,6 +58,7 @@ import re
 import secrets
 import shutil
 import socket
+import threading
 import uuid
 import zipfile
 from pathlib import Path
@@ -94,6 +95,7 @@ from webauthn.helpers import bytes_to_base64url
 from webauthn.helpers.structs import (AuthenticatorSelectionCriteria, PublicKeyCredentialDescriptor,
                                       ResidentKeyRequirement, UserVerificationRequirement)
 
+import buildworker
 import csg
 import geometry as g
 import openscad
@@ -139,6 +141,12 @@ if not DONATE_URL.startswith("https://"):
 TRUSTED_PROXY = os.environ.get("TRUSTED_PROXY") == "1"
 GEOIP_DB = os.environ.get("GEOIP_DB", "")  # MaxMind GeoLite2-Country.mmdb, optional
 CF_COUNTRY = TRUSTED_PROXY and os.environ.get("CF_COUNTRY") == "1"
+# per user: model builds (create/update/revert/duplicate) and the editor's node previews per
+# minute, and how many of them run at the same time (more wait for a free slot)
+BUILDS_PER_MINUTE = int(os.environ.get("BUILDS_PER_MINUTE", "20"))
+MESHES_PER_MINUTE = int(os.environ.get("MESHES_PER_MINUTE", "240"))
+BUILDS_AT_ONCE = int(os.environ.get("BUILDS_AT_ONCE_PER_USER", "2"))
+BUILDS_WAITING = 64  # per user; beyond that new builds are refused
 MAX_MODELS_PER_USER = int(os.environ.get("MAX_MODELS_PER_USER", "100"))
 MAX_DISK_PER_USER = int(float(os.environ.get("MAX_DISK_MB_PER_USER", "500")) * 1_000_000)
 FILE_TYPES = {".stl": "model/stl", ".obj": "model/obj", ".mtl": "text/plain", ".zip": "application/zip"}
@@ -298,8 +306,47 @@ class Lib:
                              "delete models or files (delete_model, delete_file) to make room")
 
 
+    async def build(self, fn, *a, mesh: bool = False, **kw):
+        """Runs a build (fn in a thread) for this user: counted against their per-minute limit,
+        at most BUILDS_AT_ONCE at a time (the rest wait). Raises RateLimitError."""
+        uid = self.user["id"]
+        if not (mesh_hits if mesh else build_hits).hit(uid):
+            what = "previews" if mesh else "builds"
+            n = MESHES_PER_MINUTE if mesh else BUILDS_PER_MINUTE
+            raise RateLimitError(f"too many {what} (max {n} per minute) - wait a moment and try again")
+        with _build_slots_lock:
+            slot = _build_slots.get(uid)
+            if slot is None:
+                slot = _build_slots[uid] = [threading.BoundedSemaphore(BUILDS_AT_ONCE), 0]
+            if slot[1] >= BUILDS_WAITING:
+                raise RateLimitError("too many builds waiting - wait for the running ones to finish")
+            slot[1] += 1
+        try:
+            while not slot[0].acquire(blocking=False):   # wait without holding a thread
+                await anyio.sleep(0.05)
+            try:
+                return await _run(fn, *a, **kw)
+            finally:
+                slot[0].release()
+        finally:
+            with _build_slots_lock:
+                slot[1] -= 1
+                if slot[1] == 0:
+                    _build_slots.pop(uid, None)
+
+
 class LimitError(ValueError):
     pass
+
+
+class RateLimitError(LimitError):
+    pass
+
+
+build_hits = RateLimiter(BUILDS_PER_MINUTE, 60)
+mesh_hits = RateLimiter(MESHES_PER_MINUTE, 60)
+_build_slots: dict[str, list] = {}  # user id -> [semaphore, builds running or waiting]
+_build_slots_lock = threading.Lock()
 
 
 def _lib(ctx: Context | None) -> Lib:
@@ -329,7 +376,7 @@ adjustments are easy: update_model(model_id, {"width": 60}).
 async def create_model(name: str, spec: dict, description: str = "", ctx: Context = None) -> dict:
     lib = _lib(ctx)
     lib.ensure_room(new_model=True)
-    m = await _run(lib.models.create, name, "csg", spec, description)
+    m = await lib.build(lib.models.create, name, "csg", spec, description)
     return _summary(m, lib=lib)
 
 
@@ -361,7 +408,7 @@ async def create_enclosure(
               "floor": floor, "lid_thickness": lid_thickness, "corner_screws": corner_screws,
               "standoffs": standoffs or [], "cutouts": cutouts or [], "lid_holes": lid_holes or [],
               "lid_slots": lid_slots or []}
-    m = await _run(lib.models.create, name, "enclosure", params, description)
+    m = await lib.build(lib.models.create, name, "enclosure", params, description)
     return _summary(m, lib=lib)
 
 
@@ -375,7 +422,7 @@ async def create_from_script(name: str, code: str, description: str = "", ctx: C
     lib.ensure_room(new_model=True)
     if lib.user["role"] != "admin":
         raise PermissionError("script models are for admins only")
-    m = await _run(lib.models.create, name, "script", {"code": code}, description)
+    m = await lib.build(lib.models.create, name, "script", {"code": code}, description)
     return _summary(m, lib=lib)
 
 
@@ -405,7 +452,7 @@ async def create_from_openscad(name: str, code: str, description: str = "",
         params["vars"] = vars
     if parts:
         params["parts"] = parts
-    m = await _run(lib.models.create, name, "openscad", params, description)
+    m = await lib.build(lib.models.create, name, "openscad", params, description)
     return _summary(m, lib=lib)
 
 
@@ -429,8 +476,10 @@ async def update_model(model_id: str, changes: dict | None = None, remove: list[
     """
     lib = _lib(ctx)
     lib.ensure_room()
-    m = await _run(lib.models.update, model_id, params=params, changes=changes, remove=remove,
-                   note=note, name=name, description=description, resolves=resolves)
+    rebuild = params is not None or bool(changes) or bool(remove)
+    m = await (lib.build if rebuild else _run)(
+        lib.models.update, model_id, params=params, changes=changes, remove=remove, note=note,
+        name=name, description=description, resolves=resolves)
     return _summary(m, lib=lib)
 
 
@@ -494,7 +543,7 @@ async def revert_model(model_id: str, version: int, ctx: Context = None) -> dict
     """Restores the model to an earlier version (created as a new version)."""
     lib = _lib(ctx)
     lib.ensure_room()
-    return _summary(await _run(lib.models.revert, model_id, version), lib=lib)
+    return _summary(await lib.build(lib.models.revert, model_id, version), lib=lib)
 
 
 @mcp.tool()
@@ -502,7 +551,7 @@ async def duplicate_model(model_id: str, name: str, ctx: Context = None) -> dict
     """Copies a model to a new one (to try a variant without touching the original)."""
     lib = _lib(ctx)
     lib.ensure_room(new_model=True)
-    return _summary(await _run(lib.models.duplicate, model_id, name), lib=lib)
+    return _summary(await lib.build(lib.models.duplicate, model_id, name), lib=lib)
 
 
 @mcp.tool()
@@ -1536,7 +1585,8 @@ def _message(e: Exception) -> str:
     """What an error may tell the client: our own messages as they are, anything else (database,
     file system, library internals) as a generic text with an id to find the details in the log."""
     if isinstance(e, SAFE_ERRORS) and type(e).__module__ in ("builtins", __name__, "store", "csg",
-                                                           "geometry", "templates", "printcheck"):
+                                                           "geometry", "templates", "printcheck",
+                                                           "buildworker"):
         return str(e).strip("'\"") if isinstance(e, KeyError) else str(e)
     ref = secrets.token_hex(4)
     log.error("unexpected error %s: %r", ref, e, exc_info=e)
@@ -1544,7 +1594,11 @@ def _message(e: Exception) -> str:
 
 
 def _err(e: Exception, code=400):
-    return JSONResponse({"error": _message(e)}, status_code=404 if isinstance(e, KeyError) else code)
+    if isinstance(e, KeyError):
+        code = 404
+    elif isinstance(e, RateLimitError):
+        code = 429
+    return JSONResponse({"error": _message(e)}, status_code=code)
 
 
 async def page_index(_):
@@ -1586,7 +1640,7 @@ async def _create_blank(request):
         body = await request.json()
         name = str(body.get("name") or "New model").strip()[:80] or "New model"
         lib.ensure_room(new_model=True)
-        m = await _run(lib.models.create, name, "csg", BLANK_SPEC, "", "created in the web editor")
+        m = await lib.build(lib.models.create, name, "csg", BLANK_SPEC, "", "created in the web editor")
         return JSONResponse({"ok": True, "id": m["id"]})
     except Exception as e:  # noqa: BLE001 – the error is shown in the UI
         return _err(e)
@@ -1605,11 +1659,11 @@ async def api_model(request):
             if action == "set_current":
                 m = lib.models.set_current(mid, int(body["version"]))
             elif action == "revert":
-                m = await _run(lib.models.revert, mid, int(body["version"]))
+                m = await lib.build(lib.models.revert, mid, int(body["version"]))
             elif action == "rename":
                 m = lib.models.update(mid, name=body.get("name"), description=body.get("description"))
             elif action == "update":
-                m = await _run(lib.models.update, mid, params=body.get("params"),
+                m = await lib.build(lib.models.update, mid, params=body.get("params"),
                                changes=body.get("changes"), note=body.get("note", "from the web UI"))
             elif action == "comment_add":
                 await _run(lib.models.add_comment, mid, body.get("text", ""), body.get("point"),
@@ -1620,7 +1674,7 @@ async def api_model(request):
                                          body.get("text", ""))
             elif action == "duplicate":
                 lib.ensure_room(new_model=True)
-                m = await _run(lib.models.duplicate, mid, body.get("name") or f"{mid} copy")
+                m = await lib.build(lib.models.duplicate, mid, body.get("name") or f"{mid} copy")
             else:
                 return JSONResponse({"error": "unknown action"}, status_code=400)
             return JSONResponse({"ok": True, "id": m["id"]})
@@ -1647,13 +1701,13 @@ async def api_mesh(request):
             raise ValueError("node too large")
 
         def work():
-            m = csg.build_node(node, csg.resolve_vars(body.get("vars") or {}))
-            if m.is_empty():
+            mesh = buildworker.mesh_node(node, body.get("vars") or {})  # in a sandboxed worker
+            if mesh is None:
                 return b""
             buf = io.BytesIO()
-            csg.to_trimesh(m).export(buf, file_type="stl")
+            mesh.export(buf, file_type="stl")
             return buf.getvalue()
-        stl = await _run(work)
+        stl = await lib.build(work, mesh=True)
     except Exception as e:  # noqa: BLE001 – the error is shown in the editor
         return _err(e)
     return Response(stl, media_type="model/stl")
