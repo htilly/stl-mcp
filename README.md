@@ -19,7 +19,8 @@ with a web interface for viewing, rotating and browsing the models.
   point and which part of the recipe is located there.
 - **Design system**: colours, type, icons and components are documented in
   [`docs/DESIGN.md`](docs/DESIGN.md) and shown live in the admin section at `/admin/design`.
-- **Templates**: screw holes (M2–M5, countersunk/cylindrical, nut trap), heat inserts, screw bosses,
+- **Templates**: screw holes (M2–M8, countersunk/cylindrical, nut trap), heat inserts, screw bosses,
+  printable screws, nuts and threaded holes with real ISO threads,
   snap hooks, hinges and text.
 
 ## The idea: models are recipes, not files
@@ -218,7 +219,8 @@ page). It requires `PUBLIC_URL` on https (or localhost); `OAUTH=0` turns it off.
   `extrude` (polygon/circle/rectangle profile, `twist`, `scale_top`) and `revolve`
 - Templates: `screw_hole`, `heat_insert`, `nut_trap` (cutting: the surface is at z=0, going downward),
   `boss`, `snap_hook`, `hinge` (print-in-place or with a separate pin) and `text`
-  (DejaVu Sans, raised or engraved). Dimensions for M2–M5 are in `templates.py`.
+  (DejaVu Sans, raised or engraved). Printable `screw`, `nut` and `threaded_hole` have a real
+  helical ISO metric thread. Dimensions for M2–M8 are in `templates.py`.
 - Operations: `union`, `difference`, `intersection`, `hull`, `minkowski`
 - All nodes: `translate`, `rotate` (degrees), `scale`, `mirror`, `array`, `polar`, `hidden`
 - Multiple parts (one STL per part): `{"parts": {"body": {...}, "lid": {...}}}`

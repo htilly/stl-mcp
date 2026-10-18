@@ -5,6 +5,9 @@ Convention for *cutting* templates (screw_hole, heat_insert, nut_trap): the axis
 surface is at z=0 and the body goes down into the material (plus 0.5 mm overshoot upwards for a clean
 boolean operation). Place with translate at the surface point and subtract with "difference".
 Set "flip": true to point upwards (hole from below).
+
+Threaded templates (screw, nut, threaded_hole) model a real ISO metric thread (60° trapezoid profile,
+right-handed unless "left": true) so printed parts mate with real hardware or with each other.
 """
 from __future__ import annotations
 
@@ -13,6 +16,7 @@ from functools import lru_cache
 from pathlib import Path
 
 import manifold3d as mf
+import numpy as np
 
 M = mf.Manifold
 CS = mf.CrossSection
@@ -24,13 +28,16 @@ OVERSHOOT = 0.5
 # Dimensions for metric screws (mm). clear = through hole (medium), tap = pilot hole for
 # self-tapping screw in plastic, head_cs = countersunk head Ø (90°), head_cb/head_h = socket head
 # (DIN 912) Ø/height incl. margin, nut_af/nut_h = nut width across flats/height,
-# ins_d/ins_l = hole for heat-set insert (Ruthex/CNC Kitchen type) Ø/length.
+# ins_d/ins_l = hole for heat-set insert (Ruthex/CNC Kitchen type) Ø/length, pitch = coarse thread
+# pitch, key/key_cs = hex key for socket head (DIN 912) / countersunk and button heads (ISO 10642/7380).
 SIZES = {
-    "M2":   dict(clear=2.4, tap=1.7, head_cs=4.2,  head_cb=4.0, head_h=2.0, nut_af=4.0, nut_h=1.6, ins_d=3.2, ins_l=4.0),
-    "M2.5": dict(clear=2.9, tap=2.1, head_cs=5.2,  head_cb=5.0, head_h=2.5, nut_af=5.0, nut_h=2.0, ins_d=3.5, ins_l=5.0),
-    "M3":   dict(clear=3.4, tap=2.5, head_cs=6.3,  head_cb=6.0, head_h=3.0, nut_af=5.5, nut_h=2.4, ins_d=4.0, ins_l=5.7),
-    "M4":   dict(clear=4.5, tap=3.3, head_cs=8.4,  head_cb=7.6, head_h=4.0, nut_af=7.0, nut_h=3.2, ins_d=5.6, ins_l=8.1),
-    "M5":   dict(clear=5.5, tap=4.2, head_cs=10.4, head_cb=9.2, head_h=5.0, nut_af=8.0, nut_h=4.0, ins_d=6.4, ins_l=9.5),
+    "M2":   dict(clear=2.4, tap=1.7, head_cs=4.2,  head_cb=4.0,  head_h=2.0, nut_af=4.0,  nut_h=1.6, ins_d=3.2, ins_l=4.0,  pitch=0.4,  key=1.5, key_cs=1.3),
+    "M2.5": dict(clear=2.9, tap=2.1, head_cs=5.2,  head_cb=5.0,  head_h=2.5, nut_af=5.0,  nut_h=2.0, ins_d=3.5, ins_l=5.0,  pitch=0.45, key=2.0, key_cs=1.5),
+    "M3":   dict(clear=3.4, tap=2.5, head_cs=6.3,  head_cb=6.0,  head_h=3.0, nut_af=5.5,  nut_h=2.4, ins_d=4.0, ins_l=5.7,  pitch=0.5,  key=2.5, key_cs=2.0),
+    "M4":   dict(clear=4.5, tap=3.3, head_cs=8.4,  head_cb=7.6,  head_h=4.0, nut_af=7.0,  nut_h=3.2, ins_d=5.6, ins_l=8.1,  pitch=0.7,  key=3.0, key_cs=2.5),
+    "M5":   dict(clear=5.5, tap=4.2, head_cs=10.4, head_cb=9.2,  head_h=5.0, nut_af=8.0,  nut_h=4.0, ins_d=6.4, ins_l=9.5,  pitch=0.8,  key=4.0, key_cs=3.0),
+    "M6":   dict(clear=6.6, tap=5.0, head_cs=12.6, head_cb=11.0, head_h=6.0, nut_af=10.0, nut_h=5.0, ins_d=8.0, ins_l=12.7, pitch=1.0,  key=5.0, key_cs=4.0),
+    "M8":   dict(clear=9.0, tap=6.8, head_cs=16.6, head_cb=14.0, head_h=8.0, nut_af=13.0, nut_h=6.5, ins_d=9.7, ins_l=12.7, pitch=1.25, key=6.0, key_cs=5.0),
 }
 
 
@@ -201,6 +208,137 @@ def hinge(n):
     return M.batch_boolean([one("a"), one("b")], mf.OpType.Add)
 
 
+# ---------------------------------------------------------------- threads
+
+THREAD_DEPTH = 5 * math.sqrt(3) / 16          # ISO: radial depth of the basic profile, × pitch
+
+
+def _thread_dims(n) -> tuple[float, float]:
+    """Nominal (major) diameter and pitch: from size, overridable with d / pitch."""
+    s = _size(n)
+    d = float(n.get("d", float(str(n.get("size", "M3")).upper().replace(",", ".")[1:])))
+    pitch = float(n.get("pitch", s["pitch"]))
+    if not 0.2 <= pitch <= d / 2:
+        raise ValueError(f"{n['shape']}: pitch must be between 0.2 and d/2")
+    return d, pitch
+
+
+def _thread_rod(d, pitch, length, offset=0.0, left=False, segs=None, z0=0.0):
+    """Threaded rod along z from z0 to z0+length with an ISO metric profile (crest P/8, root P/4).
+    offset grows (+, for cutting internal threads) or shrinks (−, play on an external thread) the
+    radius. Built as a mesh whose radius follows the helix, so it costs no boolean operations."""
+    R = d / 2 + offset
+    r = R - THREAD_DEPTH * pitch
+    N = int(segs or max(48, min(128, round(d * 12))))
+    per = 16                                                  # rows per pitch
+    rows = max(2, int(math.ceil(length / pitch * per)) + 1)
+    z = np.linspace(0.0, length, rows)
+    phi = np.arange(N) * 2 * np.pi / N
+    Z, P = np.meshgrid(z, phi, indexing="ij")
+    u = np.mod((Z + z0) / pitch + (1 if left else -1) * P / (2 * np.pi), 1.0)   # phase fixed to z=0
+    rad = r + (R - r) * np.interp(u, [0, 1 / 8, 7 / 16, 11 / 16, 1], [1, 1, 0, 0, 1])
+    V = np.stack([rad * np.cos(P), rad * np.sin(P), Z + z0], axis=-1).reshape(-1, 3)
+    V = np.vstack([V, [[0, 0, z0], [0, 0, z0 + length]]])
+    i, j = np.meshgrid(np.arange(rows - 1), np.arange(N), indexing="ij")
+    a, b = i * N + j, i * N + (j + 1) % N
+    c, e = b + N, a + N
+    side = np.concatenate([np.stack([a, b, c], -1), np.stack([a, c, e], -1)]).reshape(-1, 3)
+    cb, ct, jj = rows * N, rows * N + 1, np.arange(N)
+    bottom = np.stack([np.full(N, cb), (jj + 1) % N, jj], -1)
+    top = np.stack([np.full(N, ct), (rows - 1) * N + jj, (rows - 1) * N + (jj + 1) % N], -1)
+    F = np.vstack([side, bottom, top]).astype(np.uint32)
+    return M(mf.Mesh(vert_properties=np.ascontiguousarray(V, np.float32), tri_verts=F))
+
+
+def _upside_down(m, n):
+    """Like _flip, but rotates instead of mirroring so the thread keeps its handedness."""
+    return m.rotate((180, 0, 0)) if n.get("flip") else m
+
+
+def screw(n):
+    """Printable screw with a real thread. The head lies on the build plate (head face at z=0, shaft
+    toward +z), which is the strong way to print it. length = nominal length as on a real screw
+    (countersunk: incl. the head, other heads: the shaft under the head)."""
+    s = _size(n)
+    d, pitch = _thread_dims(n)
+    length = float(n.get("length", 10))
+    head = n.get("head", "socket")
+    drive = n.get("drive", "none" if head == "hex" else "hex")
+    play = float(n.get("tolerance", 0.1))
+    if head == "countersunk":
+        dk = float(n.get("head_d", 2 * d))
+        k = (dk - d) / 2                                      # 90° under the head
+        head_m = _cyl(k, dk, 0, d2=d)
+        shaft = length - k
+    elif head == "socket":
+        dk, k = float(n.get("head_d", 1.5 * d)), float(n.get("head_h", d))
+        head_m = _cyl(k, dk)
+        shaft = length
+    elif head == "button":
+        dk, k = float(n.get("head_d", 1.75 * d)), float(n.get("head_h", 0.55 * d))
+        head_m = _cyl(k, 0.6 * dk, 0, d2=dk)                  # dome as a cone: prints head-down
+        shaft = length
+    elif head == "hex":
+        dk, k = s["nut_af"], float(n.get("head_h", 0.7 * d))
+        head_m = _hex(float(n.get("head_d", dk)), k)
+        shaft = length
+    elif head == "none":                                      # set screw / threaded rod
+        k, head_m, shaft = 0.0, None, length
+    else:
+        raise ValueError("screw: head must be socket, countersunk, button, hex or none")
+    if shaft <= pitch:
+        raise ValueError("screw: length too short for the head")
+    z0 = k - 0.01
+    rod = _thread_rod(d, pitch, k + shaft - z0, -play, bool(n.get("left")), n.get("segments"), z0)
+    top = k + shaft                                           # 45° chamfer on the tip (and bottom if headless)
+    R, tip_r = d / 2 + 1, d / 2 - THREAD_DEPTH * pitch - play - 0.1
+    ch = R - tip_r
+    prof = [(0, -1), (R, -1), (R, top - ch), (tip_r, top), (0, top)]
+    if head_m is None:
+        prof = [(0, 0), (tip_r, 0), (R, ch)] + prof[2:]
+    rod = rod ^ CS([prof]).revolve(int(n.get("segments", 64)))
+    m = rod if head_m is None else head_m + rod
+    depth = float(n.get("drive_depth", {"socket": 0.5, "countersunk": 0.6, "button": 0.6,
+                                         "hex": 0.5}.get(head, 0) * k or min(0.5 * d, shaft / 3)))
+    if drive == "hex":
+        key = float(n.get("key", {"socket": s["key"], "none": d / 2}.get(head, s["key_cs"])))
+        m = m - _hex(key + 0.15, depth + OVERSHOOT, -OVERSHOOT)
+    elif drive == "slot":
+        w = max(0.6, 0.2 * d)
+        m = m - M.cube((4 * d, w, depth + OVERSHOOT)).translate((-2 * d, -w / 2, -OVERSHOOT))
+    elif drive != "none":
+        raise ValueError("screw: drive must be hex, slot or none")
+    return m
+
+
+def nut(n):
+    """Printable hex nut with a real internal thread, standing on z=0 and centered on the z axis."""
+    s = _size(n)
+    d, pitch = _thread_dims(n)
+    af = float(n.get("af", s["nut_af"]))
+    h = float(n.get("h", s["nut_h"]))
+    play = float(n.get("tolerance", 0.15))
+    cut = _thread_rod(d, pitch, h + 2, play, bool(n.get("left")), n.get("segments"), -1)
+    R = d / 2 + play
+    ch = THREAD_DEPTH * pitch + 0.2                           # countersink on both faces
+    sinks = [_cyl(ch + 0.01, 2 * (R + 0.2), -0.01, d2=2 * (R + 0.2 - ch)),
+             _cyl(ch + 0.01, 2 * (R + 0.2 - ch), h - ch, d2=2 * (R + 0.2))]
+    return _hex(af, h) - M.batch_boolean([cut] + sinks, mf.OpType.Add)
+
+
+def threaded_hole(n):
+    """Cutter for a hole with a real internal thread (printed thread instead of a tapped hole or
+    insert). Surface at z=0, goes down to −h, with a 45° lead-in at the top."""
+    d, pitch = _thread_dims(n)
+    h = float(n.get("h", 2 * d))
+    play = float(n.get("tolerance", 0.15))
+    R = d / 2 + play
+    ch = THREAD_DEPTH * pitch + 0.2
+    parts = [_thread_rod(d, pitch, h + OVERSHOOT, play, bool(n.get("left")), n.get("segments"), -h),
+             _cyl(ch, 2 * (R + 0.2 - ch), -ch, d2=2 * (R + 0.2)), _cyl(OVERSHOOT, 2 * (R + 0.2), 0)]
+    return _upside_down(M.batch_boolean(parts, mf.OpType.Add), n)
+
+
 # ---------------------------------------------------------------- text
 
 @lru_cache(maxsize=4)
@@ -303,25 +441,36 @@ TEMPLATES = {
     "screw_hole": screw_hole,
     "heat_insert": heat_insert,
     "nut_trap": nut_trap,
+    "threaded_hole": threaded_hole,
     "boss": boss,
     "snap_hook": snap_hook,
     "hinge": hinge,
+    "screw": screw,
+    "nut": nut,
     "text": text,
 }
 
 HELP = """\
 Templates (use as "shape" in a node; cutting templates are subtracted with "difference"):
-  Cutting – surface at z=0, goes downward (−z), "flip": true points upward. size: M2, M2.5, M3, M4, M5
+  Cutting – surface at z=0, goes downward (−z), "flip": true points upward.
+  size: M2, M2.5, M3, M4, M5, M6, M8
   screw_hole  size, h=10, fit: clearance|tap, head: none|countersunk|counterbore, nut?: true
               (nut pocket at the bottom), d?/head_d? for custom dimensions
   heat_insert size, h? – hole for a threaded heat-set insert (brass) with chamfer
   nut_trap    size, h?, slot? (slide in from +x), bolt=true, clearance=0.3
+  threaded_hole size, h=2*d, tolerance=0.15 – hole with a printed internal thread (real ISO
+              profile) and lead-in, for a real or printed screw. Better from M3 up.
   Positive
   boss        size, h=8, for: insert|tap – screw boss on z=0 with hole and reinforced foot
   snap_hook   length=10, width=5, thickness=1.5, overhang=1, hook_h? – arm on z=0, hook toward +x,
               width along y. The counterpart is a rectangular recess/edge.
   hinge       length=40, d=6, knuckles=5, gap=0.4, leaf=15, t=d/2, mode: print|pin, side: both|a|b,
               pin_d? – leaves on the build plate, axis along x at z=d/2 (side a toward −y, b toward +y)
+  screw       size, length=10, head: socket|countersunk|button|hex|none, drive: hex|slot|none,
+              tolerance=0.1, left?, pitch?, d?, head_d?, head_h?, key? – printable screw with a real
+              thread. Head face on z=0, shaft up along +z (print it like this). length is nominal
+              (countersunk incl. head). head none = set screw / threaded rod. Don't build threads yourself.
+  nut         size, h?, af?, tolerance=0.15, left? – hex nut with a real thread, on z=0, centered
   text        text, size=10 (mm), h=1, font: sans|bold, halign: left|center|right,
               valign: baseline|bottom|center|top, spacing, line_height, "\\n" for line break
 Example: {"op":"difference","children":[<3 mm plate>, {"shape":"screw_hole","size":"M3",
