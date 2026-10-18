@@ -11,3 +11,4 @@ networkx
 fast-simplification
 httpx
 webauthn>=3,<4
+psycopg[binary,pool]>=3.2,<4

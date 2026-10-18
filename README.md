@@ -109,10 +109,11 @@ is open; comments made while nothing is watching simply wait.
 
 ## Running
 ```
-cp .env.example .env     # fill in MCP_TOKEN and PUBLIC_URL
+cp .env.example .env     # fill in MCP_TOKEN, POSTGRES_PASSWORD and PUBLIC_URL
 docker compose up -d --build
 ```
-Without Docker: `pip install -r requirements.txt && MCP_TOKEN=... python server.py`
+The compose file starts Postgres next to the server; database migrations run at startup.
+Without Docker: `pip install -r requirements.txt && DATABASE_URL=postgresql://... MCP_TOKEN=... python server.py`
 
 The container only listens on `127.0.0.1:8765`. Set `BIND=0.0.0.0` to expose the port directly,
 or set `DOMAIN` and run `docker compose --profile caddy up -d` for automatic HTTPS.
@@ -121,15 +122,17 @@ or set `DOMAIN` and run `docker compose --profile caddy up -d` for automatic HTT
 [`deploy/README.md`](deploy/README.md).
 
 Open `http://localhost:8765/` and log in with the token, or go to `/?token=<token>`, which
-sets a session cookie. Then add a passkey (the banner in the library, or 🔑 in the header):
+sets a session cookie for the admin account (`ADMIN_EMAILS`, the first entry). Then add a passkey (the banner in the library, or 🔑 in the header):
 from then on, logging in is one tap with Face ID, Touch ID or your password manager. Passkeys
 are bound to the host name in `PUBLIC_URL`.
 
 ## Tests
 ```
 pip install -r requirements.txt -r requirements-dev.txt
+docker compose --profile test up -d postgres-test   # throwaway Postgres on 127.0.0.1:55432
 python -m pytest
 ```
+Each run uses its own schema in that database (`TEST_DATABASE_URL` overrides the address).
 `test_client.py` is a manual smoke script against a running server, not part of the suite.
 
 ## Connecting to Claude
@@ -176,6 +179,7 @@ page). It requires `PUBLIC_URL` on https (or localhost); `OAUTH=0` turns it off.
 | `reply_to_comment` | reply to a comment, optionally marking it resolved |
 | `render_model` | PNG image (iso/front/top/right) so Claude can inspect the model visually |
 | `list_models`, `revert_model`, `duplicate_model`, `delete_model` | |
+| `whoami` | the account the connection is signed in as |
 | `import_file` | imports STL/OBJ/GLB/PLY/OFF via `url` or `data_base64` (zip with obj+mtl is unpacked) |
 | `file_info` | dimensions, bounds, volume, number of loose parts |
 | `check_print` | re-run the print check on a library model or a standalone file with the current settings |
@@ -282,6 +286,10 @@ Thresholds have sensible defaults (`printcheck.py`, `SCHEMA`) and can be changed
 The thin-wall and overhang checks are sampling-based estimates, not a slicer.
 
 ## Storage
+Users, sessions, passkeys and tokens live in Postgres (`DATABASE_URL`, schema in `migrations/`);
+back it up with `docker compose exec postgres pg_dump -U stl stl > backup.sql`. An `auth.json` from
+before users existed is imported into the admin account at startup and renamed `auth.json.imported`.
+
 `STL_DIR/models/<id>/model.json` (recipe and history) and `v<N>/<part>.stl`. The 50 most recent
 versions keep their files. Older versions can be recreated with `revert_model`.
 
@@ -292,9 +300,11 @@ Always set `MCP_TOKEN` and put the server behind HTTPS. The web interface requir
 `ALLOW_SCRIPT` off if the server is reachable from outside. `/upload/*` always requires a token when
 `MCP_TOKEN` is set. The CSG spec is safe to let Claude write.
 
-Sessions are signed with a key derived from `MCP_TOKEN`, so rotating the token logs every browser
-out. OAuth access tokens live 24 h and refresh tokens 90 days (rotated on every use); only their
-sha256 hashes are stored, together with the passkeys' public keys, in `STL_DIR/auth.json`.
+Every login belongs to a user. `MCP_TOKEN` logs in as the bootstrap admin; without it set, every
+request runs as that admin (local single-user mode). Sessions are random ids stored server side
+for 90 days, so logging out or disabling a user takes effect at once. OAuth access tokens live
+24 h and refresh tokens 90 days (rotated on every use). Sessions and tokens are stored only as
+sha256 hashes, next to the passkeys' public keys, in Postgres.
 Client registration is open (as MCP requires), but nothing gets a token without your approval
 on the consent page, which shows where the app will be sent back to.
 

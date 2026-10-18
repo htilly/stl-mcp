@@ -9,6 +9,7 @@ __pycache__/
 # Generated STL files (STL_DIR default ./out; docker-compose mounts ./data)
 out/
 data/
+pgdata/
 
 # testutdata
 render_test.png
