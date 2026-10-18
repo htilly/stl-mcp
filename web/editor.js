@@ -215,7 +215,7 @@ function buildNode(node, parent, ctx) {
     serverGeometry(strip(node)).then((g) => {
       lastGeom.set(node, g);
       errors.delete(node);
-      if (objOf.get(node) === obj) { setContent(obj, g); refit(false); }
+      if (objOf.get(node) === obj) { setContent(obj, g); if (!spreadAt) layout(); refit(false); }
     }, (e) => {
       errors.set(node, e.message);
       if (objOf.get(node) === obj) { mesh.material.color.set(ERR); renderTree(); fillInspector(); }
@@ -267,8 +267,21 @@ function showResult(g, node, color, seq) {
   }, (e) => toast(`Could not build: ${e.message}`, true));
 }
 
+// Spread offsets are worked out once (when every part has its geometry) and then kept, so editing a
+// part doesn't re-pack the others around it and moved shapes stay where they were put. They are
+// worked out again when parts are added, removed or renamed, on load, and when Spread is toggled.
+let spreadAt = null;   // {key, x: Map(part name -> offset)} | null
 function layout() {
-  spreadX(partGroups.map((p) => p.group), spread && partGroups.length > 1);
+  const groups = partGroups.map((p) => p.group);
+  const key = partGroups.map((p) => p.name).join("\n");
+  const on = spread && partGroups.length > 1;
+  if (on && spreadAt?.key === key) {
+    partGroups.forEach((p) => { p.group.position.set(spreadAt.x.get(p.name), 0, 0); p.group.updateMatrixWorld(true); });
+  } else {
+    spreadX(groups, on);
+    spreadAt = null;
+    if (on && groups.every((g) => !bounds([g]).isEmpty())) spreadAt = { key, x: new Map(partGroups.map((p) => [p.name, p.group.position.x])) };
+  }
   st.buildGrid(bounds());
   placeWorkplaneGrid();
 }
@@ -1165,7 +1178,7 @@ $("measure").onclick = () => setTool("measure");
 $("workplane").onclick = () => setTool("workplane");
 $("commentmode").onclick = () => setTool("comment");
 $("fit").onclick = () => refit("iso");
-$("spread").onclick = () => { spread = !spread; $("spread").classList.toggle("on", spread); layout(); attachGizmo(); };
+$("spread").onclick = () => { spread = !spread; spreadAt = null; $("spread").classList.toggle("on", spread); layout(); attachGizmo(); };
 $("result").onclick = () => {
   viewResult = !viewResult;
   $("result").classList.toggle("on", viewResult);
@@ -1261,6 +1274,7 @@ async function load() {
   baseVersion = model.current;
   undoStack.length = redoStack.length = 0;
   sel = keep.map((p) => atPointer(spec, p)).filter(Boolean);
+  spreadAt = null;
   render();
   showInfo();
   comments.render();
