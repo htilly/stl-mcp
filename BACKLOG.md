@@ -69,7 +69,7 @@ guarded by one shared `MCP_TOKEN`. This phase adds real users.
 - [ ] **Counters per user**, shown to admins: number of logins, last login, number of models
   (private and public), versions, disk used, renders and build seconds, public models and how
   many times they were copied. Also totals over time (per day). (M)
-- [ ] **Country of origin per login**:
+- [x] **Country of origin per login** (done: GEOIP_DB or CF_COUNTRY, kept LOGIN_HISTORY_DAYS):
   - Resolve from the client IP with an offline GeoIP database (DB-IP lite or MaxMind GeoLite2;
     check the license/account terms) or a CDN header such as `CF-IPCountry` if one is added.
   - Caddy must pass the real client IP (`X-Forwarded-For`); read it only from the trusted proxy,

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import secrets
 import threading
 import time
@@ -37,6 +38,7 @@ CODE_TTL = 5 * 60
 PENDING_TTL = 10 * 60
 CHALLENGE_TTL = 5 * 60
 SEEN_EVERY = 60 * 60          # how often last_seen/last_used is written
+LOGIN_HISTORY = 60 * 60 * 24 * int(os.environ.get("LOGIN_HISTORY_DAYS", "90"))  # login_events kept
 MAX_CLIENTS = 1000
 SCOPE = "stl"
 PERSONAL_PREFIX = "stlp_"     # personal tokens are recognizable (and cheap to tell apart)
@@ -246,12 +248,17 @@ class AuthState:
 
     # ---- web sessions (the cookie holds a random id; only its hash is stored)
 
-    def create_session(self, uid: str, ttl: int = SESSION_TTL) -> str:
+    def create_session(self, uid: str, ttl: int = SESSION_TTL, country: str | None = None,
+                       user_agent: str = "") -> str:
         raw, now = secrets.token_urlsafe(32), time.time()
         with self.db.tx() as c:
             c.execute("DELETE FROM sessions WHERE expires_at < %s", (now,))
+            c.execute("DELETE FROM login_events WHERE at < %s", (now - LOGIN_HISTORY,))
             c.execute("INSERT INTO sessions (hash, user_id, created, expires_at, last_seen) "
                       "VALUES (%s, %s, %s, %s, %s)", (_hash(raw), uid, now, now + ttl, now))
+            c.execute("INSERT INTO login_events (user_id, session, at, last_seen, country, user_agent) "
+                      "VALUES (%s, %s, %s, %s, %s, %s)",
+                      (uid, _hash(raw), now, now, country, user_agent[:200]))
         self.touch_login(uid)
         return raw
 
@@ -266,8 +273,32 @@ class AuthState:
         if not row:
             return None
         if now - row.pop("_seen") > SEEN_EVERY:
-            self.db.execute("UPDATE sessions SET last_seen = %s WHERE hash = %s", (now, _hash(raw)))
+            with self.db.tx() as c:
+                c.execute("UPDATE sessions SET last_seen = %s WHERE hash = %s", (now, _hash(raw)))
+                c.execute("UPDATE login_events SET last_seen = %s WHERE session = %s",
+                          (now, _hash(raw)))
         return row
+
+    def login_stats(self) -> dict[str, dict]:
+        """Per user: login count, time spent logged in (sum of last_seen - at), and the countries
+        seen, most recent first. Time is measured to the last activity, so it is approximate
+        (activity is recorded at most every SEEN_EVERY seconds)."""
+        rows = self.db.all(
+            "SELECT user_id, count(*) AS logins, "
+            "coalesce(sum(last_seen - at), 0) AS seconds, "
+            "coalesce(array_agg(country ORDER BY at DESC) FILTER (WHERE country IS NOT NULL), '{}') "
+            "  AS countries "
+            "FROM login_events GROUP BY user_id")
+        out = {}
+        for r in rows:
+            seen = list(dict.fromkeys(r["countries"]))  # unique, newest first
+            out[r["user_id"]] = {"logins": r["logins"], "seconds": int(r["seconds"]),
+                                 "countries": seen}
+        return out
+
+    def recent_logins(self, uid: str, limit: int = 10) -> list[dict]:
+        return self.db.all("SELECT at, last_seen, country, user_agent FROM login_events "
+                           "WHERE user_id = %s ORDER BY at DESC LIMIT %s", (uid, limit))
 
     def delete_session(self, raw: str):
         self.db.execute("DELETE FROM sessions WHERE hash = %s", (_hash(raw or ""),))
