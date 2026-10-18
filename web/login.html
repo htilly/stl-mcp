@@ -3,25 +3,28 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Log in</title>
+<title>Log in · STL library</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<main class="empty login">
-  <h2>STL library</h2>
+<main class="gate"><div class="panel"><div class="body">
+  <div class="wordmark"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-mark"/></svg><span>STL library</span></div>
+  <h2>Log in</h2>
+  <p>Your models, their history and the comments you leave for Claude.</p>
   <div id="pk" hidden>
-    <button class="primary big" id="pkbtn">🔑 Log in with passkey</button>
+    <button class="primary big" id="pkbtn" style="width:100%"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-key"/></svg>Log in with passkey</button>
     <p class="warn" id="pkerr" hidden></p>
-    <p class="hint">No passkey yet? Log in once with the token below, then add one from the library.</p>
+    <p class="hint" style="margin-top:12px">No passkey yet? Log in once with the server token, then add one from the library.</p>
   </div>
   <details id="tok" open>
-    <summary>Log in with the server token (MCP_TOKEN)</summary>
-    <form method="get" class="row" style="justify-content:center; margin-top:10px">
-      <input type="password" name="token" placeholder="token" required style="width:260px">
+    <summary>Log in with the server token</summary>
+    <form method="get">
+      <input type="password" name="token" placeholder="MCP_TOKEN" required aria-label="Server token" autocomplete="current-password">
       <button>Log in</button>
     </form>
   </details>
-</main>
+</div></div></main>
 <script type="module">
 import { passkeyLogin, passkeysSupported } from "/static/common.js";
 

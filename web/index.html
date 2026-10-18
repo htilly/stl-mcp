@@ -4,20 +4,23 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>STL library</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <header class="top">
-  <h1>STL library</h1>
-  <span class="pill" id="count"></span>
-  <div class="grow"></div>
-  <input type="search" id="q" placeholder="Search models…" autocomplete="off">
-  <a href="/admin" title="Print-check settings">Settings</a>
-  <span class="live" id="live" title="Updates automatically when Claude changes something"><span class="dot"></span>live</span>
-  <button id="secbtn" hidden title="Passkeys, connected apps and logout">🔑</button>
+  <h1 class="wordmark"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-mark"/></svg><span class="name">STL library</span></h1>
+  <span class="count" id="count"></span>
+  <div class="grow lib-only"></div>
+  <label class="search"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-search"/></svg>
+    <input type="search" id="q" placeholder="Search models" autocomplete="off" aria-label="Search models"></label>
+  <span class="live" id="live" title="Updates automatically when Claude changes something"><span class="dot"></span><span class="label">Live</span></span>
+  <a class="btn icon quiet" href="/admin" title="Print-check settings" aria-label="Print-check settings"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-settings"/></svg></a>
+  <button id="secbtn" class="icon quiet" hidden title="Passkeys, connected apps and logout" aria-label="Security"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-key"/></svg></button>
 </header>
 <main class="lib">
   <div class="banner" id="pkbanner" hidden>
+    <svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-key"/></svg>
     <span>Log in with one tap next time: add a passkey (Face ID, Touch ID or your password manager).</span>
     <button class="primary" id="pkadd1">Add passkey</button>
     <button id="pkdismiss">Not now</button>
@@ -25,8 +28,9 @@
   <div class="grid" id="grid"></div>
   <div class="empty" id="empty" hidden>
     <h2>No models yet</h2>
-    <p>Ask Claude to create something, e.g. <em>“Make a box 80×50×25 mm with a lid and a USB-C hole on the short side”</em>.
-       The model shows up here right away.</p>
+    <p>Ask Claude for a part in plain words, for example:</p>
+    <blockquote>Make a box 80 × 50 × 25 mm with a lid and a USB-C hole on the short side.</blockquote>
+    <p>It shows up here as soon as Claude builds it, and updates every time Claude changes it.</p>
   </div>
 </main>
 <dialog id="sec">
@@ -45,7 +49,7 @@
       <ol class="steps">
         <li>In claude.ai, open <b>Settings → Connectors</b> and click <b>Add custom connector</b>.</li>
         <li>Name it <code class="mono">STL library</code> and paste this URL:
-          <span class="row"><code class="mono" id="mcpurl"></code><button id="copymcp">Copy</button></span>
+          <span class="row"><code class="mono" id="mcpurl"></code><button id="copymcp" class="sm">Copy</button></span>
           Leave the advanced settings empty and click <b>Add</b>.</li>
         <li>Click <b>Connect</b>. A page from this library opens; log in with your passkey if asked.</li>
         <li>Check that it sends you back to <b>https://claude.ai</b>, then click <b>Allow</b>.</li>
@@ -54,12 +58,12 @@
     </details>
   </div>
   <div class="sec row">
-    <button id="logout">Log out</button><div class="grow"></div>
+    <button id="logout"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-logout"/></svg>Log out</button><div class="grow"></div>
     <button id="secclose">Close</button>
   </div>
 </dialog>
 <script type="module">
-import { api, subscribe, ago, fmt, esc, passkeyRegister, passkeysSupported } from "/static/common.js";
+import { api, subscribe, ago, fmt, esc, icon, passkeyRegister, passkeysSupported } from "/static/common.js";
 
 const grid = document.getElementById("grid");
 const q = document.getElementById("q");
@@ -68,19 +72,21 @@ let models = [];
 function render(flashId) {
   const term = q.value.trim().toLowerCase();
   const list = models.filter((m) => !term || (m.name + " " + m.id + " " + m.description).toLowerCase().includes(term));
-  document.getElementById("count").textContent = `${models.length} models`;
+  document.getElementById("count").textContent = models.length === 1 ? "1 model" : `${models.length} models`;
   document.getElementById("empty").hidden = models.length > 0;
   grid.innerHTML = list.map((m) => {
     const parts = Object.values(m.parts);
-    const dims = parts.length === 1 ? fmt(parts[0].extents_mm) : `${parts.length} parts`;
+    const dims = parts.length === 1 ? fmt(parts[0].extents_mm) : `${parts.length}`;
     return `<a class="card${m.id === flashId ? " flash" : ""}" href="/m/${encodeURIComponent(m.id)}">
       <div class="thumb"><img loading="lazy" alt="" src="/api/models/${encodeURIComponent(m.id)}/preview.png?v=${m.version}">
-        ${m.open_comments ? `<span class="cbadge" title="Open comments">💬 ${m.open_comments}</span>` : ""}
-        ${m.warnings ? `<span class="cbadge wbadge" title="Print-check warnings">⚠ ${m.warnings}</span>` : ""}</div>
-      <div class="meta">
-        <div class="name" title="${esc(m.name)}">${esc(m.name)}</div>
-        <div class="sub"><span>${dims}</span><span>v${m.version}</span><span>${ago(m.updated)}</span></div>
-      </div></a>`;
+        ${m.open_comments ? `<span class="cbadge" title="Open comments">${icon("comment")}${m.open_comments}</span>` : ""}
+        ${m.warnings ? `<span class="cbadge wbadge" title="Print-check warnings">${icon("warning")}${m.warnings}</span>` : ""}</div>
+      <div class="name" title="${esc(m.name)}">${esc(m.name)}</div>
+      <dl class="tb">
+        <div><dt>${parts.length === 1 ? "Size" : "Parts"}</dt><dd>${dims}</dd></div>
+        <div><dt>Revision</dt><dd>v${m.version}</dd></div>
+        <div><dt>Updated</dt><dd>${ago(m.updated)}</dd></div>
+      </dl></a>`;
   }).join("");
 }
 
@@ -107,14 +113,14 @@ function renderAuth() {
     !auth.login_required || auth.passkeys.length > 0 || dismissed || !passkeysSupported();
   document.getElementById("pklist").innerHTML = auth.passkeys.map((p) => `<li>
     <span><b>${esc(p.name)}</b> <span class="hint">added ${ago(p.created)}${p.last_used ? `, used ${ago(p.last_used)}` : ""}</span></span>
-    <button class="danger" data-pk="${esc(p.id)}">Remove</button></li>`).join("")
+    <button class="danger sm" data-pk="${esc(p.id)}">Remove</button></li>`).join("")
     || `<li class="hint">No passkeys yet.</li>`;
   document.getElementById("appsec").hidden = !auth.oauth;
   document.getElementById("mcpurl").textContent = auth.mcp_url;
   document.getElementById("howto").open = auth.clients.length === 0;
   document.getElementById("applist").innerHTML = auth.clients.map((c) => `<li>
     <span><b>${esc(c.name)}</b> <span class="hint">${esc((c.redirect_uris[0] || "").replace(/^(\w+:\/\/[^/]+).*/, "$1"))}, approved ${ago(c.last_authorized)}</span></span>
-    <button class="danger" data-app="${esc(c.client_id)}">Disconnect</button></li>`).join("")
+    <button class="danger sm" data-app="${esc(c.client_id)}">Disconnect</button></li>`).join("")
     || `<li class="hint">No apps connected.</li>`;
 }
 
@@ -145,7 +151,7 @@ document.getElementById("secclose").addEventListener("click", () => sec.close())
 document.getElementById("copymcp").addEventListener("click", async (e) => {
   try {
     await navigator.clipboard.writeText(auth.mcp_url);
-    e.target.textContent = "Copied";
+    e.currentTarget.textContent = "Copied";
     setTimeout(() => { e.target.textContent = "Copy"; }, 1500);
   } catch {}
 });

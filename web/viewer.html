@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Model</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/style.css">
 <!-- three.js r169 (MIT) is served locally from web/vendor/three -->
 <script type="importmap">
@@ -14,23 +15,28 @@
 </head>
 <body>
 <header class="top">
-  <a href="/">← Library</a>
+  <a class="wordmark" href="/" title="Back to the library"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-mark"/></svg><span class="name">STL library</span></a>
+  <span class="crumb">/ <b id="crumb"></b></span>
   <div class="grow"></div>
-  <span class="live" id="live" title="The view updates automatically when Claude changes the model"><span class="dot"></span>live</span>
+  <span class="live" id="live" title="The view updates automatically when Claude changes the model"><span class="dot"></span><span class="label">Live</span></span>
 </header>
 <div class="viewer-layout">
   <div id="stage">
     <div class="toolbar">
-      <button data-view="iso" title="Isometric">Iso</button>
-      <button data-view="front">Front</button>
-      <button data-view="top">Top</button>
-      <button data-view="right">Right</button>
-      <button id="fit" title="Zoom to fit the model">Fit</button>
-      <button id="spread" class="on" title="Show the parts side by side or as they are placed">Spread parts</button>
-      <button id="edges" class="on">Edges</button>
-      <button id="wire">Wireframe</button>
-      <button id="rotate">Spin</button>
-      <button id="commentmode" title="Then click the model to leave a comment for Claude">💬 Comment</button>
+      <div class="seg" role="group" aria-label="Camera">
+        <button data-view="iso" title="Isometric view">Iso</button>
+        <button data-view="front" title="Front view">Front</button>
+        <button data-view="top" title="Top view">Top</button>
+        <button data-view="right" title="Right view">Right</button>
+        <button id="fit" class="icon" title="Zoom to fit the model" aria-label="Zoom to fit"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-fit"/></svg></button>
+      </div>
+      <div class="seg" role="group" aria-label="Display">
+        <button id="spread" class="on" title="Show the parts side by side or as they are placed"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-spread"/></svg><span class="label">Spread</span></button>
+        <button id="edges" class="on" title="Outline sharp edges"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-edges"/></svg><span class="label">Edges</span></button>
+        <button id="wire" title="Show the triangle mesh"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-wire"/></svg><span class="label">Mesh</span></button>
+        <button id="rotate" title="Turn the model slowly"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-spin"/></svg><span class="label">Spin</span></button>
+      </div>
+      <button id="commentmode" title="Then click the model to leave a comment for Claude"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-comment"/></svg><span class="label">Comment</span></button>
     </div>
     <div id="pins"></div>
     <form class="cpop" id="cpop" hidden>
@@ -38,21 +44,23 @@
       <div class="row">
         <button class="primary" type="submit">Save</button>
         <button type="button" id="ccancel">Cancel</button>
-        <span class="hint">Ctrl+Enter</span>
+        <span class="hint">⌘/Ctrl + Enter</span>
       </div>
     </form>
     <div class="loading" id="loading">Loading…</div>
-    <div class="hud" id="hud"></div>
+    <div class="hud" id="hud" hidden><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-dimension"/></svg><span id="hudtext"></span></div>
     <div class="toast" id="toast"></div>
   </div>
   <aside class="side">
-    <div class="sec">
+    <div class="sec head">
       <input class="title-input" id="title" aria-label="Name">
-      <textarea class="desc-input" id="desc" rows="1" placeholder="Description…" aria-label="Description"></textarea>
-      <div class="row hint">
-        <span>id: <span class="mono" id="mid"></span></span>
-        <button id="copyid" title="Copy id – refer to the model when talking to Claude">Copy</button>
-      </div>
+      <textarea class="desc-input" id="desc" rows="1" placeholder="Add a description" aria-label="Description"></textarea>
+      <dl class="tb">
+        <div><dt>Revision</dt><dd id="tbrev"></dd></div>
+        <div><dt>Saved</dt><dd id="tbsaved"></dd></div>
+        <div><dt>Id <button id="copyid" class="icon quiet copy" title="Copy the id to refer to this model when talking to Claude" aria-label="Copy id"><svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-copy"/></svg></button></dt>
+          <dd class="mono" id="mid"></dd></div>
+      </dl>
     </div>
     <div class="sec">
       <h2>Parts <span id="vlabel" class="pill"></span></h2>
@@ -64,8 +72,8 @@
       <div class="row hint" style="margin-top:6px">
         <label><input type="checkbox" id="showresolved"> Show resolved</label>
       </div>
-      <p class="hint" id="chint">Click <b>💬 Comment</b> and then the model. Tell Claude
-        “look at the comments” and it sees exactly which part you mean.</p>
+      <p class="hint" id="chint">Choose <b>Comment</b>, then click the model where something should change.
+        Tell Claude to look at the comments and it gets the exact point and the part of the recipe there.</p>
     </div>
     <div class="sec" id="paramsec" hidden>
       <h2>Parameters</h2>
@@ -79,16 +87,16 @@
       <h2>History</h2>
       <ul class="versions" id="versions"></ul>
       <div class="row" style="margin-top:8px" id="veractions" hidden>
-        <button id="revert">Restore this version</button>
+        <button id="revert"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-restore"/></svg>Restore this version</button>
       </div>
     </div>
     <div class="sec">
       <h2>Recipe</h2>
       <details id="recipebox">
-        <summary>Show JSON (what Claude adjusts)</summary>
+        <summary>Show the JSON recipe Claude edits</summary>
         <div class="row" style="margin:8px 0">
-          <button id="copyrecipe">Copy</button>
-          <button id="editrecipe">Edit</button>
+          <button id="copyrecipe" class="sm"><svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-copy"/></svg>Copy</button>
+          <button id="editrecipe" class="sm">Edit</button>
         </div>
         <pre class="recipe" id="recipe"></pre>
         <div id="recipeedit" hidden>
@@ -101,8 +109,9 @@
       </details>
     </div>
     <div class="sec row">
-      <button id="dup">Duplicate</button>
-      <button class="danger" id="del">Delete model</button>
+      <button id="dup"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-duplicate"/></svg>Duplicate</button>
+      <div class="grow"></div>
+      <button class="danger" id="del"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-trash"/></svg>Delete model</button>
     </div>
   </aside>
 </div>
@@ -111,7 +120,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "/static/vendor/three/OrbitControls.js";
 import { STLLoader } from "/static/vendor/three/STLLoader.js";
-import { api, subscribe, ago, fmt, esc, warnHtml, PART_COLORS } from "/static/common.js";
+import { api, subscribe, ago, fmt, esc, icon, warnHtml, PART_COLORS } from "/static/common.js";
 
 const id = decodeURIComponent(location.pathname.split("/").pop());
 const $ = (s) => document.getElementById(s);
@@ -145,10 +154,12 @@ const loader = new STLLoader();
 const geomCache = new Map();
 let loadSeq = 0;
 
+// Viewport colours come from the --stage tokens in style.css, so the theme lives in one place.
 function themeColors() {
-  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
-  scene.background = new THREE.Color(dark ? 0x181a20 : 0xeceef2);
-  return dark;
+  const css = getComputedStyle(document.documentElement);
+  const c = (name) => new THREE.Color(css.getPropertyValue(name).trim());
+  scene.background = c("--stage");
+  return { major: c("--stage-grid-major"), minor: c("--stage-grid") };
 }
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { themeColors(); buildGrid(); });
 
@@ -177,8 +188,8 @@ function buildGrid() {
   const span = Math.max(size.x, size.y) * 1.6 + 20;
   const step = span > 600 ? 50 : span > 200 ? 20 : 10;
   const n = Math.ceil(span / step);
-  const dark = themeColors();
-  grid = new THREE.GridHelper(n * step, n, dark ? 0x3a404c : 0xb9bfcb, dark ? 0x262a33 : 0xd8dce4);
+  const col = themeColors();
+  grid = new THREE.GridHelper(n * step, n, col.major, col.minor);
   grid.rotation.x = Math.PI / 2;
   const c = b.getCenter(new THREE.Vector3());
   grid.position.set(Math.round(c.x / step) * step, Math.round(c.y / step) * step, 0);
@@ -213,7 +224,8 @@ function layoutParts() {
   const b = bbox();
   if (!b.isEmpty()) {
     const s = b.getSize(new THREE.Vector3());
-    $("hud").textContent = `${fmt([s.x, s.y, s.z])}`;
+    $("hudtext").textContent = fmt([s.x, s.y, s.z]);
+    $("hud").hidden = false;
   }
   buildGrid();
 }
@@ -273,7 +285,10 @@ async function showVersion(v, refit) {
 function renderSide() {
   const cur = model.versions.find((x) => x.version === model.current);
   const ver = model.versions.find((x) => x.version === viewVersion) || cur;
-  document.title = model.name;
+  document.title = `${model.name} · STL library`;
+  $("crumb").textContent = model.name;
+  $("tbrev").textContent = `v${ver.version} of ${model.versions.length}`;
+  $("tbsaved").textContent = ago(ver.created);
   if (document.activeElement !== $("title")) $("title").value = model.name;
   if (document.activeElement !== $("desc")) $("desc").value = model.description || "";
   $("mid").textContent = model.id;
@@ -281,12 +296,13 @@ function renderSide() {
 
   $("parts").innerHTML = Object.entries(ver.parts).map(([name, p], i) => `
     <div class="part">
-      <span class="swatch${hidden.has(name) ? " off" : ""}" data-part="${esc(name)}" title="Show/hide"
-            style="background:${PART_COLORS[i % PART_COLORS.length]}"></span>
-      <div><div>${esc(name)}</div>
-        <div class="dims">${fmt(p.extents_mm)} · ${p.volume_cm3} cm³</div>
+      <button class="swatch${hidden.has(name) ? " off" : ""}" data-part="${esc(name)}"
+            title="${hidden.has(name) ? "Show" : "Hide"} ${esc(name)}" aria-pressed="${!hidden.has(name)}"
+            style="background:${PART_COLORS[i % PART_COLORS.length]}"></button>
+      <div><div class="pname">${esc(name)}</div>
+        <div class="dims">${fmt(p.extents_mm)}, ${p.volume_cm3} cm³</div>
         ${warnHtml(p)}</div>
-      <a class="btn" href="${p.url}" download>STL</a>
+      <a class="btn sm" href="${p.url}" download title="Download ${esc(name)} as STL">${icon("download", "sm")}STL</a>
     </div>`).join("");
   document.querySelectorAll(".swatch").forEach((s) => s.onclick = () => {
     const n = s.dataset.part;
@@ -420,12 +436,12 @@ function renderComments() {
       <span class="badge">${c.id.slice(1)}</span>
       <div>
         <div class="ctext">${esc(c.text)}</div>
-        <div class="hint">v${c.version}${c.part ? " · " + esc(c.part) : ""} · ${ago(c.created)}${c.point ? "" : " · no point"}</div>
+        <div class="hint">v${c.version}${c.part ? ", " + esc(c.part) : ""}, ${ago(c.created)}${c.point ? "" : ", no point"}</div>
         ${(c.replies || []).map((r) => `<div class="reply ${r.author}"><b>${r.author === "claude" ? "Claude" : "You"}:</b> ${esc(r.text)}</div>`).join("")}
         <div class="row cact">
-          ${c.status === "open" ? `<button data-a="resolve">Mark resolved</button>` : `<button data-a="reopen">Reopen</button>`}
-          <button data-a="reply">Reply</button>
-          <button data-a="delete" class="danger">Delete</button>
+          ${c.status === "open" ? `<button class="sm" data-a="resolve">${icon("check", "sm")}Resolve</button>` : `<button class="sm" data-a="reopen">Reopen</button>`}
+          <button class="sm" data-a="reply">${icon("reply", "sm")}Reply</button>
+          <button class="sm danger" data-a="delete">Delete</button>
         </div>
       </div>
     </div>`).join("") : "";
@@ -490,7 +506,7 @@ $("cpop").onsubmit = async (e) => {
   try {
     await post({ action: "comment_add", text, point, normal, part, version: viewVersion });
     closePopup();
-    toast("Comment saved – ask Claude to look at it");
+    toast("Comment saved. Ask Claude to look at the comments.");
   } catch { /* post shows the toast */ }
 };
 $("ctext").onkeydown = (e) => {
@@ -516,8 +532,8 @@ async function post(body) {
 
 $("title").onchange = () => post({ action: "rename", name: $("title").value.trim() || model.name });
 $("desc").onchange = () => post({ action: "rename", description: $("desc").value });
-$("copyid").onclick = () => { navigator.clipboard.writeText(model.id); toast("id copied"); };
-$("copyrecipe").onclick = () => { navigator.clipboard.writeText($("recipe").textContent); toast("recipe copied"); };
+$("copyid").onclick = () => { navigator.clipboard.writeText(model.id); toast("Id copied"); };
+$("copyrecipe").onclick = () => { navigator.clipboard.writeText($("recipe").textContent); toast("Recipe copied"); };
 $("revert").onclick = () => { followCurrent = true; post({ action: "revert", version: viewVersion }); };
 $("dup").onclick = async () => {
   const name = prompt("Name of the copy:", model.name + " copy");
@@ -543,10 +559,10 @@ $("saverecipe").onclick = async () => {
 
 document.querySelectorAll("[data-view]").forEach((b) => b.onclick = () => setView(b.dataset.view));
 $("fit").onclick = () => setView("iso");
-$("spread").onclick = (e) => { spread = !spread; e.target.classList.toggle("on", spread); layoutParts(); };
-$("edges").onclick = (e) => { showEdges = !showEdges; e.target.classList.toggle("on", showEdges); applyMaterials(); };
-$("wire").onclick = (e) => { wire = !wire; e.target.classList.toggle("on", wire); applyMaterials(); };
-$("rotate").onclick = (e) => { controls.autoRotate = !controls.autoRotate; e.target.classList.toggle("on", controls.autoRotate); };
+$("spread").onclick = (e) => { spread = !spread; e.currentTarget.classList.toggle("on", spread); layoutParts(); };
+$("edges").onclick = (e) => { showEdges = !showEdges; e.currentTarget.classList.toggle("on", showEdges); applyMaterials(); };
+$("wire").onclick = (e) => { wire = !wire; e.currentTarget.classList.toggle("on", wire); applyMaterials(); };
+$("rotate").onclick = (e) => { controls.autoRotate = !controls.autoRotate; e.currentTarget.classList.toggle("on", controls.autoRotate); };
 
 async function refresh(first) {
   let m;

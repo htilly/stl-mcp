@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Design system · STL library</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  /* page-only layout for the reference; the components themselves come from style.css */
+  .ref { max-width: 1080px; margin: 0 auto; padding: var(--s6) var(--s5) var(--s7); }
+  .ref > header { margin-bottom: var(--s6); max-width: 64ch; }
+  .ref > header h1 { font-size: var(--t-xl); font-stretch: 96%; letter-spacing: -.015em; margin-bottom: var(--s2); }
+  .ref > header p { color: var(--scribe); }
+  .ref section { padding: var(--s6) 0; border-top: 1px solid var(--rule); }
+  .ref section > h2 { font-size: var(--t-lg); margin-bottom: var(--s2); }
+  .ref section > p { color: var(--scribe); max-width: 64ch; margin-bottom: var(--s5); }
+  .ref h3 { font-size: var(--t-base); margin: var(--s5) 0 var(--s3); }
+  .swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(196px, 1fr)); gap: var(--s3); }
+  .sw { border: 1px solid var(--rule); border-radius: var(--r-panel); overflow: hidden; background: var(--sheet); }
+  .sw .chip { height: 64px; border-bottom: 1px solid var(--rule); }
+  .sw .tb { border-top: 0; grid-auto-flow: row; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); }
+  .typerow { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: var(--s4); align-items: baseline; padding: var(--s3) 0; border-top: 1px solid var(--rule); }
+  .typerow:first-of-type { border-top: 0; }
+  .typerow .hint { font-family: var(--mono); }
+  .icons { display: grid; grid-template-columns: repeat(auto-fill, minmax(116px, 1fr)); gap: var(--s2); }
+  .icons figure { margin: 0; padding: var(--s4) var(--s2) var(--s3); text-align: center; background: var(--sheet); border: 1px solid var(--rule); border-radius: var(--r-panel); }
+  .icons .i { width: 28px; height: 28px; }
+  .icons figcaption { margin-top: var(--s2); font-family: var(--mono); font-size: var(--t-xs); color: var(--scribe); }
+  .demo { background: var(--sheet); border: 1px solid var(--rule); border-radius: var(--r-panel); padding: var(--s5); }
+  .demo + .demo { margin-top: var(--s3); }
+  .demo.stage { background: var(--stage); position: relative; min-height: 160px; }
+  .demo.stage .toolbar, .demo.stage .hud, .demo.stage .toast { position: absolute; }
+  .space { display: flex; gap: var(--s4); align-items: flex-end; flex-wrap: wrap; }
+  .space div { background: var(--layout-wash); border: 1px solid var(--layout); }
+  .space figure { margin: 0; text-align: center; font-size: var(--t-xs); color: var(--scribe); }
+  .twocol { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--s4); align-items: start; }
+  .card.static:hover { border-color: var(--rule); }
+  .card.static:hover .name { color: inherit; }
+  .card .thumb svg.part { width: 58%; height: 58%; }
+</style>
+</head>
+<body>
+<header class="top">
+  <a class="wordmark" href="/"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-mark"/></svg><span class="name">STL library</span></a>
+  <span class="crumb">/ <b>Design system</b></span>
+  <div class="grow"></div>
+  <div class="seg" role="group" aria-label="Theme">
+    <button data-theme-set="light">Light</button>
+    <button data-theme-set="auto" class="on">Auto</button>
+    <button data-theme-set="dark">Dark</button>
+  </div>
+</header>
+
+<main class="ref">
+  <header>
+    <h1>Design system</h1>
+    <p>The tokens, icons and components the web UI is built from, rendered from the live
+      <code>style.css</code> and <code>icons.svg</code>. The written rules are in <code>docs/DESIGN.md</code>.</p>
+  </header>
+
+  <section id="colour">
+    <h2>Colour</h2>
+    <p>Neutral metal greys for the workbench, layout blue for the one thing that matters on a screen,
+      build-plate gold for comments. Switch the theme above to see the dark values.</p>
+    <div class="swatches" id="swatches"></div>
+    <h3>Part colours</h3>
+    <div class="swatches" id="parts"></div>
+  </section>
+
+  <section id="type">
+    <h2>Type</h2>
+    <p>Archivo for the interface, with its width axis doing structural work. IBM Plex Mono only for things
+      you would copy into code. Every figure is tabular so dimensions line up.</p>
+    <div class="demo">
+      <div class="typerow"><span class="hint">28 / 650</span><span style="font-size:var(--t-xl);font-weight:650;font-stretch:96%;letter-spacing:-.015em">Print-check settings</span></div>
+      <div class="typerow"><span class="hint">21 / 650</span><span style="font-size:var(--t-lg);font-weight:650;font-stretch:96%">Pen holder with three 12 mm holes</span></div>
+      <div class="typerow"><span class="hint">16 / 700 / 112%</span><span class="wordmark" style="font-size:var(--t-md)">STL library</span></div>
+      <div class="typerow"><span class="hint">14 / 400</span><span>Click the model where something should change, then tell Claude to look at the comments.</span></div>
+      <div class="typerow"><span class="hint">12 / 400</span><span class="hint" style="font-family:var(--sans)">80 × 50 × 25 mm, 41.2 cm³</span></div>
+      <div class="typerow"><span class="hint">11 / 500 / 78%</span><span style="font-size:var(--t-xs);font-weight:500;font-stretch:78%;color:var(--scribe)">Revision</span></div>
+      <div class="typerow"><span class="hint">Mono 12</span><code>update_model("pen-holder", {"n": 4, "h": 50})</code></div>
+    </div>
+  </section>
+
+  <section id="title-block">
+    <h2>Title block</h2>
+    <p>The signature element: the cell grid from the corner of an engineering drawing. It holds facts
+      about a model and nothing else.</p>
+    <div class="twocol">
+      <dl class="tb full">
+        <div><dt>Revision</dt><dd>v7 of 7</dd></div>
+        <div><dt>Saved</dt><dd>2 min ago</dd></div>
+        <div><dt>Id</dt><dd class="mono">pen-holder</dd></div>
+      </dl>
+      <dl class="tb full">
+        <div><dt>Size</dt><dd>80 × 50 × 25 mm</dd></div>
+        <div><dt>Revision</dt><dd>v3</dd></div>
+        <div><dt>Updated</dt><dd>1 h ago</dd></div>
+      </dl>
+    </div>
+  </section>
+
+  <section id="icons">
+    <h2>Icons</h2>
+    <p>24 × 24 grid, 1.6 stroke, round joins, coloured by the surrounding text.
+      Use <code>&lt;svg class="i"&gt;&lt;use href="/static/icons.svg#i-name"/&gt;&lt;/svg&gt;</code> or <code>icon("name")</code>.</p>
+    <div class="icons" id="iconlist"></div>
+  </section>
+
+  <section id="space">
+    <h2>Space and shape</h2>
+    <p>A 4 px grid. Two radii: 4 px for controls, 6 px for panels. One shadow, only for things that float.</p>
+    <div class="demo">
+      <div class="space" id="spacing"></div>
+    </div>
+    <div class="demo row" style="gap:var(--s5)">
+      <div style="width:120px;height:56px;border:1px solid var(--rule);border-radius:var(--r-control);background:var(--inset)"></div>
+      <div style="width:120px;height:56px;border:1px solid var(--rule);border-radius:var(--r-panel);background:var(--sheet)"></div>
+      <div style="width:120px;height:56px;border:1px solid var(--rule);border-radius:var(--r-panel);background:var(--sheet);box-shadow:var(--lift)"></div>
+    </div>
+  </section>
+
+  <section id="controls">
+    <h2>Controls</h2>
+    <p>One primary action per view. Buttons are verbs.</p>
+    <div class="demo">
+      <div class="row">
+        <button class="primary">Rebuild</button>
+        <button><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-restore"/></svg>Restore this version</button>
+        <button class="danger"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-trash"/></svg>Delete model</button>
+        <button class="quiet">Not now</button>
+        <button class="icon quiet" aria-label="Security"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-key"/></svg></button>
+        <button disabled>Disabled</button>
+      </div>
+      <div class="row" style="margin-top:var(--s4)">
+        <button class="sm"><svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-download"/></svg>STL</button>
+        <button class="sm"><svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-check"/></svg>Resolve</button>
+        <div class="seg">
+          <button>Iso</button><button class="on">Front</button><button>Top</button><button>Right</button>
+        </div>
+        <span class="pill">2 open</span>
+        <span class="live on"><span class="dot"></span>Live</span>
+        <span class="live"><span class="dot"></span>Connecting</span>
+      </div>
+      <div class="row" style="margin-top:var(--s4)">
+        <label class="search"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-search"/></svg>
+          <input type="search" placeholder="Search models" aria-label="Search models (example)"></label>
+        <input type="text" value="iPhone" aria-label="Example text input">
+        <label class="row" style="gap:6px"><input type="checkbox" checked> Show resolved</label>
+      </div>
+      <div style="margin-top:var(--s4)" class="warn"><svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-warning"/></svg><span>Not watertight. The slicer may fill or drop faces.</span></div>
+    </div>
+  </section>
+
+  <section id="library">
+    <h2>Library</h2>
+    <p>A card is a preview on the build plate, the name, and a title block.</p>
+    <div class="grid" style="max-width:780px">
+      <a class="card static" href="#library">
+        <div class="thumb"><svg class="part" viewBox="0 0 24 24" fill="none" stroke="#2a3a66" stroke-width=".6" stroke-linejoin="round"><path d="M12 3 19.5 7.25 12 11.5 4.5 7.25Z" fill="#7aa6ff"/><path d="M4.5 7.25 12 11.5V20L4.5 15.75Z" fill="#4f8cff"/><path d="M19.5 7.25 12 11.5V20l7.5-4.25Z" fill="#3a6fd8"/></svg>
+          <span class="cbadge"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-comment"/></svg>2</span></div>
+        <div class="name">Pen holder</div>
+        <dl class="tb"><div><dt>Size</dt><dd>80 × 50 × 25 mm</dd></div><div><dt>Revision</dt><dd>v3</dd></div><div><dt>Updated</dt><dd>1 h ago</dd></div></dl>
+      </a>
+      <a class="card static" href="#library">
+        <div class="thumb"><svg class="part" viewBox="0 0 24 24" fill="none" stroke="#5a3a1a" stroke-width=".6" stroke-linejoin="round"><path d="M12 3 19.5 7.25 12 11.5 4.5 7.25Z" fill="#ffc184"/><path d="M4.5 7.25 12 11.5V20L4.5 15.75Z" fill="#ff9a3c"/><path d="M19.5 7.25 12 11.5V20l7.5-4.25Z" fill="#d97a26"/></svg>
+          <span class="cbadge wbadge"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-warning"/></svg>1</span></div>
+        <div class="name">USB-C enclosure</div>
+        <dl class="tb"><div><dt>Parts</dt><dd>2</dd></div><div><dt>Revision</dt><dd>v12</dd></div><div><dt>Updated</dt><dd>just now</dd></div></dl>
+      </a>
+    </div>
+    <h3>Banner</h3>
+    <div class="banner"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-key"/></svg>
+      <span>Log in with one tap next time: add a passkey (Face ID, Touch ID or your password manager).</span>
+      <button class="primary">Add passkey</button><button class="quiet">Not now</button></div>
+  </section>
+
+  <section id="viewer">
+    <h2>3D view</h2>
+    <p>Overlays sit on the viewport; the side panel holds the model's facts, parts, comments and revisions.</p>
+    <div class="demo stage">
+      <div class="toolbar">
+        <div class="seg"><button>Iso</button><button>Front</button><button>Top</button><button>Right</button>
+          <button class="icon" aria-label="Zoom to fit"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-fit"/></svg></button></div>
+        <div class="seg"><button class="on"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-spread"/></svg>Spread</button>
+          <button class="on"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-edges"/></svg>Edges</button>
+          <button><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-wire"/></svg>Mesh</button></div>
+        <button id="commentmode" class="on"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-comment"/></svg>Comment</button>
+      </div>
+      <div class="hud"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-dimension"/></svg><span>80 × 50 × 25 mm</span></div>
+      <div class="toast show">v4: wall 3 mm</div>
+    </div>
+    <div class="twocol" style="margin-top:var(--s4)">
+      <div class="demo">
+        <ul class="versions">
+          <li class="sel cur"><span class="v">v4</span><span class="note">wall 3 mm</span><span class="t">just now</span></li>
+          <li><span class="v">v3</span><span class="note">four holes, 50 mm tall</span><span class="t">5 min ago</span></li>
+          <li><span class="v">v2</span><span class="note">web: d=12.4</span><span class="t">1 h ago</span></li>
+        </ul>
+        <div class="params" style="margin-top:var(--s4)">
+          <label>n</label><input type="number" value="4" aria-label="n">
+          <label>wall</label><input type="number" value="3" class="dirty" aria-label="wall">
+          <label>h</label><input type="text" value="=d*4" class="expr" aria-label="h">
+        </div>
+      </div>
+      <div class="demo">
+        <div class="cmt"><span class="badge">1</span><div><div class="ctext">This hole should be 2 mm larger</div>
+          <div class="hint">v3, body, 4 min ago</div>
+          <div class="reply claude"><b>Claude:</b> Made it 14 mm in v4.</div></div></div>
+        <div class="cmt done"><span class="badge">2</span><div><div class="ctext">Round the top edge</div>
+          <div class="hint">v2, body, 1 h ago</div></div></div>
+        <div style="margin-top:var(--s3);position:relative;display:flex;gap:var(--s3);align-items:flex-end">
+          <span class="pin" style="position:relative;top:0">1</span>
+          <span class="pin done" style="position:relative;top:0">2</span>
+          <span class="pin focus" style="position:relative;top:0">3</span>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script type="module">
+import { icon, PART_COLORS } from "/static/common.js";
+const $ = (id) => document.getElementById(id);
+
+const TOKENS = [
+  ["--aluminium", "Page"], ["--sheet", "Panels"], ["--inset", "Inputs"], ["--graphite", "Text"],
+  ["--scribe", "Secondary text"], ["--rule", "Borders"], ["--rule-strong", "Strong borders"],
+  ["--layout", "Accent"], ["--layout-wash", "Selection"], ["--pei", "Comments"],
+  ["--fault", "Faults"], ["--sound", "Live, current"], ["--stage", "Viewport"], ["--plate", "Preview plate"],
+];
+const ICONS = ["mark", "search", "key", "settings", "comment", "warning", "download", "copy", "duplicate",
+  "back", "plus", "close", "check", "reply", "restore", "trash", "logout",
+  "fit", "spin", "edges", "wire", "spread", "dimension"];
+
+function drawSwatches() {
+  const css = getComputedStyle(document.documentElement);
+  $("swatches").innerHTML = TOKENS.map(([t, use]) => {
+    const v = css.getPropertyValue(t).trim();
+    return `<div class="sw"><div class="chip" style="background:var(${t})"></div>
+      <dl class="tb"><div><dt>${use}</dt><dd class="mono">${t}</dd></div><div><dt>Value</dt><dd class="mono">${v}</dd></div></dl></div>`;
+  }).join("");
+}
+$("parts").innerHTML = PART_COLORS.map((c, i) => `<div class="sw"><div class="chip" style="background:${c}"></div>
+  <dl class="tb"><div><dt>Part</dt><dd>${i + 1}</dd></div><div><dt>Value</dt><dd class="mono">${c}</dd></div></dl></div>`).join("");
+$("iconlist").innerHTML = ICONS.map((n) => `<figure>${icon(n)}<figcaption>i-${n}</figcaption></figure>`).join("");
+$("spacing").innerHTML = [4, 8, 12, 16, 24, 32, 48].map((n, i) =>
+  `<figure><div style="width:${n}px;height:${n}px"></div>--s${i + 1}<br>${n}</figure>`).join("");
+
+document.querySelectorAll("[data-theme-set]").forEach((b) => b.onclick = () => {
+  const t = b.dataset.themeSet;
+  if (t === "auto") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = t;
+  document.querySelectorAll("[data-theme-set]").forEach((x) => x.classList.toggle("on", x === b));
+  drawSwatches();
+});
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", drawSwatches);
+drawSwatches();
+</script>
+</body>
+</html>

@@ -15,6 +15,8 @@ with a web interface for viewing, rotating and browsing the models.
 
 - **Comments**: click a point on the model and write what should change. Claude sees the
   point and which part of the recipe is located there.
+- **Design system**: colours, type, icons and components are documented in
+  [`docs/DESIGN.md`](docs/DESIGN.md) and shown live at `/static/design.html`.
 - **Templates**: screw holes (M2–M5, countersunk/cylindrical, nut trap), heat inserts, screw bosses,
   snap hooks, hinges and text.
 
