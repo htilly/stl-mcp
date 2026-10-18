@@ -18,8 +18,13 @@ def _stl_bytes(extents=(10, 10, 10)):
     return trimesh.creation.box(extents=extents).export(file_type="stl")
 
 
+def fdir():
+    """The admin's standalone files (direct tool calls run as the admin in single-user mode)."""
+    return server.Lib(server._admin()).dir
+
+
 def _write_box(out_dir, name="box.stl", extents=(10, 20, 30)):
-    (out_dir / name).write_bytes(_stl_bytes(extents))
+    (fdir() / name).write_bytes(_stl_bytes(extents))
     return name
 
 
@@ -39,19 +44,21 @@ def test_safe_rejects_empty():
         server._safe("!!!")
 
 
-def test_url(monkeypatch):
+def test_url(monkeypatch, out_dir):
     monkeypatch.setattr(server, "PUBLIC_URL", "https://x.test")
-    assert server._url("a.stl") == "https://x.test/files/a.stl"
+    admin = server._admin()
+    assert server.Lib(admin).url("a.stl") == f"https://x.test/f/{admin['id']}/a.stl"
 
 
 def test_out_file_blocks_traversal_and_bad_suffix(out_dir):
-    (out_dir / "a.txt").write_text("x")
+    lib = server.Lib(server._admin())
+    (fdir() / "a.txt").write_text("x")
     with pytest.raises(FileNotFoundError):
-        server._out_file("../../etc/passwd")
+        server._out_file(lib, "../../etc/passwd")
     with pytest.raises(FileNotFoundError):
-        server._out_file("a.txt")
+        server._out_file(lib, "a.txt")
     with pytest.raises(FileNotFoundError):
-        server._out_file("missing.stl")
+        server._out_file(lib, "missing.stl")
 
 
 def test_check_public_blocks_private(monkeypatch):
@@ -82,10 +89,10 @@ def test_comment_view_drops_empty_and_internal_fields():
 
 def test_save_makes_simplified_copy_over_limit(out_dir, monkeypatch):
     monkeypatch.setattr(server, "TINKERCAD_MAX", 20_000)
-    info = server._save(trimesh.creation.icosphere(subdivisions=4), "big")
+    info = server._save(server.Lib(server._admin()), trimesh.creation.icosphere(subdivisions=4), "big")
     assert info["tinkercad"]["file"] == "big_tinkercad.stl"
     assert info["tinkercad"]["size_bytes"] <= 20_000
-    assert (out_dir / "big_tinkercad.stl").is_file()
+    assert (fdir() / "big_tinkercad.stl").is_file()
 
 
 def test_file_info(out_dir):
@@ -99,7 +106,7 @@ def test_file_info(out_dir):
 def test_import_file_base64(out_dir):
     data = base64.b64encode(_stl_bytes()).decode()
     info = server.import_file("imp", data_base64=data)
-    assert info["file"] == "imp.stl" and (out_dir / "imp.stl").is_file()
+    assert info["file"] == "imp.stl" and (fdir() / "imp.stl").is_file()
 
 
 def test_import_file_requires_exactly_one_source():
@@ -125,7 +132,7 @@ def test_modify_file_scale_saves_under_new_name(out_dir):
     _write_box(out_dir)
     info = server.modify_file("box.stl", name="big", scale=2)
     assert sorted(info["extents_mm"]) == [20.0, 40.0, 60.0]
-    assert (out_dir / "box.stl").is_file() and (out_dir / "big.stl").is_file()
+    assert (fdir() / "box.stl").is_file() and (fdir() / "big.stl").is_file()
 
 
 def test_modify_file_overwrites_by_default(out_dir):
@@ -135,7 +142,7 @@ def test_modify_file_overwrites_by_default(out_dir):
 
 
 def test_modify_file_max_triangles(out_dir):
-    (out_dir / "ball.stl").write_bytes(trimesh.creation.icosphere(subdivisions=4).export(file_type="stl"))
+    (fdir() / "ball.stl").write_bytes(trimesh.creation.icosphere(subdivisions=4).export(file_type="stl"))
     info = server.modify_file("ball.stl", name="small", max_triangles=200)
     assert info["triangles"] <= 200
 
@@ -144,7 +151,7 @@ def test_split_file_orders_largest_first(out_dir):
     a = trimesh.creation.box(extents=(10, 10, 10))
     b = trimesh.creation.icosphere(subdivisions=3)
     b.apply_translation([50, 0, 0])
-    (out_dir / "two.stl").write_bytes(trimesh.util.concatenate([a, b]).export(file_type="stl"))
+    (fdir() / "two.stl").write_bytes(trimesh.util.concatenate([a, b]).export(file_type="stl"))
     parts = server.split_file("two.stl")
     assert [p["file"] for p in parts] == ["two_part1.stl", "two_part2.stl"]
     assert parts[0]["triangles"] > parts[1]["triangles"]
@@ -156,13 +163,13 @@ def test_export_obj_creates_obj_mtl_zip(out_dir):
     res = server.export_obj("set", [{"file": "a.stl", "color": "blue"}, {"file": "b.stl"}])
     assert res["parts"] == ["a", "b"] and res["triangles"] == 24
     for ext in ("obj", "mtl", "zip"):
-        assert (out_dir / f"set.{ext}").is_file()
-    with zipfile.ZipFile(out_dir / "set.zip") as z:
+        assert (fdir() / f"set.{ext}").is_file()
+    with zipfile.ZipFile(fdir() / "set.zip") as z:
         assert sorted(z.namelist()) == ["set.mtl", "set.obj"]
 
 
 def test_export_obj_simplifies_over_limit(out_dir, monkeypatch):
-    (out_dir / "ball.stl").write_bytes(trimesh.creation.icosphere(subdivisions=4).export(file_type="stl"))
+    (fdir() / "ball.stl").write_bytes(trimesh.creation.icosphere(subdivisions=4).export(file_type="stl"))
     full = server.export_obj("full", [{"file": "ball.stl"}])
     monkeypatch.setattr(server, "TINKERCAD_MAX", full["size_bytes"] // 2)
     small = server.export_obj("small", [{"file": "ball.stl"}])
@@ -171,7 +178,7 @@ def test_export_obj_simplifies_over_limit(out_dir, monkeypatch):
 
 def test_list_and_delete_files(out_dir):
     _write_box(out_dir)
-    (out_dir / "ignore.txt").write_text("x")
+    (fdir() / "ignore.txt").write_text("x")
     assert [f["file"] for f in server.list_files()] == ["box.stl"]
     assert server.delete_file("box.stl") == "deleted box.stl"
     assert server.list_files() == []
@@ -419,7 +426,7 @@ def test_flat_file_download_content_type_and_404(client, out_dir):
     r = client.get("/files/box.stl")
     assert r.status_code == 200 and r.headers["content-type"].startswith("model/stl")
     assert client.get("/files/missing.stl").status_code == 404
-    (out_dir / "x.txt").write_text("x")
+    (fdir() / "x.txt").write_text("x")
     assert client.get("/files/x.txt").status_code == 404
 
 
@@ -523,6 +530,7 @@ def test_preview_png_is_rendered_then_cached(client, out_dir):
 def test_api_events_streams_initial_and_changes():
     class Req:
         calls = 0
+        state = type("State", (), {"user": None})()  # anonymous: follows the admin's library
 
         async def is_disconnected(self):
             return False
@@ -531,7 +539,7 @@ def test_api_events_streams_initial_and_changes():
         resp = await server.api_events(Req())
         assert resp.media_type == "text/event-stream"
         first = await resp.body_iterator.__anext__()
-        server.store._bump("zzz")
+        server.store._bump("zzz", None)
         second = await resp.body_iterator.__anext__()
         await resp.body_iterator.aclose()
         return first, second
@@ -545,7 +553,7 @@ def test_upload_converts_to_stl(client, out_dir):
     obj = trimesh.creation.box().export(file_type="obj")
     r = client.put("/upload/model.obj", content=obj)
     assert r.status_code == 200 and r.json()["file"] == "model.stl"
-    assert (out_dir / "model.stl").is_file()
+    assert (fdir() / "model.stl").is_file()
 
 
 def test_upload_rejects_garbage_and_oversize(client, monkeypatch):

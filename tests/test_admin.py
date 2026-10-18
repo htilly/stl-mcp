@@ -99,7 +99,7 @@ def test_check_print_tool_for_model_and_file(out_dir):
     assert r["ok"] is False and "thin_walls" in {w["code"] for w in r["warnings"]["model"]}
     server.store.settings.update({"min_wall_mm": 0.3})
     assert server.check_print(model_id="plate")["ok"] is True
-    (out_dir / "big.stl").write_bytes(trimesh.creation.box((400, 10, 10)).export(file_type="stl"))
+    (server.Lib(server._admin()).dir / "big.stl").write_bytes(trimesh.creation.box((400, 10, 10)).export(file_type="stl"))
     r = server.check_print(file="big.stl")
     assert "exceeds_build_volume" in {w["code"] for w in r["warnings"]["model"]}
 

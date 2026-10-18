@@ -1,11 +1,15 @@
-"""On-disk model library with version history.
+"""Model library with version history.
 
 A *model* is a recipe (kind + params) – not just an STL. Every change becomes a new version
 that is rebuilt from the recipe, so Claude can adjust step by step and you can roll back.
 
-Layout:
-  <STL_DIR>/models/<id>/model.json
+Each model has an owner. The model document (recipe, versions, comments) lives in Postgres
+(table models, see migrations/002_models.sql); the built files stay on disk:
   <STL_DIR>/models/<id>/v<N>/<part>.stl
+
+Store itself is unrestricted; the server always goes through Store.view(user), which only lets a
+user reach their own models (admins reach all). Someone else's model looks exactly like one that
+does not exist.
 """
 from __future__ import annotations
 
@@ -21,6 +25,7 @@ import time
 from pathlib import Path
 
 import trimesh
+from psycopg.types.json import Jsonb
 
 import csg
 import geometry as g
@@ -154,15 +159,24 @@ def _stats(mesh: trimesh.Trimesh) -> dict:
     }
 
 
+def _missing(mid: str) -> KeyError:
+    return KeyError(f"model '{mid}' does not exist")
+
+
 class Store:
-    def __init__(self, root: Path, allow_script: bool = False):
+    def __init__(self, root: Path, db, allow_script: bool = False):
         self.dir = Path(root) / "models"
         self.dir.mkdir(parents=True, exist_ok=True)
+        self.db = db
         self.allow_script = allow_script
         self.settings = printcheck.Settings(Path(root) / "settings.json")
         self.lock = threading.RLock()
         self.revision = 0          # incremented on every change (the web UI polls via SSE)
         self.last_changed: str | None = None
+        # per owner: the revision of their last change and which model it was, so each user's
+        # live updates only fire for their own library
+        self.owner_revision: dict[str | None, int] = {}
+        self.owner_last_changed: dict[str | None, str] = {}
 
     # -- intern
     def _path(self, mid: str) -> Path:
@@ -171,22 +185,36 @@ class Store:
         return self.dir / mid
 
     def _read(self, mid: str) -> dict:
-        f = self._path(mid) / "model.json"
-        if not f.is_file():
-            raise KeyError(f"model '{mid}' does not exist")
-        return json.loads(f.read_text())
+        self._path(mid)  # validates the id
+        row = self.db.one("SELECT doc FROM models WHERE id = %s", (mid,))
+        if not row:
+            raise _missing(mid)
+        return row["doc"]
 
     def _write(self, m: dict):
-        f = self._path(m["id"]) / "model.json"
-        tmp = f.with_suffix(".tmp")
-        tmp.write_text(json.dumps(m, ensure_ascii=False, indent=1))
-        tmp.replace(f)
-        self.revision += 1
-        self.last_changed = m["id"]
+        self.db.execute(
+            "INSERT INTO models (id, owner_id, name, updated, doc) VALUES (%s, %s, %s, %s, %s) "
+            "ON CONFLICT (id) DO UPDATE SET owner_id = EXCLUDED.owner_id, name = EXCLUDED.name, "
+            "updated = EXCLUDED.updated, doc = EXCLUDED.doc",
+            (m["id"], m.get("owner"), m["name"], m.get("updated", time.time()), Jsonb(m)))
+        self._bump(m["id"], m.get("owner"))
 
-    def _bump(self, mid):
+    def _bump(self, mid, owner):
         self.revision += 1
         self.last_changed = mid
+        self.owner_revision[owner] = self.revision
+        self.owner_last_changed[owner] = mid
+
+    def owner(self, mid: str) -> str | None:
+        """The model's owner id; KeyError if the model does not exist."""
+        self._path(mid)
+        row = self.db.one("SELECT owner_id FROM models WHERE id = %s", (mid,))
+        if not row:
+            raise _missing(mid)
+        return row["owner_id"]
+
+    def view(self, user: dict) -> "StoreView":
+        return StoreView(self, user)
 
     def build(self, kind: str, params: dict) -> dict:
         if kind == "csg":
@@ -227,15 +255,15 @@ class Store:
 
     # -- publikt
     def create(self, name: str, kind: str, params: dict, description: str = "",
-               note: str = "") -> dict:
+               note: str = "", owner: str | None = None) -> dict:
         with self.lock:
             base = slug(name)
             mid, i = base, 2
-            while (self.dir / mid).exists():
+            while (self.dir / mid).exists() or self.db.one("SELECT 1 FROM models WHERE id = %s", (mid,)):
                 mid, i = f"{base}-{i}", i + 1
             self._path(mid).mkdir(parents=True)
-            m = {"id": mid, "name": name, "description": description, "created": time.time(),
-                 "updated": time.time(), "current": 0, "versions": []}
+            m = {"id": mid, "owner": owner, "name": name, "description": description,
+                 "created": time.time(), "updated": time.time(), "current": 0, "versions": []}
             try:
                 self._new_version(m, kind, params, note or "created")
             except Exception:
@@ -313,11 +341,13 @@ class Store:
             self._write(m)
             return m
 
-    def duplicate(self, mid: str, name: str) -> dict:
+    def duplicate(self, mid: str, name: str, owner: str | None = None) -> dict:
+        """Copies the current recipe into a new model, owned by owner (default: the same owner)."""
         m = self._read(mid)
         cur = self.current(m)
         return self.create(name, cur["kind"], copy.deepcopy(cur["params"]), m.get("description", ""),
-                           f"copy of {mid} v{cur['version']}")
+                           f"copy of {mid} v{cur['version']}",
+                           owner=owner if owner is not None else m.get("owner"))
 
     # -- comments (pointed out in the web 3D view, read and answered by Claude)
     @staticmethod
@@ -391,22 +421,62 @@ class Store:
     def delete(self, mid: str):
         with self.lock:
             p = self._path(mid)
-            if not p.is_dir():
-                raise KeyError(f"model '{mid}' does not exist")
-            shutil.rmtree(p)
-            self._bump(mid)
+            row = self.db.one("DELETE FROM models WHERE id = %s RETURNING owner_id", (mid,))
+            if not row:
+                raise _missing(mid)
+            shutil.rmtree(p, ignore_errors=True)
+            self._bump(mid, row["owner_id"])
 
     def get(self, mid: str) -> dict:
         return self._read(mid)
 
-    def list(self) -> list[dict]:
-        out = []
-        for f in self.dir.glob("*/model.json"):
-            try:
-                out.append(json.loads(f.read_text()))
-            except (OSError, json.JSONDecodeError):
-                continue
-        return sorted(out, key=lambda m: m.get("updated", 0), reverse=True)
+    def list(self, owner: str | None = None, everyone: bool = True) -> list[dict]:
+        """All models (everyone=True) or only owner's, most recently changed first."""
+        if everyone:
+            rows = self.db.all("SELECT doc FROM models ORDER BY updated DESC, id")
+        else:
+            rows = self.db.all("SELECT doc FROM models WHERE owner_id = %s ORDER BY updated DESC, id",
+                               (owner,))
+        return [r["doc"] for r in rows]
+
+    def delete_owner(self, owner: str) -> int:
+        """Deletes all of a user's models and their files. Returns how many."""
+        with self.lock:
+            rows = self.db.all("DELETE FROM models WHERE owner_id = %s RETURNING id", (owner,))
+            for r in rows:
+                shutil.rmtree(self._path(r["id"]), ignore_errors=True)
+                self._bump(r["id"], owner)
+            return len(rows)
+
+    def import_legacy(self, owner: str) -> int:
+        """Moves model.json files from before the database into it, owned by owner. Each file is
+        renamed to model.json.imported, so this runs once per model. Returns how many."""
+        n = 0
+        with self.lock:
+            for f in sorted(self.dir.glob("*/model.json")):
+                try:
+                    m = json.loads(f.read_text())
+                except (OSError, json.JSONDecodeError):
+                    continue
+                m["owner"] = owner
+                self.db.execute(
+                    "INSERT INTO models (id, owner_id, name, updated, doc) VALUES (%s, %s, %s, %s, %s) "
+                    "ON CONFLICT (id) DO NOTHING",
+                    (m["id"], owner, m.get("name") or m["id"], m.get("updated") or time.time(), Jsonb(m)))
+                f.replace(f.with_name("model.json.imported"))
+                n += 1
+        return n
+
+    def revision_for(self, user: dict | None) -> int:
+        """The revision a user's live view follows: everything for admins, else their own."""
+        if user and user["role"] == "admin":
+            return self.revision
+        return self.owner_revision.get(user["id"] if user else None, 0)
+
+    def last_changed_for(self, user: dict | None) -> str | None:
+        if user and user["role"] == "admin":
+            return self.last_changed
+        return self.owner_last_changed.get(user["id"] if user else None)
 
     def file(self, mid: str, rel: str) -> Path:
         p = (self._path(mid) / rel).resolve()
@@ -424,3 +494,56 @@ class Store:
             if v["version"] == version:
                 return v
         raise KeyError(f"version {version} does not exist for '{m['id']}'")
+
+
+class StoreView:
+    """The library as one user sees it: their own models (admins: every model). Everything else
+    raises the same KeyError as a model that does not exist."""
+
+    def __init__(self, store: Store, user: dict):
+        self.store, self.user = store, user
+        self.admin = user["role"] == "admin"
+
+    def _check(self, mid: str) -> str:
+        owner = self.store.owner(mid)
+        if not self.admin and owner != self.user["id"]:
+            raise _missing(mid)
+        return mid
+
+    def create(self, name: str, kind: str, params: dict, description: str = "", note: str = "") -> dict:
+        return self.store.create(name, kind, params, description, note, owner=self.user["id"])
+
+    def get(self, mid: str) -> dict:
+        return self.store.get(self._check(mid))
+
+    def list(self) -> list[dict]:
+        return self.store.list(self.user["id"], everyone=self.admin)
+
+    def update(self, mid: str, **kw) -> dict:
+        return self.store.update(self._check(mid), **kw)
+
+    def revert(self, mid: str, version: int) -> dict:
+        return self.store.revert(self._check(mid), version)
+
+    def set_current(self, mid: str, version: int) -> dict:
+        return self.store.set_current(self._check(mid), version)
+
+    def duplicate(self, mid: str, name: str) -> dict:
+        return self.store.duplicate(self._check(mid), name, owner=self.user["id"])
+
+    def add_comment(self, mid: str, text: str, *a, **kw) -> dict:
+        return self.store.add_comment(self._check(mid), text, *a, **kw)
+
+    def comment_action(self, mid: str, cid: str, action: str, text: str = "", author: str = "user") -> dict:
+        return self.store.comment_action(self._check(mid), cid, action, text, author=author)
+
+    def delete(self, mid: str):
+        self.store.delete(self._check(mid))
+
+    def recheck(self, mid: str | None = None) -> int:
+        if mid is None and not self.admin:
+            return sum(self.store.recheck(m["id"]) for m in self.list())
+        return self.store.recheck(self._check(mid) if mid else None)
+
+    def file(self, mid: str, rel: str) -> Path:
+        return self.store.file(self._check(mid), rel)
