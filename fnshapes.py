@@ -340,25 +340,40 @@ def _catmull(P, steps, closed):
     return np.vstack(out)
 
 
-def _path(p, segs):
-    """Path spec → (points (k,3), closed)."""
+def _path(p, segs, max_points):
+    """Path spec → (points (k,3), closed). The point count is checked against max_points before
+    anything is allocated (a helix with a million turns must fail fast, not fill the memory)."""
     if isinstance(p, list):
         p = {"type": "points", "points": p}
     if not isinstance(p, dict):
         raise ValueError("sweep: 'path' must be a list of points or {type: points|spline|arc|helix|bezier, …}")
     kind = p.get("type", "points")
     closed = bool(p.get("closed", False))
+
+    def steps(default):
+        v = p.get("steps", default)
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not 1 <= v <= 1000:
+            raise ValueError("sweep: path 'steps' must be a number between 1 and 1000")
+        return int(v)
+
+    def room(count):
+        if count > max_points:
+            raise ValueError(f"sweep: the path is too detailed ({count:,.0f} points, max "
+                             f"{max_points:,} for this profile) – lower steps/turns/segments")
     if kind == "points":
         P = _pts(p.get("points"), "sweep path points")
+        room(len(P))
     elif kind == "spline":
-        P = _catmull(_pts(p.get("points"), "sweep spline points", 3 if closed else 2),
-                     int(p.get("steps", 16)), closed)
+        Q, st = _pts(p.get("points"), "sweep spline points", 3 if closed else 2), steps(16)
+        room(len(Q) * st + 1)
+        P = _catmull(Q, st, closed)
     elif kind == "bezier":
         C = _pts(p.get("points"), "sweep bezier points", 4)
         if (len(C) - 1) % 3:
             raise ValueError("sweep: a bezier path needs 3k+1 points (start, c1, c2, end, c1, c2, end …)")
-        steps = int(p.get("steps", 24))
-        u = np.linspace(0, 1, steps, endpoint=False)[:, None]
+        st = steps(24)
+        room((len(C) - 1) // 3 * st + 1)
+        u = np.linspace(0, 1, st, endpoint=False)[:, None]
         out = []
         for s in range(0, len(C) - 1, 3):
             p0, p1, p2, p3 = C[s:s + 4]
@@ -371,6 +386,9 @@ def _path(p, segs):
         if r <= 0 or deg == 0:
             raise ValueError("sweep: arc requires r > 0 and degrees ≠ 0")
         closed = closed or abs(abs(deg) - 360) < 1e-9
+        if not math.isfinite(deg) or not math.isfinite(start):
+            raise ValueError("sweep: arc degrees and start must be finite numbers")
+        room(segs * abs(deg) / 360)
         k = max(3, math.ceil(segs * abs(deg) / 360))
         ang = (start + np.linspace(0, deg, k, endpoint=not closed)) * _D
         P = np.stack([r * np.cos(ang), r * np.sin(ang), np.zeros(k)], -1)
@@ -378,8 +396,9 @@ def _path(p, segs):
         r = float(p.get("r", 10))
         pitch = float(p.get("pitch", 5))
         turns = float(p.get("turns", 1))
-        if r <= 0 or turns <= 0:
+        if r <= 0 or turns <= 0 or not math.isfinite(turns):
             raise ValueError("sweep: helix requires r > 0 and turns > 0")
+        room(segs * turns + 1)
         k = max(4, math.ceil(segs * turns) + 1)
         th = np.linspace(0, turns * 2 * math.pi, k) * (-1 if p.get("left") else 1)
         P = np.stack([r * np.cos(th), r * np.sin(th), np.linspace(0, pitch * turns, k)], -1)
@@ -499,8 +518,9 @@ def sweep(n, env, profile_fn):
     if "path" not in n:
         raise ValueError("sweep requires 'path'")
     segs = _int(n, "segments", 64, 3, 1024)
-    P, closed = _path(n["path"], segs)
     polys = _contours(profile_fn(n), "sweep")
+    # every path point becomes a ring of the profile's points (2 triangles each)
+    P, closed = _path(n["path"], segs, max(4, MAX_TRIANGLES // (2 * sum(map(len, polys)))))
     if n.get("twist") or n.get("taper", 1) != 1:
         P = _densify(P, closed, segs)                          # twist/taper need rings along straights
     T, D, X, Y = _frames(P, closed)

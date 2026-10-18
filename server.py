@@ -26,6 +26,11 @@ Environment variables:
   TURNSTILE_SITE_KEY / TURNSTILE_SECRET  Cloudflare Turnstile on the signup form (off when unset)
   SIGNUPS_PER_HOUR  new accounts per client IP and hour (default 5)
   DONATE_URL     https link for the Donate button (e.g. https://paypal.me/yourname); hidden when unset
+  GEOIP_DB       path to a GeoLite2-Country.mmdb; shows each user's login country in the admin UI.
+                 IP addresses are never stored, only the two-letter country.
+  CF_COUNTRY     1 = take the login country from Cloudflare's CF-IPCountry header instead (only
+                 when the site is behind Cloudflare and TRUSTED_PROXY=1, otherwise it can be spoofed)
+  LOGIN_HISTORY_DAYS  how long login events (time, country, browser) are kept (default 90)
   TRUSTED_PROXY  1 = take the client IP from X-Forwarded-For (only behind your own proxy)
   MAX_MODELS_PER_USER / MAX_DISK_MB_PER_USER  limits for non-admins (default 100 / 500)
   TINKERCAD_MAX_MB  size limit for Tinkercad import (default 25); larger files get a simplified copy
@@ -134,6 +139,8 @@ DONATE_URL = os.environ.get("DONATE_URL", "").strip()
 if not DONATE_URL.startswith("https://"):
     DONATE_URL = ""
 TRUSTED_PROXY = os.environ.get("TRUSTED_PROXY") == "1"
+GEOIP_DB = os.environ.get("GEOIP_DB", "")  # MaxMind GeoLite2-Country.mmdb, optional
+CF_COUNTRY = TRUSTED_PROXY and os.environ.get("CF_COUNTRY") == "1"
 # per user: model builds (create/update/revert/duplicate) and the editor's node previews per
 # minute, and how many of them run at the same time (more wait for a free slot)
 BUILDS_PER_MINUTE = int(os.environ.get("BUILDS_PER_MINUTE", "20"))
@@ -921,8 +928,35 @@ def _mcp_user(ctx: Context | None) -> dict:
     return user
 
 
-def _set_session(resp: Response, user: dict) -> Response:
-    resp.set_cookie(SESSION_COOKIE, oauth.state.create_session(user["id"]), max_age=SESSION_TTL,
+_geoip = None
+
+
+def _country(request) -> str | None:
+    """Two-letter country of the client: Cloudflare's CF-IPCountry when behind it (CF_COUNTRY),
+    otherwise a lookup in the MaxMind GeoLite2 Country database at GEOIP_DB, if configured. The
+    IP address itself is not kept."""
+    global _geoip
+    if CF_COUNTRY:
+        c = request.headers.get("cf-ipcountry", "").strip().upper()
+        if len(c) == 2 and c.isalpha() and c not in ("XX", "T1"):
+            return c
+    if not GEOIP_DB:
+        return None
+    try:
+        if _geoip is None:
+            import maxminddb
+            _geoip = maxminddb.open_database(GEOIP_DB)
+        rec = _geoip.get(_client_ip(request)) or {}
+        return (rec.get("country") or {}).get("iso_code")
+    except Exception:  # noqa: BLE001 - tracking must never break a login
+        log.warning("GeoIP lookup failed", exc_info=True)
+        return None
+
+
+def _set_session(resp: Response, user: dict, request=None) -> Response:
+    meta = {"country": _country(request), "user_agent": request.headers.get("user-agent", "")} \
+        if request is not None else {}
+    resp.set_cookie(SESSION_COOKIE, oauth.state.create_session(user["id"], **meta), max_age=SESSION_TTL,
                     httponly=True, samesite="lax", secure=PUBLIC_URL.startswith("https"))
     resp.delete_cookie("stl_token")  # the old cookie held the raw token
     return resp
@@ -990,7 +1024,7 @@ class Auth(BaseHTTPMiddleware):
             # login via ?token= : set a session cookie and remove the token from the URL
             rest = urlencode([(k, v) for k, v in request.query_params.multi_items() if k != "token"])
             return _set_session(RedirectResponse(path + (f"?{rest}" if rest else ""), status_code=303),
-                                user)
+                                user, request)
         return await call_next(request)
 
 
@@ -1082,7 +1116,7 @@ async def passkey_login_verify(request):
                      ip=_client_ip(request))
         return JSONResponse({"error": f"passkey verification failed: {e}"}, status_code=400)
     oauth.state.touch_passkey(pk["id"], v.new_sign_count)
-    return _set_session(JSONResponse({"ok": True}), oauth.state.user(pk["user_id"]))
+    return _set_session(JSONResponse({"ok": True}), oauth.state.user(pk["user_id"]), request)
 
 
 async def passkey_register_options(request):
@@ -1245,7 +1279,7 @@ async def signup_verify(request):
         await _run(st.delete_user, user["id"])
         return JSONResponse({"error": "this passkey already belongs to an account - log in instead"},
                             status_code=409)
-    return _set_session(JSONResponse({"ok": True, "user": _user_view(user)}), user)
+    return _set_session(JSONResponse({"ok": True, "user": _user_view(user)}), user, request)
 
 
 # ---- sign in with Google, GitHub or Apple (see sso.py)
@@ -1359,7 +1393,7 @@ async def sso_callback(request):
     if flow["link"]:
         security_log("identity_linked", user=flow["link"], provider=name)
     resp = RedirectResponse(nxt, status_code=303)
-    return resp if flow["link"] else _set_session(resp, user)
+    return resp if flow["link"] else _set_session(resp, user, request)
 
 
 async def api_auth_identity(request):
@@ -1423,15 +1457,22 @@ async def page_admin_users(_):
 async def api_admin_users(_):
     def collect():
         out = []
+        stats = oauth.state.login_stats()
         for u in oauth.state.users():
             lib = Lib(u)
             out.append({**{k: u[k] for k in ("id", "display_name", "email", "role", "bootstrap",
                                               "disabled", "created", "last_login", "passkeys",
                                               "providers", "tokens", "apps")},
+                        **(stats.get(u["id"]) or {"logins": 0, "seconds": 0, "countries": []}),
                         "models": len(store.list(u["id"], everyone=False)),
                         "disk_mb": round(lib.disk_bytes() / 1e6, 1)})
         return out
     return JSONResponse({"users": await _run(collect), "signup": SIGNUP})
+
+
+async def api_admin_user_logins(request):
+    rows = await _run(oauth.state.recent_logins, request.path_params["id"], 20)
+    return JSONResponse({"logins": rows})
 
 
 async def api_admin_user(request):
@@ -1856,6 +1897,7 @@ app = Starlette(
         Route("/admin/design", page_admin_design),
         Route("/admin/users", page_admin_users),
         Route("/api/admin/users", api_admin_users),
+        Route("/api/admin/users/{id}/logins", api_admin_user_logins),
         Route("/api/admin/users/{id}", api_admin_user, methods=["POST", "DELETE"]),
         Route("/api/settings", api_settings, methods=["GET", "POST"]),
         Route("/api/recheck", api_recheck, methods=["POST"]),
