@@ -127,7 +127,12 @@ mcp = FastMCP(
         "{'wall': 3} or {'/root/children/1/d': 8}) until the user is satisfied. Use "
         "variables in 'vars' for dimensions likely to be adjusted, and the templates (screw_hole, "
         "heat_insert, boss, snap_hook, hinge, text, and screw/nut/threaded_hole for real printed "
-        "threads …) instead of building such things yourself. "
+        "threads …) instead of building such things yourself. For organic or parametric forms "
+        "(vases, knobs, grips, ribbed or wavy surfaces, terrain, pipes, springs, handles, "
+        "transitions between outlines) use the expression shapes radial (radius = expression of "
+        "z and angle), heightmap (z = expression of x, y), sweep (profile along a path/helix/"
+        "spline with twist/taper) and loft (between outlines at different heights) – they cover "
+        "what would otherwise need a script model. "
         "get_model shows the recipe and the user's comments: they are points the user "
         "clicked in the 3D view, with near_nodes = the nodes in the recipe that are closest. "
         "Resolve them with update_model(..., resolves=[id]) or answer with reply_to_comment. "
@@ -317,7 +322,8 @@ async def create_enclosure(
 async def create_from_script(name: str, code: str, description: str = "", ctx: Context = None) -> dict:
     """Advanced: Python that sets `result` (trimesh.Trimesh), `parts` (list -> union) or
     `parts` (dict name->mesh). Available: trimesh, numpy as np, g (blk/cyl/union/diff).
-    Requires ALLOW_SCRIPT=1. Prefer create_model – it is safe and easier to adjust."""
+    Requires ALLOW_SCRIPT=1. Prefer create_model – it is safe and easier to adjust, and its
+    radial/heightmap/sweep/loft shapes cover organic and parametric forms."""
     lib = _lib(ctx)
     lib.ensure_room(new_model=True)
     if lib.user["role"] != "admin":

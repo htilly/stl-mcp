@@ -22,6 +22,9 @@ with a web interface for viewing, rotating and browsing the models.
 - **Templates**: screw holes (M2–M8, countersunk/cylindrical, nut trap), heat inserts, screw bosses,
   printable screws, nuts and threaded holes with real ISO threads,
   snap hooks, hinges and text.
+- **Expression shapes**: `radial`, `heightmap`, `sweep` and `loft` build organic and parametric
+  forms (vases, knobs, wavy surfaces, pipes, springs, outline transitions) from safe per-vertex
+  expressions, so script models are not needed for them.
 
 ## The idea: models are recipes, not files
 
@@ -216,7 +219,20 @@ page). It requires `PUBLIC_URL` on https (or localhost); `OAUTH=0` turns it off.
 }
 ```
 - Shapes: `box` (with `radius`), `cylinder`, `cone`, `sphere`, `tube`, `torus`, `wedge`,
-  `extrude` (polygon/circle/rectangle profile, `twist`, `scale_top`) and `revolve`
+  `extrude` (polygon/circle/rectangle/spline profile, `twist`, `scale_top`) and `revolve`.
+  Profiles can be combined with `{"op": "union|difference|intersection|hull", "profiles": [...]}`
+  and moved with `translate`/`rotate`.
+- Expression shapes (`fnshapes.py`, built directly as meshes):
+  - `radial`: radius as an expression of height and angle,
+    `{"shape": "radial", "h": 60, "r": "=20+6*sin(t*180)+1.5*cos(8*a)"}` (z, a in degrees, t = z/h)
+  - `heightmap`: a solid from z=0 up to `z` = expression of x, y over `size: [sx, sy]`
+  - `sweep`: a 2D profile along a path (points, `spline`, `arc`, `helix`, `bezier`, `closed`)
+    with rotation-minimizing frames, mitred corners, `twist` and `taper` (number or expression of t)
+  - `loft`: between outlines at increasing z (`sections: [{z, profile, offset?, rotate?}]`, `smooth`)
+
+  Per-vertex expressions are parsed once and evaluated vectorized with numpy (same whitelist as
+  other expressions, plus `atan2`, `exp`, `log`, `clamp`, `lerp`, `smoothstep`, `noise`). A shape
+  may have at most 2 million triangles.
 - Templates: `screw_hole`, `heat_insert`, `nut_trap` (cutting: the surface is at z=0, going downward),
   `boss`, `snap_hook`, `hinge` (print-in-place or with a separate pin) and `text`
   (DejaVu Sans, raised or engraved). Printable `screw`, `nut` and `threaded_hole` have a real
