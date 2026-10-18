@@ -199,6 +199,7 @@ function renderAuth() {
   $("dangersec").hidden = !auth.login_required || u.bootstrap;
   $("pklist").innerHTML = auth.passkeys.map((p) => `<li>
     <span><b>${esc(p.name)}</b> <span class="hint">added ${ago(p.created)}${p.last_used ? `, used ${ago(p.last_used)}` : ""}</span></span>
+    <button class="sm" data-rename="${esc(p.id)}" data-name="${esc(p.name)}">Rename</button>
     <button class="danger sm" data-pk="${esc(p.id)}">Remove</button></li>`).join("")
     || `<li class="hint">No passkeys yet.</li>`;
   $("appsec").hidden = !auth.oauth && !auth.login_required;
@@ -265,6 +266,16 @@ $("renamebtn").addEventListener("click", async () => {
   loadAuth();
 });
 $("pklist").addEventListener("click", async (e) => {
+  const rid = e.target.dataset.rename;
+  if (rid) {
+    const name = (prompt("Name this passkey", e.target.dataset.name) || "").trim();
+    if (!name || name === e.target.dataset.name) return;
+    try {
+      await api(`/api/auth/passkeys/${encodeURIComponent(rid)}`, { method: "PATCH", body: { name } });
+      loadAuth();
+    } catch (err) { pkerr.textContent = err.message; pkerr.hidden = false; }
+    return;
+  }
   const id = e.target.dataset.pk;
   if (!id || !confirm("Remove this passkey? You can no longer log in with it.")) return;
   try {

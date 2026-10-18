@@ -875,6 +875,17 @@ async def api_auth(request):
 
 async def api_auth_passkey(request):
     user, st = _user(request), oauth.state
+    if request.method == "PATCH":
+        try:
+            name = str((await request.json()).get("name") or "").strip()
+        except ValueError:
+            name = ""
+        if not name:
+            return JSONResponse({"error": "give the passkey a name"}, status_code=400)
+        pk = st.rename_passkey(request.path_params["id"], user["id"], name)
+        if not pk:
+            return JSONResponse({"error": "no such passkey"}, status_code=404)
+        return JSONResponse({"ok": True, "passkey": _passkey_view(pk)})
     mine = st.passkeys(user["id"])
     if (not user["bootstrap"] and not st.identities(user["id"])
             and [p["id"] for p in mine] == [request.path_params["id"]]):
@@ -1490,7 +1501,7 @@ app = Starlette(
         Route("/api/auth/tokens", api_auth_tokens, methods=["POST"]),
         Route("/api/auth/tokens/{id}", api_auth_token, methods=["DELETE"]),
         Route("/api/auth", api_auth),
-        Route("/api/auth/passkeys/{id}", api_auth_passkey, methods=["DELETE"]),
+        Route("/api/auth/passkeys/{id}", api_auth_passkey, methods=["PATCH", "DELETE"]),
         Route("/api/auth/clients/{id}", api_auth_client, methods=["DELETE"]),
         Route("/oauth/consent", oauth_consent, methods=["GET", "POST"]),
         *OAUTH_ROUTES,

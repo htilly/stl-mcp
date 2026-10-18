@@ -201,6 +201,8 @@ class AuthState:
         return self.db.all(
             f"SELECT {_USER}, "
             "(SELECT count(*) FROM passkeys p WHERE p.user_id = u.id) AS passkeys, "
+            "(SELECT coalesce(array_agg(p.name ORDER BY p.created), '{}') FROM passkeys p "
+            " WHERE p.user_id = u.id) AS passkey_names, "
             "(SELECT coalesce(array_agg(provider ORDER BY provider), '{}') FROM identities i "
             " WHERE i.user_id = u.id) AS providers, "
             "(SELECT count(*) FROM personal_tokens t WHERE t.user_id = u.id) AS tokens, "
@@ -273,6 +275,10 @@ class AuthState:
     def touch_passkey(self, cred_id: str, sign_count: int):
         self.db.execute("UPDATE passkeys SET sign_count = %s, last_used = %s WHERE id = %s",
                         (sign_count, time.time(), cred_id))
+
+    def rename_passkey(self, cred_id: str, uid: str, name: str) -> dict | None:
+        return self.db.one("UPDATE passkeys SET name = %s WHERE id = %s AND user_id = %s RETURNING *",
+                           ((name or "").strip()[:60] or "passkey", cred_id, uid))
 
     def delete_passkey(self, cred_id: str, uid: str) -> bool:
         return self.db.execute("DELETE FROM passkeys WHERE id = %s AND user_id = %s",
