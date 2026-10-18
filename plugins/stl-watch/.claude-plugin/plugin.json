@@ -1,0 +1,8 @@
+{
+  "name": "stl-watch",
+  "version": "0.1.0",
+  "description": "Wakes Claude Code the moment you comment on a model in the autosmith web UI.",
+  "author": { "name": "Henrik Tilly" },
+  "repository": "https://github.com/htilly/stl-mcp",
+  "experimental": { "monitors": "./monitors/monitors.json" }
+}

@@ -1,0 +1,7 @@
+[
+  {
+    "name": "stl-watch",
+    "command": "exec python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/stl_watch.py\" watch --if-signed-in",
+    "description": "New comments on your stl-mcp models"
+  }
+]

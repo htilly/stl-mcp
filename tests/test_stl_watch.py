@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -185,3 +186,22 @@ def test_environment_token_overrides_login(oauth_env, monkeypatch):
     stl_watch.cmd_login()
     monkeypatch.setenv("STL_MCP_TOKEN", "from-env")
     assert stl_watch.token() == "from-env"
+
+
+def test_if_signed_in_exits_silently_without_credentials(tmp_path):
+    # no `security` on PATH, so a real keychain token on the dev machine can not leak in
+    env = {"PATH": str(tmp_path), "HOME": str(tmp_path), "STL_MCP_URL": "http://127.0.0.1:9"}
+    r = subprocess.run([sys.executable, SPEC.origin, "watch", "--if-signed-in"],
+                       env=env, capture_output=True, text=True, timeout=20)
+    assert r.returncode == 0 and r.stdout == "" and r.stderr == ""
+
+
+def test_plugin_manifests_point_at_real_files():
+    root = Path(__file__).resolve().parent.parent
+    plugin = root / "plugins" / "stl-watch"
+    manifest = json.loads((plugin / ".claude-plugin" / "plugin.json").read_text())
+    monitors = json.loads((plugin / manifest["experimental"]["monitors"]).read_text())
+    assert all(m["name"] and m["command"] and m["description"] for m in monitors)
+    assert "scripts/stl_watch.py" in monitors[0]["command"] and (plugin / "scripts" / "stl_watch.py").exists()
+    market = json.loads((root / ".claude-plugin" / "marketplace.json").read_text())
+    assert (root / market["plugins"][0]["source"] / ".claude-plugin" / "plugin.json").exists()
