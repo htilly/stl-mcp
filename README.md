@@ -483,7 +483,10 @@ How a sign-in finds its account: an identity that is already linked logs in to i
 **verified** email equal to an account's email links to that account; else a new account is
 created (only with `SIGNUP=1`, within the per-IP limit). Emails are only ever taken from verified
 sign-ins or `ADMIN_EMAILS`, never typed in, so nobody can claim someone else's address in advance.
-A verified email in `ADMIN_EMAILS` makes the account an admin. In the account dialog users link
+A verified email in `ADMIN_EMAILS` makes the account an admin once; after that roles are managed
+on the users page, so a demotion sticks (also after the account is deleted and the address
+reused). A sign-in is never linked by email to an admin who can already log in: whoever controls
+that mailbox at some provider would get admin, so admins link providers in the account dialog. In the account dialog users link
 or unlink providers; the last way to log in cannot be removed.
 
 ## Security

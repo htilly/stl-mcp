@@ -322,3 +322,44 @@ def test_sso_browser_cookie_is_short_lived_and_scoped(client):
     cookie = r.headers["set-cookie"]
     assert cookie.startswith(f"{server.SSO_COOKIE}=") and "HttpOnly" in cookie
     assert "Path=/auth/sso/" in cookie and "Max-Age=600" in cookie
+
+
+def test_admin_emails_promote_only_once(client, fake, monkeypatch):
+    """A demoted ADMIN_EMAILS user stays demoted: the next sign-in does not promote them again."""
+    monkeypatch.setattr(server, "ADMIN_EMAILS", ["boss@example.com"])
+    sign_in_google(client, fake, email="boss@example.com")
+    boss = me(client)["user"]
+    assert boss["role"] == "admin"
+    server.oauth.state.set_role(boss["id"], "member")
+    client.cookies.clear()
+    sign_in_google(client, fake, code="c2", email="boss@example.com")
+    assert me(client)["user"]["role"] == "member"
+
+
+def test_admin_emails_grant_survives_account_deletion(client, fake, monkeypatch):
+    """A recycled address must not be promoted again after the account was deleted."""
+    monkeypatch.setattr(server, "ADMIN_EMAILS", ["boss@example.com"])
+    sign_in_google(client, fake, email="boss@example.com")
+    server.oauth.state.delete_user(me(client)["user"]["id"])
+    client.cookies.clear()
+    sign_in_google(client, fake, code="c2", sub="g-new", email="boss@example.com")
+    assert me(client)["user"]["role"] == "member"
+
+
+def test_verified_email_does_not_take_over_an_admin_who_can_log_in(client, fake):
+    """Losing an admin's mailbox at some provider must not hand out the admin account."""
+    admin = server._admin()
+    st = server.oauth.state
+    st.set_email(admin["id"], "boss@example.com")
+    st.add_identity(admin["id"], "github", "gh-boss", "boss@example.com")
+    r = sign_in_google(client, fake, sub="g-attacker", email="boss@example.com")
+    assert "admin+account" in r.headers["location"] and server.SESSION_COOKIE not in r.cookies
+    assert st.identity_user("google", "g-attacker") is None
+
+
+def test_fresh_admin_without_a_way_in_still_links_by_email(client, fake):
+    """First-time setup: the bootstrap admin (only MCP_TOKEN so far) signs in with Google."""
+    admin = server._admin()
+    server.oauth.state.set_email(admin["id"], "boss@example.com")
+    sign_in_google(client, fake, email="boss@example.com")
+    assert me(client)["user"]["id"] == admin["id"]

@@ -10,7 +10,8 @@ Environment variables:
   MCP_TOKEN      break-glass admin credential (bearer, or ?token= as a login link for pages);
                  without it every request runs as the admin user (local single-user mode: only
                  localhost, no SIGNUP/UI_PUBLIC/FILES_PUBLIC/ALLOW_SCRIPT)
-  ADMIN_EMAILS   comma-separated emails that are admins (the first one is the bootstrap admin)
+  ADMIN_EMAILS   comma-separated emails made admin on their first verified sign-in (once; the
+                 first one is the bootstrap admin)
   OAUTH          0 = disable the OAuth server for MCP clients like claude.ai (default on;
                  needs PUBLIC_URL on https or localhost)
   UI_PUBLIC      1 = web UI + files readable without a token (changes require a token)
@@ -1293,7 +1294,14 @@ def _sso_account(ident: sso.Identity, link: str | None, ip: str) -> tuple[dict |
         user = owner
     elif ident.email and (match := st.user_by_email(ident.email)):
         # a verified email that an account already has: the same person (emails only ever come
-        # from verified sign-ins or from ADMIN_EMAILS, never from what someone typed)
+        # from verified sign-ins or from ADMIN_EMAILS, never from what someone typed). Not for an
+        # admin who can already log in: whoever controls that mailbox at some provider would get
+        # admin. They link the provider from the account dialog instead.
+        if match["role"] == "admin" and st.has_way_in(match["id"]):
+            security_log("login_failed", method=ident.provider, user=match["id"],
+                         reason="auto-link to an admin account refused")
+            return None, (f"this email belongs to an admin account - log in with your passkey and "
+                          f"link {label} in the account dialog")
         st.add_identity(match["id"], ident.provider, ident.subject, ident.email)
         security_log("identity_linked", user=match["id"], provider=ident.provider, by="verified email")
         user = match
@@ -1307,7 +1315,10 @@ def _sso_account(ident: sso.Identity, link: str | None, ip: str) -> tuple[dict |
         st.add_identity(user["id"], ident.provider, ident.subject, ident.email)
     if user["disabled"]:
         return None, "this account is disabled"
-    if ident.email and ident.email.lower() in ADMIN_EMAILS and user["role"] != "admin":
+    # ADMIN_EMAILS promotes an email once; after that, roles are managed on the users page and a
+    # demotion sticks (an already-admin account only records the grant).
+    if ident.email and ident.email.lower() in ADMIN_EMAILS and st.claim_admin_grant(ident.email, user["id"]) \
+            and user["role"] != "admin":
         security_log("role_changed", user=user["id"], role="admin", by="ADMIN_EMAILS")
         st.set_role(user["id"], "admin")
         user = st.user(user["id"])
