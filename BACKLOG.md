@@ -22,9 +22,9 @@ Today `auth.json` holds passkeys, OAuth clients and tokens with no owner, and ev
 guarded by one shared `MCP_TOKEN`. This phase adds real users.
 
 ### Users and roles
-- [ ] **User model** in `auth.py`/`auth.json`: `id`, `name`, `email` (optional), `role`, `created`,
+- [x] **User model** (done: Postgres, PR #11) in `auth.py`/`auth.json`: `id`, `name`, `email` (optional), `role`, `created`,
   `last_login`, `disabled`. Passkeys and OAuth tokens get a `user_id`. (M)
-- [ ] **Roles:**
+- [x] **Roles** (admin/member done, PRs #11-#12; visibility/public models still open below):
   - `admin`: manage users, see all models and all stats, change settings (`/admin`, print-check
     settings), delete any model.
   - `member`: create, edit, comment on and delete their own models; see their own usage.
@@ -32,10 +32,10 @@ guarded by one shared `MCP_TOKEN`. This phase adds real users.
     (and back to private). Public models are readable by every logged-in user and can be
     **copied** into their own library. See "Public models and copying" below.
   - `MCP_TOKEN` stays as a bootstrap/break-glass admin credential, not a normal login.
-- [ ] **Onboarding by invite**: admin creates an invite link (single use, expiry, role), the invited
-  user registers a passkey. No open self-signup for the test. (M)
-- [ ] **Migration:** existing models and passkeys are assigned to the first admin on first start. (S)
-- [ ] **Ownership and enforcement**: `owner` on each model; filter `list_models`, `/api/models`,
+- [x] ~~Onboarding by invite~~ **Replaced by open signup** (PRs #13-#14): passkey or Google/GitHub/
+  Apple sign-in, Cloudflare Turnstile, a per-IP limit, behind `SIGNUP=1`. (M)
+- [x] **Migration** (done, PRs #11-#12): existing models and passkeys are assigned to the first admin on first start. (S)
+- [x] **Ownership and enforcement** (done, PR #12; `tests/test_isolation.py`): `owner` on each model; filter `list_models`, `/api/models`,
   `/files/...`, `/preview.png`, comments and events by owner and role. MCP tool calls resolve
   the user from the OAuth token, so a member's Claude only sees that member's models. Test with
   two users that neither can read, change or delete the other's models, files or previews. (L)
@@ -57,9 +57,10 @@ guarded by one shared `MCP_TOKEN`. This phase adds real users.
     readable but not writable by others; copy produces an independent model.
   - Abuse: let admins unpublish any model, and add a report link or at least an admin list of
     public models. Count publishes and copies in the stats below.
-- [ ] **Admin UI** on `/admin`: list users, change role, disable, revoke their passkeys and
-  OAuth clients, create invites. (M)
-- [ ] **Per-user limits** (feeds phase 1): max models, disk quota and rate limits keyed by user. (M)
+- [x] **Admin UI** (done, PR #15): `/admin/users` lists users with models, storage and ways in;
+  change role, disable, log out everywhere, delete. (M)
+- [x] **Per-user limits**, partly (PR #13): max models and disk quota per user. Rate limits on
+  heavy endpoints are still open in phase 1. (M)
 
 ### Usage stats and logging
 - [ ] **Event log** (append-only JSONL or SQLite in `/data`): `login` (success and failure), `logout`,
@@ -76,7 +77,8 @@ guarded by one shared `MCP_TOKEN`. This phase adds real users.
   - Store the country code only, not the raw IP, or at most a truncated/hashed IP. (S-M)
 - [ ] **Stats view in `/admin`**: table of users with logins, last seen, country, models; simple
   charts for logins per day and models per user. (M)
-- [ ] **Privacy note** (GDPR, users are likely in the EU): tell testers what is logged and why,
+- [x] **Privacy note**, partly (PR #13: `/privacy` and account deletion; the retention period
+  waits for the event log) (GDPR, users are likely in the EU): tell testers what is logged and why,
   set a retention period for the event log (for example 90 days), and let an admin delete a
   user together with their data. (S)
 

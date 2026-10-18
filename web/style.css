@@ -502,6 +502,11 @@ ol.steps code { overflow-wrap: anywhere; }
 .admin .actions { display: flex; gap: var(--s2); flex-wrap: wrap; align-items: center; position: sticky; bottom: 0;
   padding: var(--s3) 0; background: var(--aluminium); }
 .admin .msg { font-size: 13px; color: var(--scribe); }
+.admin .user h2 { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+.admin .user .help { margin: 0 0 var(--s3); color: var(--scribe); font-size: var(--t-sm); }
+.admin .user .tb { margin-bottom: var(--s3); }
+.admin .user .acts { padding-bottom: var(--s2); }
+.admin .user.off { opacity: .7; }
 .admin .msg.err { color: var(--fault); }
 
 /* ---------------------------------------------------------------- small screens */

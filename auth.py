@@ -196,6 +196,28 @@ class AuthState:
         return self.db.execute("DELETE FROM identities WHERE user_id = %s AND provider = %s",
                                (uid, provider)) > 0
 
+    def users(self) -> list[dict]:
+        """Every user with counts of their ways in (for the admin list)."""
+        return self.db.all(
+            f"SELECT {_USER}, "
+            "(SELECT count(*) FROM passkeys p WHERE p.user_id = u.id) AS passkeys, "
+            "(SELECT coalesce(array_agg(provider ORDER BY provider), '{}') FROM identities i "
+            " WHERE i.user_id = u.id) AS providers, "
+            "(SELECT count(*) FROM personal_tokens t WHERE t.user_id = u.id) AS tokens, "
+            "(SELECT count(DISTINCT client_id) FROM oauth_tokens o WHERE o.user_id = u.id "
+            " AND o.expires_at > extract(epoch FROM now())) AS apps "
+            "FROM users u ORDER BY u.created")
+
+    def set_disabled(self, uid: str, disabled: bool) -> bool:
+        return self.db.execute("UPDATE users SET disabled = %s WHERE id = %s AND NOT bootstrap",
+                               (disabled, uid)) > 0
+
+    def revoke_logins(self, uid: str):
+        """Logs the user out everywhere: web sessions, connected apps and personal tokens."""
+        with self.db.tx() as c:
+            for table in ("sessions", "oauth_tokens", "personal_tokens"):
+                c.execute(f"DELETE FROM {table} WHERE user_id = %s", (uid,))
+
     def touch_login(self, uid: str):
         self.db.execute("UPDATE users SET last_login = %s WHERE id = %s", (time.time(), uid))
 
