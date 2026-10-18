@@ -1,4 +1,7 @@
-# Design system
+# Design system: autosmith
+
+autosmith.eu: *STL, made by AI.* The name pairs the forge (a smith) with automation; the mark is an anvil
+built from the triangles an STL file is made of, with one ember spark.
 
 The web UI is a workbench for parts that Claude builds and you print. It should read like a
 measuring tool: calm, exact, and quiet enough that the model on screen is the loudest thing.
@@ -38,6 +41,7 @@ dark set applies automatically (`prefers-color-scheme`) or with `<html data-them
 | `--rule-strong` | `#aab3bd` | `#46505c` | Hovered borders, inactive dots |
 | `--layout` | `#2340c0` | `#8197ff` | Accent: primary action, selection, focus. Machinist's layout blue |
 | `--layout-wash` | `#e4e8fa` | `#1e2546` | Selected rows, active toggles, banners |
+| `--ember` | `#e8782a` | `#ff9a55` | Brand spark in the logo. Never used for UI state |
 | `--pei` | `#e2ad45` | `#e8b552` | Comments and pins. The gold of a PEI build plate |
 | `--fault` | `#b8322a` | `#f0735f` | Print-check warnings, destructive actions, errors |
 | `--sound` | `#2a7d4f` | `#52c486` | Live connection, current revision |
@@ -123,7 +127,7 @@ gives the 14 px size. An icon-only button needs `class="icon"` and an `aria-labe
 
 | Id | Meaning |
 |---|---|
-| `i-mark` | The product mark (isometric block with a blue top face) |
+| `i-mark` | The autosmith mark: a faceted anvil with an ember spark (64 × 64, multi-tone) |
 | `i-search` | Search |
 | `i-key` | Passkeys and login security |
 | `i-settings` | Admin: print-check settings |
@@ -141,7 +145,16 @@ gives the 14 px size. An icon-only button needs `class="icon"` and an `aria-labe
 New icons follow the same grid: draw inside a 2 px margin, strokes only, no fills (the mark is the
 one exception), and keep each to a few paths.
 
-The browser tab icon is [`web/favicon.svg`](../web/favicon.svg): the mark with fixed colours.
+## Brand
+
+Files in [`web/brand/`](../web/brand): `mark.svg` (light/dark aware), `logo.svg` / `logo-dark.svg`
+(lockup with `autosmith.eu`, text as paths), `icon.svg` (app tile), `og-image.svg|png` (1200 × 630 social
+card), PNG app icons, `apple-touch-icon.png` and `site.webmanifest`. The browser tab icon is
+[`web/favicon.svg`](../web/favicon.svg) (same as `mark.svg`) with `favicon.ico` as fallback.
+
+- Wordmark: lowercase **auto** (weight 500) + **smith** (800) in Archivo at 112% width. `.eu` is set in `--scribe`, only in lockups.
+- Clear space: the height of the spark on every side. Minimum mark size 16 px.
+- The mark's facets are one blue at ten opacities; do not recolour them per state. The spark is the only `--ember` use.
 
 ## Components
 
@@ -161,8 +174,11 @@ The browser tab icon is [`web/favicon.svg`](../web/favicon.svg): the mark with f
 | `.params` | Parameter editor: mono name, right-aligned value; changed values get the wash |
 | `.pin`, `.cpop`, `.cmt` | Comment pin on the model, the popover to write one, a comment in the list |
 | `.hud`, `.toast` | Viewport overlays: overall size (bottom left), notifications (bottom right) |
-| `.gate .panel` | Centred panel for login and app consent |
-| `dialog` | Modal: passkeys and connected apps |
+| `.gate .panel` | Centred panel for login, signup, app consent and the privacy page (`.prose`) |
+| `.gate .or` | Divider with a word in it ("New here?") between two ways in |
+| `ol.start` | Getting-started checklist in the empty library; finished steps get `.done` |
+| `.secret` | A value shown only once (a new personal token), with a copy button |
+| `dialog` | Modal: the account (name, passkeys, connecting Claude, apps, tokens, deletion) |
 | `.tabs` | Links between admin pages; the current one has `aria-current="page"` |
 | `.admin` | Settings page layout |
 

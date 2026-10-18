@@ -3,20 +3,27 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>STL library</title>
+<title>autosmith · STL, made by AI</title>
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/static/favicon.ico" sizes="48x48">
+<link rel="apple-touch-icon" href="/static/brand/apple-touch-icon.png">
+<link rel="manifest" href="/static/brand/site.webmanifest">
+<meta name="theme-color" content="#14181f">
+<meta property="og:site_name" content="autosmith.eu">
+<meta property="og:title" content="autosmith: STL, made by AI">
+<meta property="og:image" content="/static/brand/og-image.png">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <header class="top">
-  <h1 class="wordmark"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-mark"/></svg><span class="name">STL library</span></h1>
+  <h1 class="wordmark"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-mark"/></svg><span class="name">auto<b>smith</b></span></h1>
   <span class="count" id="count"></span>
   <div class="grow lib-only"></div>
   <label class="search"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-search"/></svg>
     <input type="search" id="q" placeholder="Search models" autocomplete="off" aria-label="Search models"></label>
   <span class="live" id="live" title="Updates automatically when Claude changes something"><span class="dot"></span><span class="label">Live</span></span>
-  <a class="btn icon quiet" href="/admin" title="Admin: print-check settings and design system" aria-label="Admin"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-settings"/></svg></a>
-  <button id="secbtn" class="icon quiet" hidden title="Passkeys, connected apps and logout" aria-label="Security"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-key"/></svg></button>
+  <a class="btn icon quiet" id="adminlink" hidden href="/admin" title="Admin: print-check settings and design system" aria-label="Admin"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-settings"/></svg></a>
+  <button id="secbtn" class="icon quiet" hidden title="Account: passkeys, connecting Claude, tokens, logout" aria-label="Account"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-key"/></svg></button>
 </header>
 <main class="lib">
   <div class="banner" id="pkbanner" hidden>
@@ -27,13 +34,27 @@
   </div>
   <div class="grid" id="grid"></div>
   <div class="empty" id="empty" hidden>
-    <h2>No models yet</h2>
-    <p>Ask Claude for a part in plain words, for example:</p>
-    <blockquote>Make a box 80 × 50 × 25 mm with a lid and a USB-C hole on the short side.</blockquote>
-    <p>It shows up here as soon as Claude builds it, and updates every time Claude changes it.</p>
+    <h2>Get started</h2>
+    <p>Claude builds the models; this page shows them, live, with every revision.</p>
+    <ol class="start">
+      <li class="done" id="st-account"><b>Account created</b><span id="st-who"></span></li>
+      <li id="st-passkey" hidden><b>Add a passkey</b>So you can log in with one tap, and approve Claude
+        when you connect it.<div class="row"><button class="primary sm" id="pkadd3">Add passkey</button></div></li>
+      <li id="st-connect"><b>Connect Claude</b>Add this library to claude.ai, ChatGPT or Claude Code.
+        <div class="row"><button class="primary sm" id="connectbtn">Show me how</button></div></li>
+      <li><b>Ask for a part</b>In plain words, for example:
+        <blockquote>Make a box 80 × 50 × 25 mm with a lid and a USB-C hole on the short side.</blockquote>
+        It shows up here as soon as Claude builds it, and updates every time Claude changes it.</li>
+    </ol>
   </div>
 </main>
 <dialog id="sec">
+  <div class="sec">
+    <h2>Account</h2>
+    <div class="row"><input type="text" id="myname" maxlength="80" aria-label="Your name" style="flex:1">
+      <button id="renamebtn">Save</button></div>
+    <p class="hint" id="whoami" style="margin-top:8px"></p>
+  </div>
   <div class="sec">
     <h2>Passkeys</h2>
     <ul class="plain" id="pklist"></ul>
@@ -41,29 +62,68 @@
       <button class="primary" id="pkadd2">Add passkey</button></div>
     <p class="warn" id="pkerr" hidden></p>
   </div>
-  <div class="sec" id="appsec" hidden>
-    <h2>Connected apps</h2>
-    <ul class="plain" id="applist"></ul>
+  <div class="sec" id="appsec">
+    <h2>Connect Claude</h2>
+    <p class="hint">Your library's address for AI apps:</p>
+    <span class="row"><code class="mono" id="mcpurl"></code><button id="copymcp" class="sm">Copy</button></span>
     <details id="howto">
-      <summary>How to connect claude.ai</summary>
+      <summary>claude.ai and the Claude apps</summary>
       <ol class="steps">
         <li>In claude.ai, open <b>Settings → Connectors</b> and click <b>Add custom connector</b>.</li>
-        <li>Name it <code class="mono">STL library</code> and paste this URL:
-          <span class="row"><code class="mono" id="mcpurl"></code><button id="copymcp" class="sm">Copy</button></span>
-          Leave the advanced settings empty and click <b>Add</b>.</li>
+        <li>Name it <code class="mono">autosmith</code>, paste the address above, leave the advanced
+          settings empty and click <b>Add</b>.</li>
         <li>Click <b>Connect</b>. A page from this library opens; log in with your passkey if asked.</li>
         <li>Check that it sends you back to <b>https://claude.ai</b>, then click <b>Allow</b>.</li>
         <li>In a chat, turn the connector on in the tools menu and ask Claude for a model.</li>
       </ol>
     </details>
+    <details id="howto-chatgpt">
+      <summary>ChatGPT</summary>
+      <ol class="steps">
+        <li>In ChatGPT, open <b>Settings → Apps &amp; Connectors → Advanced settings</b> and turn on
+          <b>Developer mode</b> (on some plans an admin has to allow it).</li>
+        <li>Click <b>Create</b>, name it <code class="mono">autosmith</code>, paste the address above
+          and choose <b>OAuth</b> as authentication. Leave client id and secret empty.</li>
+        <li>A page from this library opens: log in with your passkey and click <b>Allow</b>.</li>
+        <li>In a chat, turn the connector on and ask for a model.</li>
+      </ol>
+    </details>
+    <details id="howto-code">
+      <summary>Claude Code and Claude Desktop</summary>
+      <ol class="steps">
+        <li>Create a personal token below.</li>
+        <li>Run the command shown with it.</li>
+      </ol>
+    </details>
+    <h2 style="margin-top:16px">Connected apps</h2>
+    <ul class="plain" id="applist"></ul>
+  </div>
+  <div class="sec">
+    <h2>Personal tokens</h2>
+    <p class="hint">For apps that log in with a header instead of a browser, such as Claude Code.</p>
+    <ul class="plain" id="toklist"></ul>
+    <div id="newtok" class="secret" hidden>
+      <span class="hint">Copy it now; it is not shown again.</span>
+      <code class="mono" id="newtokval"></code>
+      <code class="mono" id="newtokcmd"></code>
+      <span class="row"><button class="sm" id="copytok">Copy token</button><button class="sm" id="copycmd">Copy command</button></span>
+    </div>
+    <div class="row"><input type="text" id="tokname" placeholder="Name, e.g. Claude Code on my Mac" style="flex:1">
+      <button id="tokadd">Create token</button></div>
+  </div>
+  <div class="sec" id="dangersec">
+    <h2>Delete account</h2>
+    <p class="hint">Deletes your account, all your models and files, passkeys and tokens at once.</p>
+    <div class="row" style="margin-top:8px"><button class="danger" id="delacct"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-trash"/></svg>Delete account</button></div>
   </div>
   <div class="sec row">
-    <button id="logout"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-logout"/></svg>Log out</button><div class="grow"></div>
+    <button id="logout"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-logout"/></svg>Log out</button>
+    <a class="hint" href="/privacy">Privacy</a><div class="grow"></div>
     <button id="secclose">Close</button>
   </div>
 </dialog>
 <script type="module">
-import { api, subscribe, ago, fmt, esc, icon, passkeyRegister, passkeysSupported } from "/static/common.js";
+import { api, subscribe, ago, fmt, esc, icon, copyText, passkeyRegister, passkeysSupported } from "/static/common.js";
 
 const grid = document.getElementById("grid");
 const q = document.getElementById("q");
@@ -93,6 +153,7 @@ function render(flashId) {
 async function load(flashId) {
   models = (await api("/api/models")).models;
   render(flashId);
+  if (auth) renderAuth();
 }
 
 q.addEventListener("input", () => render());
@@ -100,28 +161,44 @@ subscribe((d) => load(d.id), document.getElementById("live"));
 load();
 setInterval(() => render(), 60000);  // refresh "x min ago"
 
-// ---- login security: passkeys, connected OAuth apps, logout
-const sec = document.getElementById("sec");
-const pkerr = document.getElementById("pkerr");
+// ---- the account: passkeys, connecting Claude, connected apps, tokens, deletion
+const $ = (id) => document.getElementById(id);
+const sec = $("sec");
+const pkerr = $("pkerr");
 let auth = null;
 
 function renderAuth() {
-  document.getElementById("secbtn").hidden = !auth.login_required;
+  const u = auth.user;
+  $("secbtn").hidden = !auth.login_required;
+  $("adminlink").hidden = u.role !== "admin";
   let dismissed = false;
   try { dismissed = localStorage.getItem("pk-banner-dismissed") === "1"; } catch {}
-  document.getElementById("pkbanner").hidden =
-    !auth.login_required || auth.passkeys.length > 0 || dismissed || !passkeysSupported();
-  document.getElementById("pklist").innerHTML = auth.passkeys.map((p) => `<li>
+  const needPasskey = auth.login_required && auth.passkeys.length === 0 && passkeysSupported();
+  $("pkbanner").hidden = !needPasskey || dismissed || models.length === 0;  // the checklist covers it
+  $("st-passkey").hidden = !needPasskey;
+  $("st-who").textContent = `Signed in as ${u.display_name || u.email || "you"}.`;
+  $("st-connect").classList.toggle("done", auth.clients.length > 0 || auth.tokens.length > 0);
+  $("myname").value = u.display_name;
+  const use = auth.usage;
+  $("whoami").textContent = [u.email, u.role === "admin" ? "admin" : null,
+    `${use.models}${use.max_models ? ` of ${use.max_models}` : ""} models`,
+    `${use.disk_mb}${use.max_disk_mb ? ` of ${use.max_disk_mb}` : ""} MB`].filter(Boolean).join(" · ");
+  $("dangersec").hidden = !auth.login_required || u.bootstrap;
+  $("pklist").innerHTML = auth.passkeys.map((p) => `<li>
     <span><b>${esc(p.name)}</b> <span class="hint">added ${ago(p.created)}${p.last_used ? `, used ${ago(p.last_used)}` : ""}</span></span>
     <button class="danger sm" data-pk="${esc(p.id)}">Remove</button></li>`).join("")
     || `<li class="hint">No passkeys yet.</li>`;
-  document.getElementById("appsec").hidden = !auth.oauth;
-  document.getElementById("mcpurl").textContent = auth.mcp_url;
-  document.getElementById("howto").open = auth.clients.length === 0;
-  document.getElementById("applist").innerHTML = auth.clients.map((c) => `<li>
+  $("appsec").hidden = !auth.oauth && !auth.login_required;
+  $("mcpurl").textContent = auth.mcp_url;
+  $("howto").open = auth.clients.length === 0 && !$("howto-chatgpt").open && !$("howto-code").open;
+  $("applist").innerHTML = auth.clients.map((c) => `<li>
     <span><b>${esc(c.name)}</b> <span class="hint">${esc((c.redirect_uris[0] || "").replace(/^(\w+:\/\/[^/]+).*/, "$1"))}, approved ${ago(c.last_authorized)}</span></span>
     <button class="danger sm" data-app="${esc(c.client_id)}">Disconnect</button></li>`).join("")
     || `<li class="hint">No apps connected.</li>`;
+  $("toklist").innerHTML = auth.tokens.map((t) => `<li>
+    <span><b>${esc(t.name)}</b> <span class="hint">created ${ago(t.created)}${t.last_used ? `, used ${ago(t.last_used)}` : ", never used"}</span></span>
+    <button class="danger sm" data-tok="${esc(t.id)}">Revoke</button></li>`).join("")
+    || `<li class="hint">No tokens.</li>`;
 }
 
 async function loadAuth() {
@@ -131,11 +208,11 @@ async function loadAuth() {
 
 async function addPasskey() {
   pkerr.hidden = true;
-  const name = document.getElementById("pkname").value.trim()
+  const name = $("pkname").value.trim()
     || (/iPhone|iPad/.test(navigator.userAgent) ? "iPhone/iPad" : /Mac/.test(navigator.userAgent) ? "Mac" : "passkey");
   try {
     await passkeyRegister(name);
-    document.getElementById("pkname").value = "";
+    $("pkname").value = "";
     await loadAuth();
   } catch (e) {
     if (e.name === "NotAllowedError") return;
@@ -146,34 +223,62 @@ async function addPasskey() {
   }
 }
 
-document.getElementById("secbtn").addEventListener("click", () => { loadAuth(); sec.showModal(); });
-document.getElementById("secclose").addEventListener("click", () => sec.close());
-document.getElementById("copymcp").addEventListener("click", async (e) => {
-  try {
-    await navigator.clipboard.writeText(auth.mcp_url);
-    e.target.textContent = "Copied";
-    setTimeout(() => { e.target.textContent = "Copy"; }, 1500);
-  } catch {}
+const openAccount = () => { loadAuth(); sec.showModal(); };
+$("secbtn").addEventListener("click", openAccount);
+$("connectbtn").addEventListener("click", () => {
+  openAccount();
+  $("appsec").scrollIntoView({ block: "start" });
 });
-document.getElementById("pkadd1").addEventListener("click", addPasskey);
-document.getElementById("pkadd2").addEventListener("click", addPasskey);
-document.getElementById("pkdismiss").addEventListener("click", () => {
+$("secclose").addEventListener("click", () => sec.close());
+$("copymcp").addEventListener("click", (e) => copyText(e.target, auth.mcp_url));
+$("pkadd1").addEventListener("click", addPasskey);
+$("pkadd2").addEventListener("click", addPasskey);
+$("pkadd3").addEventListener("click", addPasskey);
+$("pkdismiss").addEventListener("click", () => {
   try { localStorage.setItem("pk-banner-dismissed", "1"); } catch {}
-  document.getElementById("pkbanner").hidden = true;
+  $("pkbanner").hidden = true;
 });
-document.getElementById("pklist").addEventListener("click", async (e) => {
+$("renamebtn").addEventListener("click", async () => {
+  await api("/api/auth/me", { method: "PATCH", body: { display_name: $("myname").value } });
+  loadAuth();
+});
+$("pklist").addEventListener("click", async (e) => {
   const id = e.target.dataset.pk;
   if (!id || !confirm("Remove this passkey? You can no longer log in with it.")) return;
   await api(`/api/auth/passkeys/${encodeURIComponent(id)}`, { method: "DELETE" });
   loadAuth();
 });
-document.getElementById("applist").addEventListener("click", async (e) => {
+$("applist").addEventListener("click", async (e) => {
   const id = e.target.dataset.app;
   if (!id || !confirm("Disconnect this app? It has to be approved again to reconnect.")) return;
   await api(`/api/auth/clients/${encodeURIComponent(id)}`, { method: "DELETE" });
   loadAuth();
 });
-document.getElementById("logout").addEventListener("click", async () => {
+let newToken = "";
+$("tokadd").addEventListener("click", async () => {
+  const t = await api("/api/auth/tokens", { method: "POST", body: { name: $("tokname").value.trim() || "token" } });
+  newToken = t.token;
+  $("newtokval").textContent = t.token;
+  $("newtokcmd").textContent = `claude mcp add --transport http autosmith ${auth.mcp_url} --header "Authorization: Bearer ${t.token}"`;
+  $("newtok").hidden = false;
+  $("tokname").value = "";
+  loadAuth();
+});
+$("copytok").addEventListener("click", (e) => copyText(e.target, newToken));
+$("copycmd").addEventListener("click", (e) => copyText(e.target, $("newtokcmd").textContent));
+$("toklist").addEventListener("click", async (e) => {
+  const id = e.target.dataset.tok;
+  if (!id || !confirm("Revoke this token? Apps using it stop working.")) return;
+  await api(`/api/auth/tokens/${encodeURIComponent(id)}`, { method: "DELETE" });
+  loadAuth();
+});
+$("delacct").addEventListener("click", async () => {
+  const typed = prompt('This deletes your account and all your models and files. Type "delete" to confirm.');
+  if (typed !== "delete") return;
+  await api("/api/auth/me", { method: "DELETE", body: { confirm: "delete" } });
+  location.href = "/";
+});
+$("logout").addEventListener("click", async () => {
   await api("/auth/logout", { method: "POST", body: {} });
   location.reload();
 });

@@ -1,4 +1,6 @@
-# stl-mcp
+# autosmith.eu
+
+*STL, made by AI.* (repo and service name: `stl-mcp`)
 
 Self-hosted MCP server where Claude creates and iteratively adjusts 3D models for printing (mm),
 with a web interface for viewing, rotating and browsing the models.
@@ -147,7 +149,7 @@ Once, about a minute. The connector then also works in the Claude apps on your p
    `https://stl.tilly.se/`), log in with the token once and click **Add passkey** in the banner
    (or under 🔑 in the header). Without a passkey you can still log in with the token in step 5.
 2. In claude.ai, open **Settings → Connectors** and click **Add custom connector**.
-3. Name: `STL library`. URL: `https://<your-url>/mcp` (here: `https://stl.tilly.se/mcp`).
+3. Name: `autosmith`. URL: `https://<your-url>/mcp` (here: `https://stl.tilly.se/mcp`).
    Leave the advanced settings (OAuth client id/secret) empty. Click **Add**.
 4. Click **Connect** next to the new connector. A page from your server opens.
 5. If you are not logged in there, click **Log in with passkey** (or use the token).
@@ -297,6 +299,23 @@ from before users existed (`model.json`, files directly in `STL_DIR`) become the
 
 Users only reach their own models and files; someone else's look exactly like ones that do not
 exist (404). Admins reach everything.
+
+## Accounts and signup
+With `SIGNUP=1` anyone can create an account on the login page: a name and a passkey, nothing
+else. Each account gets its own private library and standalone files; admins (`ADMIN_EMAILS`,
+or `MCP_TOKEN`) see everything and the `/admin` pages. New users see a getting-started checklist,
+and the account dialog (🔑) shows how to connect claude.ai, ChatGPT or Claude Code, with personal
+tokens for clients that send a header.
+
+- **Bots:** set `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET` (Cloudflare Turnstile, free) and keep
+  the per-IP limit (`SIGNUPS_PER_HOUR`, default 5). Behind your own proxy set `TRUSTED_PROXY=1` so
+  the limit sees the real client address.
+- **Limits:** `MAX_MODELS_PER_USER` (100) and `MAX_DISK_MB_PER_USER` (500) apply to non-admins;
+  Claude gets a clear error when one is reached. Script models are admin-only.
+- **Leaving:** users delete their account and all its data from the account dialog. `/privacy`
+  says what is stored.
+
+`SIGNUP=1` requires `MCP_TOKEN`; without it every visitor would be the admin.
 
 ## Security
 Always set `MCP_TOKEN` and put the server behind HTTPS. The web interface requires a login

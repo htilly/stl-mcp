@@ -5,6 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Model</title>
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/static/favicon.ico" sizes="48x48">
+<link rel="apple-touch-icon" href="/static/brand/apple-touch-icon.png">
+<link rel="manifest" href="/static/brand/site.webmanifest">
+<meta name="theme-color" content="#14181f">
+<meta property="og:site_name" content="autosmith.eu">
+<meta property="og:title" content="autosmith: STL, made by AI">
+<meta property="og:image" content="/static/brand/og-image.png">
 <link rel="stylesheet" href="/static/style.css">
 <!-- three.js r169 (MIT) is served locally from web/vendor/three -->
 <script type="importmap">
@@ -15,7 +22,7 @@
 </head>
 <body>
 <header class="top">
-  <a class="wordmark" href="/" title="Back to the library"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-mark"/></svg><span class="name">STL library</span></a>
+  <a class="wordmark" href="/" title="Back to the library"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-mark"/></svg><span class="name">auto<b>smith</b></span></a>
   <span class="crumb">/ <b id="crumb"></b></span>
   <div class="grow"></div>
   <span class="live" id="live" title="The view updates automatically when Claude changes the model"><span class="dot"></span><span class="label">Live</span></span>
@@ -285,7 +292,7 @@ async function showVersion(v, refit) {
 function renderSide() {
   const cur = model.versions.find((x) => x.version === model.current);
   const ver = model.versions.find((x) => x.version === viewVersion) || cur;
-  document.title = `${model.name} · STL library`;
+  document.title = `${model.name} · autosmith`;
   $("crumb").textContent = model.name;
   $("tbrev").textContent = `v${ver.version} of ${model.versions.length}`;
   $("tbsaved").textContent = ago(ver.created);

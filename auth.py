@@ -18,6 +18,7 @@ import threading
 import time
 from pathlib import Path
 
+import httpx
 from psycopg.types.json import Jsonb
 
 from mcp.server.auth.provider import (AccessToken, AuthorizationCode, AuthorizationParams,
@@ -71,6 +72,53 @@ class Expiring:
             return item[1] if item and item[0] > time.time() else None
 
 
+class RateLimiter:
+    """At most `limit` events per key within `window` seconds (in memory, per process)."""
+
+    def __init__(self, limit: int, window: int):
+        self.limit, self.window = limit, window
+        self._hits: dict[str, list[float]] = {}
+        self._lock = threading.Lock()
+
+    def _recent(self, key: str, now: float) -> list[float]:
+        hits = [t for t in self._hits.get(key, []) if t > now - self.window]
+        self._hits[key] = hits
+        return hits
+
+    def allowed(self, key: str) -> bool:
+        with self._lock:
+            return len(self._recent(key, time.time())) < self.limit
+
+    def hit(self, key: str) -> bool:
+        """Records an event; False (and nothing recorded) if the key is already at the limit."""
+        with self._lock:
+            now = time.time()
+            hits = self._recent(key, now)
+            if len(hits) >= self.limit:
+                return False
+            hits.append(now)
+            if len(self._hits) > 10_000:  # forget idle keys
+                self._hits = {k: v for k, v in self._hits.items() if v}
+            return True
+
+
+TURNSTILE_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
+
+
+def verify_turnstile(secret: str, token: str, ip: str | None = None) -> bool:
+    """Checks a Cloudflare Turnstile token server side. Without a secret the check is off."""
+    if not secret:
+        return True
+    if not token:
+        return False
+    try:
+        r = httpx.post(TURNSTILE_URL, data={"secret": secret, "response": token,
+                                            **({"remoteip": ip} if ip else {})}, timeout=10)
+        return bool(r.json().get("success"))
+    except (httpx.HTTPError, ValueError):
+        return False
+
+
 # ---------------------------------------------------------------- persistent state (Postgres)
 
 _USER = "u.id, u.display_name, u.email, u.role, u.bootstrap, u.disabled, u.created, u.last_login"
@@ -91,10 +139,19 @@ class AuthState:
         return self.db.one(f"SELECT {_USER} FROM users u WHERE u.id = %s", (uid,))
 
     def create_user(self, display_name: str = "", email: str | None = None,
-                    role: str = "member") -> dict:
+                    role: str = "member", uid: str | None = None) -> dict:
         return self.db.one(
-            f"INSERT INTO users AS u (display_name, email, role) VALUES (%s, %s, %s) RETURNING {_USER}",
-            ((display_name or "").strip()[:80], (email or "").strip().lower() or None, role))
+            f"INSERT INTO users AS u (id, display_name, email, role) "
+            f"VALUES (coalesce(%s, gen_random_uuid()::text), %s, %s, %s) RETURNING {_USER}",
+            (uid, (display_name or "").strip()[:80], (email or "").strip().lower() or None, role))
+
+    def rename_user(self, uid: str, display_name: str) -> dict:
+        return self.db.one(f"UPDATE users AS u SET display_name = %s WHERE id = %s RETURNING {_USER}",
+                           (display_name.strip()[:80], uid))
+
+    def delete_user(self, uid: str) -> bool:
+        """Deletes the user and, by cascade, their passkeys, sessions, identities and tokens."""
+        return self.db.execute("DELETE FROM users WHERE id = %s AND NOT bootstrap", (uid,)) > 0
 
     def bootstrap_admin(self, email: str | None = None) -> dict:
         """The admin that MCP_TOKEN logs in as (and that owns data from before users existed)."""

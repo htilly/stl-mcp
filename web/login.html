@@ -3,22 +3,46 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Log in · STL library</title>
+<title>Log in · autosmith</title>
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/static/favicon.ico" sizes="48x48">
+<link rel="apple-touch-icon" href="/static/brand/apple-touch-icon.png">
+<link rel="manifest" href="/static/brand/site.webmanifest">
+<meta name="theme-color" content="#14181f">
+<meta property="og:site_name" content="autosmith.eu">
+<meta property="og:title" content="autosmith: STL, made by AI">
+<meta property="og:image" content="/static/brand/og-image.png">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <main class="gate"><div class="panel"><div class="body">
-  <div class="wordmark"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-mark"/></svg><span>STL library</span></div>
+  <div class="wordmark"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-mark"/></svg><span>auto<b>smith</b></span></div>
   <h2>Log in</h2>
-  <p>Your models, their history and the comments you leave for Claude.</p>
-  <div id="pk" hidden>
-    <button class="primary big" id="pkbtn" style="width:100%"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-key"/></svg>Log in with passkey</button>
-    <p class="warn" id="pkerr" hidden></p>
-    <p class="hint" style="margin-top:12px">No passkey yet? Log in once with the server token, then add one from the library.</p>
+  <p>STL, made by AI. Describe a part to Claude; it builds a printable 3D model that shows up here, with every revision.</p>
+
+  <div class="stack" id="sso" hidden></div>
+  <div class="stack" id="pk" hidden>
+    <button class="primary big" id="pkbtn"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-key"/></svg>Log in with passkey</button>
   </div>
-  <details id="tok" open>
-    <summary>Log in with the server token</summary>
+  <p class="warn" id="pkerr" hidden></p>
+
+  <form id="signup" hidden>
+    <div class="or">New here?</div>
+    <label class="ts-label" for="suname">Your name</label>
+    <input type="text" id="suname" maxlength="80" autocomplete="name" required placeholder="e.g. Joe">
+    <div id="turnstile"></div>
+    <div class="stack">
+      <button class="big" id="subtn"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-plus"/></svg>Create account with passkey</button>
+    </div>
+    <p class="hint" style="margin-top:12px">Your passkey is your login: Face ID, Touch ID or your
+      password manager, no password. It is also how you approve Claude or ChatGPT when you connect
+      them. <a href="/privacy">Privacy</a></p>
+  </form>
+  <p class="hint" id="nopk" hidden>This browser does not support passkeys. Open the page in a recent
+    Safari, Chrome, Edge or Firefox.</p>
+
+  <details id="tok" hidden>
+    <summary>Log in with the server token (admin)</summary>
     <form method="get">
       <input type="password" name="token" placeholder="MCP_TOKEN" required aria-label="Server token" autocomplete="current-password">
       <button>Log in</button>
@@ -26,21 +50,61 @@
   </details>
 </div></div></main>
 <script type="module">
-import { passkeyLogin, passkeysSupported } from "/static/common.js";
+import { api, passkeyLogin, passkeySignup, passkeysSupported } from "/static/common.js";
 
-if (passkeysSupported()) {
-  const err = document.getElementById("pkerr");
-  document.getElementById("pk").hidden = false;
-  document.getElementById("tok").open = false;
-  document.getElementById("pkbtn").addEventListener("click", async () => {
+const $ = (id) => document.getElementById(id);
+const err = $("pkerr");
+const show = (e) => {
+  if (e.name === "NotAllowedError") return;  // the user cancelled the passkey prompt
+  if (e.name === "InvalidStateError") e.message = "This device already has a passkey for an account here - log in instead.";
+  err.textContent = e.message;
+  err.hidden = false;
+};
+// this page stands in for the one that was asked for, so reloading lands there once logged in
+const done = () => location.reload();
+
+const cfg = await api("/auth/config").catch(() => ({ signup: false, providers: [] }));
+const admin = new URLSearchParams(location.search).has("admin");
+const supported = passkeysSupported();
+
+$("tok").hidden = !(admin || (!supported && !cfg.signup));
+$("tok").open = admin;
+$("nopk").hidden = supported;
+$("pk").hidden = !supported;
+
+$("pkbtn").addEventListener("click", async () => {
+  err.hidden = true;
+  try { await passkeyLogin(); done(); } catch (e) { show(e); }
+});
+
+let turnstileToken = "";
+if (cfg.signup && supported) {
+  $("signup").hidden = false;
+  if (cfg.turnstile_site_key) {
+    window.onTurnstile = () => window.turnstile.render("#turnstile", {
+      sitekey: cfg.turnstile_site_key,
+      callback: (t) => { turnstileToken = t; },
+      "expired-callback": () => { turnstileToken = ""; },
+    });
+    const s = document.createElement("script");
+    s.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=onTurnstile";
+    s.async = true;
+    document.head.append(s);
+  }
+  $("signup").addEventListener("submit", async (e) => {
+    e.preventDefault();
     err.hidden = true;
+    const btn = $("subtn");
+    btn.disabled = true;
     try {
-      await passkeyLogin();
-      location.reload();  // this page stands in for the one that was asked for
+      const device = /iPhone|iPad/.test(navigator.userAgent) ? "iPhone/iPad" : /Mac/.test(navigator.userAgent) ? "Mac" : "passkey";
+      await passkeySignup($("suname").value, turnstileToken, device);
+      done();
     } catch (e) {
-      if (e.name === "NotAllowedError") return;  // the user cancelled
-      err.textContent = e.message;
-      err.hidden = false;
+      show(e);
+      if (window.turnstile) { window.turnstile.reset("#turnstile"); turnstileToken = ""; }
+    } finally {
+      btn.disabled = false;
     }
   });
 }
