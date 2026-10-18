@@ -55,6 +55,16 @@ from starlette.responses import (FileResponse, HTMLResponse, JSONResponse, Plain
 from starlette.routing import Mount, Route
 from pydantic import AnyHttpUrl
 from starlette.staticfiles import StaticFiles
+
+
+class RevalidatedStatic(StaticFiles):
+    """Static assets are not fingerprinted, so make every cache (Cloudflare included) revalidate
+    against the ETag instead of guessing a lifetime. Otherwise a deploy keeps serving old CSS."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 from webauthn.helpers import bytes_to_base64url
 from webauthn.helpers.structs import (AuthenticatorSelectionCriteria, PublicKeyCredentialDescriptor,
                                       ResidentKeyRequirement, UserVerificationRequirement)
@@ -1101,7 +1111,7 @@ app = Starlette(
         Route("/api/auth/clients/{id}", api_auth_client, methods=["DELETE"]),
         Route("/oauth/consent", oauth_consent, methods=["GET", "POST"]),
         *OAUTH_ROUTES,
-        Mount("/static", app=StaticFiles(directory=WEB)),
+        Mount("/static", app=RevalidatedStatic(directory=WEB)),
         Mount("/", app=mcp_app),
     ],
     lifespan=lifespan,
