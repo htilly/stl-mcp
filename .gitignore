@@ -13,3 +13,6 @@ pgdata/
 
 # testutdata
 render_test.png
+
+# local OpenSCAD libraries (BOSL2); the Docker image bundles its own
+openscad-libs/

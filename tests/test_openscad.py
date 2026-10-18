@@ -1,0 +1,134 @@
+"""OpenSCAD models: the source check always runs; builds skip when openscad is not installed."""
+import asyncio
+
+import pytest
+
+import openscad
+import server
+from openscad import OpenSCADError, check
+
+needs_openscad = pytest.mark.skipif(not openscad.available(), reason="openscad is not installed")
+needs_bosl2 = pytest.mark.skipif(not (openscad.LIBS / "BOSL2" / "std.scad").is_file(),
+                                 reason="BOSL2 is not installed")
+
+
+def run(coro):
+    return asyncio.run(coro)
+
+
+@pytest.fixture
+def scad(out_dir):
+    server.store.allow_openscad = True
+    return out_dir
+
+
+# ---- source check (no binary needed)
+
+@pytest.mark.parametrize("code", [
+    'import("/etc/passwd");',
+    'import ( file = "x.stl" );',
+    'surface(file="/etc/hostname");',
+    'x = dxf_dim(file="a.dxf", name="w");',
+    "include </etc/passwd>",
+    "use</etc/passwd>",
+    "include <../../etc/passwd>",
+    "include <BOSL2/../../../etc/passwd.scad>",
+    "include <x.scad>",
+    "include <BOSL2/std.scad",
+    "cube(1); /* never closed",
+    'echo("never closed);',
+    "include\n>\n</etc/passwd>",
+])
+def test_check_rejects_file_access(code):
+    with pytest.raises(OpenSCADError):
+        check(code)
+
+
+@pytest.mark.parametrize("code", [
+    'cube(10); // import("/etc/passwd")',
+    '/* include </etc/passwd> */ cube(1);',
+    'echo("import(\\"/etc/passwd\\") and include </etc/passwd>"); cube(1);',
+    "my_import = 1; important = 2; cube([1e3, 2.5e-1, .5]);",
+    "$fn = 32; cylinder(d=3, h=2);",
+])
+def test_check_ignores_strings_and_comments(code):
+    assert check(code) == []
+
+
+@needs_bosl2
+def test_check_allows_bosl2():
+    assert check("include <BOSL2/std.scad>\nuse<BOSL2/threading.scad>") == [
+        "BOSL2/std.scad", "BOSL2/threading.scad"]
+
+
+def test_bad_variables_are_rejected():
+    for v in ({"a; import(\"x\")": 1}, {"PART": "x"}, {"s": "a\nb"}, {"x": {"y": 1}}):
+        with pytest.raises(OpenSCADError):
+            openscad._overrides(v)
+    assert openscad._overrides({"w": 3, "s": 'a"b', "on": True, "v": [1, 2.5]}) == [
+        "-D", "w=3", "-D", 's="a\\"b"', "-D", "on=true", "-D", "v=[1,2.5]"]
+
+
+def test_disabled_by_flag(out_dir):
+    server.store.allow_openscad = False
+    with pytest.raises(PermissionError):
+        run(server.create_from_openscad("c", "cube(10);"))
+
+
+def test_rejected_code_saves_nothing(scad):
+    with pytest.raises(OpenSCADError):
+        run(server.create_from_openscad("c", 'import("/etc/passwd");'))
+    assert server.list_models() == []
+
+
+# ---- builds
+
+@needs_openscad
+def test_cube(scad):
+    s = run(server.create_from_openscad("Cube", "w = 10;\ncube([w, 20, 5]);"))
+    assert s["kind"] == "openscad"
+    assert s["parts"]["model"]["extents_mm"] == [10.0, 20.0, 5.0]
+    assert s["parts"]["model"]["watertight"]
+
+
+@needs_openscad
+def test_variable_override_and_code_replace(scad):
+    s = run(server.create_from_openscad("Cube", "w = 10;\ncube([w, 20, 5]);"))
+    s = run(server.update_model(s["model_id"], {"w": 30}))
+    assert s["version"] == 2 and s["parts"]["model"]["extents_mm"] == [30.0, 20.0, 5.0]
+    m = server.get_model(s["model_id"])
+    assert m["params"]["vars"] == {"w": 30} and "w = 10" in m["params"]["code"]
+    s = run(server.update_model(s["model_id"], {"code": "w = 1;\ncube([w, 2, 3]);"}))
+    assert s["parts"]["model"]["extents_mm"] == [30.0, 2.0, 3.0]  # the override still applies
+
+
+@needs_openscad
+def test_parts(scad):
+    code = 'if (PART == "body") cube(10); else translate([0, 0, 20]) cube([10, 10, 2]);'
+    s = run(server.create_from_openscad("Box", code, parts=["body", "lid"]))
+    assert set(s["parts"]) == {"body", "lid"}
+    assert s["parts"]["lid"]["extents_mm"] == [10.0, 10.0, 2.0]
+
+
+@needs_openscad
+def test_errors_are_reported(scad):
+    with pytest.raises(OpenSCADError, match="no 3D object|empty|ERROR|WARNING"):
+        run(server.create_from_openscad("Empty", "x = 1;"))
+
+
+@needs_openscad
+@needs_bosl2
+def test_bosl2_threaded_rod(scad):
+    code = ("include <BOSL2/std.scad>\ninclude <BOSL2/threading.scad>\n"
+            "threaded_rod(d=10, l=20, pitch=1.5, anchor=BOTTOM, $fn=24);")
+    s = run(server.create_from_openscad("Rod", code))
+    ext = s["parts"]["model"]["extents_mm"]
+    assert 9 < ext[0] <= 10.1 and abs(ext[2] - 20) < 0.1
+
+
+@needs_openscad
+def test_timeout(scad, monkeypatch):
+    monkeypatch.setattr(openscad, "TIMEOUT", 2)
+    slow = "function f(n) = n <= 0 ? 0 : 1 + f(n - 1) + f(n - 1);\nx = f(60);\ncube(1);"
+    with pytest.raises(OpenSCADError, match="longer than"):
+        run(server.create_from_openscad("Slow", slow))

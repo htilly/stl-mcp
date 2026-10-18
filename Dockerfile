@@ -1,5 +1,17 @@
 FROM python:3.12-slim
 WORKDIR /app
+# OpenSCAD for create_from_openscad (sandboxed, see openscad.py) and BOSL2, pinned to a commit.
+# The libraries dir is read-only for the server; OPENSCADPATH points only there.
+ARG BOSL2_COMMIT=f1493a8425f51bd0585dd6d89aea962561100d32
+ADD https://github.com/BelfrySCAD/BOSL2/archive/${BOSL2_COMMIT}.tar.gz /tmp/bosl2.tar.gz
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends openscad \
+ && rm -rf /var/lib/apt/lists/* \
+ && mkdir -p /opt/openscad-libs/BOSL2 \
+ && tar -xzf /tmp/bosl2.tar.gz -C /opt/openscad-libs/BOSL2 --strip-components=1 \
+ && rm /tmp/bosl2.tar.gz \
+ && chmod -R a-w /opt/openscad-libs
+ENV OPENSCAD_LIBS=/opt/openscad-libs
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY *.py ./

@@ -29,6 +29,7 @@ from psycopg.types.json import Jsonb
 
 import csg
 import geometry as g
+import openscad
 import printcheck
 
 MAX_VERSIONS = 50  # older versions' STL files are pruned (the recipe is kept)
@@ -74,6 +75,13 @@ def _build_script(p, allow: bool):
         if r.returncode != 0:
             raise RuntimeError(r.stderr[-1500:])
         return {f.stem[4:]: trimesh.load(f) for f in sorted(Path(td).glob("out_*.stl"))}
+
+
+def _build_openscad(p, allow: bool):
+    if not allow:
+        raise PermissionError("OpenSCAD models are disabled on this server (ALLOW_OPENSCAD=0 "
+                              "or the openscad binary is missing)")
+    return openscad.build(p)
 
 
 # ---------------------------------------------------------------- JSON pointers
@@ -125,12 +133,13 @@ def ptr_remove(doc, ptr: str):
 
 def apply_changes(kind: str, params: dict, changes: dict | None, remove: list[str] | None) -> dict:
     """changes: {"/json/pointer": value} or {"key": value}.
-    A key without '/': for csg -> vars[key], otherwise -> params[key]."""
+    A key without '/': for csg and openscad -> vars[key] ("code"/"parts" for openscad replace
+    those), otherwise -> params[key]."""
     p = copy.deepcopy(params)
     for k, v in (changes or {}).items():
         if k.startswith("/"):
             ptr_set(p, k, v)
-        elif kind == "csg":
+        elif kind == "csg" or (kind == "openscad" and k not in ("code", "parts", "vars")):
             p.setdefault("vars", {})[k] = v
         else:
             p[k] = v
@@ -164,11 +173,12 @@ def _missing(mid: str) -> KeyError:
 
 
 class Store:
-    def __init__(self, root: Path, db, allow_script: bool = False):
+    def __init__(self, root: Path, db, allow_script: bool = False, allow_openscad: bool = False):
         self.dir = Path(root) / "models"
         self.dir.mkdir(parents=True, exist_ok=True)
         self.db = db
         self.allow_script = allow_script
+        self.allow_openscad = allow_openscad
         self.settings = printcheck.Settings(Path(root) / "settings.json")
         self.lock = threading.RLock()
         self.revision = 0          # incremented on every change (the web UI polls via SSE)
@@ -225,6 +235,8 @@ class Store:
             return _build_primitive(params)
         if kind == "script":
             return _build_script(params, self.allow_script)
+        if kind == "openscad":
+            return _build_openscad(params, self.allow_openscad)
         raise ValueError(f"unknown kind '{kind}'")
 
     def _new_version(self, m: dict, kind: str, params: dict, note: str) -> dict:
