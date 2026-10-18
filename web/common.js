@@ -145,3 +145,8 @@ export async function copyText(btn, text) {
 // ---- icons: the sprite in /static/icons.svg (see docs/DESIGN.md#icons)
 export const icon = (name, cls = "") =>
   `<svg class="i${cls ? " " + cls : ""}" aria-hidden="true"><use href="/static/icons.svg#i-${name}"/></svg>`;
+
+// Whether a model is private (only its owner) or public (in the gallery), as a badge.
+export const visBadge = (visibility, cls = "") => visibility === "public"
+  ? `<span class="vbadge public${cls ? " " + cls : ""}" title="Public: in the gallery, anyone logged in can view and copy it">${icon("globe")}Public</span>`
+  : `<span class="vbadge${cls ? " " + cls : ""}" title="Private: only you can see it">${icon("lock")}Private</span>`;

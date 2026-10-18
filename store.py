@@ -9,7 +9,8 @@ Each model has an owner. The model document (recipe, versions, comments) lives i
 
 Store itself is unrestricted; the server always goes through Store.view(user), which only lets a
 user reach their own models (admins reach all). Someone else's model looks exactly like one that
-does not exist.
+does not exist - unless its owner made it public: then anyone can read it (not its comments) and
+copy it, but only the owner (and admins) can change it.
 """
 from __future__ import annotations
 
@@ -156,6 +157,14 @@ def _missing(mid: str) -> KeyError:
     return KeyError(f"model '{mid}' does not exist")
 
 
+VISIBILITIES = ("private", "public")
+
+
+def _doc(row: dict) -> dict:
+    """A model document with its visibility from the column (the column is what queries use)."""
+    return {**row["doc"], "visibility": row["visibility"]}
+
+
 class Store:
     def __init__(self, root: Path, db, allow_script: bool = False, allow_openscad: bool = False):
         self.dir = Path(root) / "models"
@@ -180,17 +189,19 @@ class Store:
 
     def _read(self, mid: str) -> dict:
         self._path(mid)  # validates the id
-        row = self.db.one("SELECT doc FROM models WHERE id = %s", (mid,))
+        row = self.db.one("SELECT doc, visibility FROM models WHERE id = %s", (mid,))
         if not row:
             raise _missing(mid)
-        return row["doc"]
+        return _doc(row)
 
     def _write(self, m: dict):
         self.db.execute(
-            "INSERT INTO models (id, owner_id, name, updated, doc) VALUES (%s, %s, %s, %s, %s) "
+            "INSERT INTO models (id, owner_id, name, visibility, updated, doc) "
+            "VALUES (%s, %s, %s, %s, %s, %s) "
             "ON CONFLICT (id) DO UPDATE SET owner_id = EXCLUDED.owner_id, name = EXCLUDED.name, "
-            "updated = EXCLUDED.updated, doc = EXCLUDED.doc",
-            (m["id"], m.get("owner"), m["name"], m.get("updated", time.time()), Jsonb(m)))
+            "visibility = EXCLUDED.visibility, updated = EXCLUDED.updated, doc = EXCLUDED.doc",
+            (m["id"], m.get("owner"), m["name"], m.get("visibility", "private"),
+             m.get("updated", time.time()), Jsonb(m)))
         self._bump(m["id"], m.get("owner"))
 
     def _bump(self, mid, owner):
@@ -201,11 +212,15 @@ class Store:
 
     def owner(self, mid: str) -> str | None:
         """The model's owner id; KeyError if the model does not exist."""
+        return self.access(mid)[0]
+
+    def access(self, mid: str) -> tuple[str | None, str]:
+        """(owner id, visibility) of a model; KeyError if it does not exist."""
         self._path(mid)
-        row = self.db.one("SELECT owner_id FROM models WHERE id = %s", (mid,))
+        row = self.db.one("SELECT owner_id, visibility FROM models WHERE id = %s", (mid,))
         if not row:
             raise _missing(mid)
-        return row["owner_id"]
+        return row["owner_id"], row["visibility"]
 
     def view(self, user: dict) -> "StoreView":
         return StoreView(self, user)
@@ -361,12 +376,47 @@ class Store:
             return m
 
     def duplicate(self, mid: str, name: str, owner: str | None = None) -> dict:
-        """Copies the current recipe into a new model, owned by owner (default: the same owner)."""
+        """Copies the current recipe into a new, private model owned by owner (default: the same
+        owner). A copy of someone else's model records where it came from (copied_from)."""
         m = self._read(mid)
         cur = self.current(m)
-        return self.create(name, cur["kind"], copy.deepcopy(cur["params"]), m.get("description", ""),
-                           f"copy of {mid} v{cur['version']}",
-                           owner=owner if owner is not None else m.get("owner"))
+        owner = owner if owner is not None else m.get("owner")
+        new = self.create(name, cur["kind"], copy.deepcopy(cur["params"]), m.get("description", ""),
+                          f"copy of {mid} v{cur['version']}", owner=owner)
+        if owner != m.get("owner"):
+            with self.lock:
+                new = self._read(new["id"])
+                new["copied_from"] = {"model_id": mid, "owner_id": m.get("owner"),
+                                      "name": m["name"], "version": cur["version"]}
+                self._write(new)
+        return new
+
+    def set_visibility(self, mid: str, visibility: str) -> dict:
+        """Makes a model private (only its owner and admins) or public (readable by everyone,
+        listed in the gallery). Its versions and updated time stay as they are."""
+        if visibility not in VISIBILITIES:
+            raise ValueError(f"visibility must be one of {', '.join(VISIBILITIES)}")
+        with self.lock:
+            m = self._read(mid)
+            if m["visibility"] != visibility:
+                m["visibility"] = visibility
+                m["published"] = time.time() if visibility == "public" else None
+                self._write(m)
+            return m
+
+    def public(self, limit: int = 500) -> list[dict]:
+        """Public models for the gallery, most recently changed first, each with owner_name and
+        copies (how many models were copied from it)."""
+        rows = self.db.all(
+            "SELECT m.doc, m.visibility, u.display_name AS owner_name, "
+            "(SELECT count(*) FROM models c WHERE c.doc->'copied_from'->>'model_id' = m.id) AS copies "
+            "FROM models m LEFT JOIN users u ON u.id = m.owner_id "
+            "WHERE m.visibility = 'public' ORDER BY m.updated DESC, m.id LIMIT %s", (limit,))
+        return [{**_doc(r), "owner_name": r["owner_name"] or "", "copies": r["copies"]} for r in rows]
+
+    def owner_name(self, owner: str | None) -> str:
+        row = self.db.one("SELECT display_name FROM users WHERE id = %s", (owner,)) if owner else None
+        return (row or {}).get("display_name") or ""
 
     # -- comments (pointed out in the web 3D view, read and answered by Claude)
     @staticmethod
@@ -452,11 +502,11 @@ class Store:
     def list(self, owner: str | None = None, everyone: bool = True) -> list[dict]:
         """All models (everyone=True) or only owner's, most recently changed first."""
         if everyone:
-            rows = self.db.all("SELECT doc FROM models ORDER BY updated DESC, id")
+            rows = self.db.all("SELECT doc, visibility FROM models ORDER BY updated DESC, id")
         else:
-            rows = self.db.all("SELECT doc FROM models WHERE owner_id = %s ORDER BY updated DESC, id",
-                               (owner,))
-        return [r["doc"] for r in rows]
+            rows = self.db.all("SELECT doc, visibility FROM models WHERE owner_id = %s "
+                               "ORDER BY updated DESC, id", (owner,))
+        return [_doc(r) for r in rows]
 
     def delete_owner(self, owner: str) -> int:
         """Deletes all of a user's models and their files. Returns how many."""
@@ -516,24 +566,34 @@ class Store:
 
 
 class StoreView:
-    """The library as one user sees it: their own models (admins: every model). Everything else
-    raises the same KeyError as a model that does not exist."""
+    """The library as one user sees it: their own models (admins: every model), plus read access
+    to public models (reading, files, previews and copying - not changing them, not their
+    comments). Everything else raises the same KeyError as a model that does not exist."""
 
     def __init__(self, store: Store, user: dict):
         self.store, self.user = store, user
         self.admin = user["role"] == "admin"
 
-    def _check(self, mid: str) -> str:
-        owner = self.store.owner(mid)
-        if not self.admin and owner != self.user["id"]:
+    def _check(self, mid: str, read: bool = False) -> str:
+        owner, visibility = self.store.access(mid)
+        if not (self.admin or owner == self.user["id"] or (read and visibility == "public")):
             raise _missing(mid)
         return mid
+
+    def can_edit(self, m: dict) -> bool:
+        return self.admin or m.get("owner") == self.user["id"]
 
     def create(self, name: str, kind: str, params: dict, description: str = "", note: str = "") -> dict:
         return self.store.create(name, kind, params, description, note, owner=self.user["id"])
 
     def get(self, mid: str) -> dict:
-        return self.store.get(self._check(mid))
+        m = self.store.get(self._check(mid, read=True))
+        if not self.can_edit(m):
+            m = {**m, "comments": []}  # comments are between the owner and their Claude
+        return m
+
+    def set_visibility(self, mid: str, visibility: str) -> dict:
+        return self.store.set_visibility(self._check(mid), visibility)
 
     def list(self) -> list[dict]:
         return self.store.list(self.user["id"], everyone=self.admin)
@@ -548,7 +608,7 @@ class StoreView:
         return self.store.set_current(self._check(mid), version)
 
     def duplicate(self, mid: str, name: str) -> dict:
-        return self.store.duplicate(self._check(mid), name, owner=self.user["id"])
+        return self.store.duplicate(self._check(mid, read=True), name, owner=self.user["id"])
 
     def add_comment(self, mid: str, text: str, *a, **kw) -> dict:
         return self.store.add_comment(self._check(mid), text, *a, **kw)
@@ -565,4 +625,4 @@ class StoreView:
         return self.store.recheck(self._check(mid) if mid else None)
 
     def file(self, mid: str, rel: str) -> Path:
-        return self.store.file(self._check(mid), rel)
+        return self.store.file(self._check(mid, read=True), rel)

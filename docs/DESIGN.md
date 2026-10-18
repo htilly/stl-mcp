@@ -131,6 +131,9 @@ gives the 14 px size. An icon-only button needs `class="icon"` and an `aria-labe
 | `i-key` | Passkeys and login security |
 | `i-settings` | Admin: print-check settings |
 | `i-heart` | Donate button (shown when `DONATE_URL` is set) |
+| `i-lock` | Private model (visibility badge and toggle) |
+| `i-globe` | Public model, the gallery link |
+| `i-grid` | Back to your own library (from the gallery) |
 | `i-swatch` | Admin: design system |
 | `i-type` | Typography |
 | `i-comment` | Comments, comment mode |
@@ -167,6 +170,7 @@ card), PNG app icons, `apple-touch-icon.png` and `site.webmanifest`. The browser
 | `.tb` | Title block: `<dl class="tb"><div><dt>Label</dt><dd>Value</dd></div>…</dl>`. `.tb.full` adds an outer border |
 | `.card` | Library item: preview, name, title block (size, revision, updated) |
 | `.cbadge`, `.wbadge` | Count badges on a card: open comments (gold), print-check warnings (red) |
+| `.vbadge`, `.vbadge.public` | Visibility on a card (bottom right of the thumbnail): Private (outlined, lock) or Public (blue, globe); `.inline` in running text |
 | `.live` | Connection dot: grey while connecting, green when live |
 | `.banner` | One-line call to action above the library |
 | `.sec` | Side panel section with an `h2` heading |

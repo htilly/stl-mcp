@@ -244,6 +244,7 @@ main.lib { padding: var(--s5); max-width: 1440px; margin: 0 auto; }
 }
 .card .tb { grid-auto-flow: row; grid-template-columns: minmax(0, 1.75fr) minmax(0, .8fr) minmax(0, 1fr); }
 .card .tb > div { padding-top: 5px; padding-bottom: 6px; }
+.card .tb.two { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
 .card.flash { animation: flash 1.6s ease; }
 @keyframes flash { 0% { box-shadow: 0 0 0 3px var(--layout); } 100% { box-shadow: 0 0 0 0 transparent; } }
 .cbadge {
@@ -254,6 +255,50 @@ main.lib { padding: var(--s5); max-width: 1440px; margin: 0 auto; }
 }
 .cbadge .i { width: 13px; height: 13px; stroke-width: 2; }
 .cbadge.wbadge { right: auto; left: var(--s2); background: var(--fault); color: #fff; }
+/* visibility: on every card (bottom right of the thumbnail) and at the top of the model panel */
+.vbadge {
+  position: absolute; bottom: var(--s2); right: var(--s2);
+  display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px;
+  border-radius: 99px; font-size: var(--t-xs); font-weight: 700;
+  background: var(--sheet); color: var(--scribe); border: 1px solid var(--rule-strong);
+}
+.vbadge .i { width: 13px; height: 13px; stroke-width: 2; }
+.vbadge.public { background: var(--layout); color: var(--layout-ink); border-color: var(--layout); }
+.vbadge.inline { position: static; vertical-align: 1px; }
+/* a card with more than one link (gallery): .cover is the card's link, the maker link sits on top */
+div.card { position: relative; }
+div.card:hover { border-color: var(--layout); }
+div.card:hover .name { color: var(--layout); }
+.card .cover { color: inherit; display: flex; flex-direction: column; }
+.card .cover:hover { text-decoration: none; }
+.card .cover::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
+.card .cover:focus-visible { outline: none; }
+.card .cover:focus-visible::after { box-shadow: var(--focus); }
+.card .by { display: flex; align-items: center; gap: var(--s2); padding: 0 var(--s3) var(--s2); margin-top: -4px;
+  font-size: var(--t-sm); min-width: 0; }
+.card .by .hint { margin-left: auto; flex: none; }
+.maker { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 6px; min-width: 0;
+  color: var(--graphite); font-weight: 600; }
+.maker span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.maker:hover span:last-child { color: var(--layout); text-decoration: underline; }
+.avatar {
+  flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 99px;
+  font-size: 10px; font-weight: 700; letter-spacing: .02em; color: #fff;
+  background: hsl(var(--hue, 220) 55% 45%);
+}
+.chip {
+  display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 2px 0 5px;
+  border: 1px solid var(--rule-strong); border-radius: 99px; background: var(--sheet); font-weight: 600;
+}
+.chip .btn.icon { width: 26px; height: 26px; border-radius: 99px; }
+.vis { margin-top: var(--s3); }
+.vis .seg { width: 100%; }
+.vis .seg > button { flex: 1; justify-content: center; }
+.vis .seg > button.on[data-vis="public"] { background: var(--layout); border-color: var(--layout); color: var(--layout-ink); }
+.vis .hint { margin: 6px 0 0; }
+.readonly-note { margin-top: var(--s3); display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+.gallery-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s2) var(--s4); margin: 0 0 var(--s4); }
+.gallery-head h2 { margin: 0; font-size: var(--t-lg); font-weight: 650; letter-spacing: -.01em; }
 a.btn.quiet { background: transparent; border-color: transparent; color: var(--scribe); }
 a.btn.quiet:hover { background: var(--inset); color: var(--graphite); }
 .btn.icon { width: 32px; padding: 0; }

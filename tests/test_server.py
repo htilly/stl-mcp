@@ -192,7 +192,7 @@ def test_tools_are_registered():
     names = {t.name for t in run(server.mcp.list_tools())}
     assert names == {
         "create_model", "create_enclosure", "create_from_script", "create_from_openscad", "update_model",
-        "get_model",
+        "get_model", "set_visibility",
         "reply_to_comment", "render_model", "list_models", "revert_model", "duplicate_model",
         "delete_model", "import_file", "file_info", "modify_file", "split_file", "export_obj",
         "list_files", "delete_file", "check_print", "whoami"}

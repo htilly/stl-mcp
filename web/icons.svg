@@ -25,6 +25,9 @@
 <symbol id="i-edges" viewBox="0 0 24 24"><path d="M12 3 19.5 7.25V15.75L12 20 4.5 15.75V7.25Z M4.5 7.25 12 11.5 19.5 7.25 M12 11.5V20"/></symbol>
 <symbol id="i-wire" viewBox="0 0 24 24"><path d="M4 4h16v16H4Z M4 20 20 4 M4 12l8-8 M12 20l8-8"/></symbol>
 <symbol id="i-spread" viewBox="0 0 24 24"><rect x="2.5" y="7" width="7" height="10" rx="1"/><rect x="14.5" y="7" width="7" height="10" rx="1"/><path d="M11.5 12h1"/></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5 M12 14.5v2"/></symbol>
+<symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17 M12 3.5c2.4 2.4 3.6 5.2 3.6 8.5s-1.2 6.1-3.6 8.5c-2.4-2.4-3.6-5.2-3.6-8.5s1.2-6.1 3.6-8.5Z"/></symbol>
+<symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6.5" height="6.5" rx="1.2"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.2"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.2"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.2"/></symbol>
 <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.500-7 10-7 10z"/></symbol>
 <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h9 M17 7h3 M4 17h3 M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
 <symbol id="i-swatch" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><circle cx="16.5" cy="16.5" r="3.5"/></symbol>
