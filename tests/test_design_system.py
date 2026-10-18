@@ -23,7 +23,7 @@ def client(out_dir, monkeypatch):
 @pytest.mark.parametrize("path,ctype", [
     ("/static/icons.svg", "image/svg+xml"),
     ("/static/favicon.svg", "image/svg+xml"),
-    ("/static/fonts/archivo-latin-wdth-normal.woff2", "font/woff2"),
+    ("/static/fonts/plus-jakarta-sans-latin-wght-normal.woff2", "font/woff2"),
     ("/static/fonts/ibm-plex-mono-latin-400-normal.woff2", "font/woff2"),
     ("/static/fonts/ibm-plex-mono-latin-500-normal.woff2", "font/woff2"),
 ])

@@ -8,7 +8,7 @@
 <link rel="icon" href="/static/favicon.ico" sizes="48x48">
 <link rel="apple-touch-icon" href="/static/brand/apple-touch-icon.png">
 <link rel="manifest" href="/static/brand/site.webmanifest">
-<meta name="theme-color" content="#14181f">
+<meta name="theme-color" content="#0f172a">
 <meta property="og:site_name" content="autosmith.eu">
 <meta property="og:title" content="autosmith: STL, made by AI">
 <meta property="og:image" content="/static/brand/og-image.png">
@@ -22,6 +22,7 @@
   <label class="search"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-search"/></svg>
     <input type="search" id="q" placeholder="Search models" autocomplete="off" aria-label="Search models"></label>
   <span class="live" id="live" title="Updates automatically when Claude changes something"><span class="dot"></span><span class="label">Live</span></span>
+  <a class="btn sm" id="donate" hidden target="_blank" rel="noopener noreferrer" title="Support autosmith with a donation (PayPal)"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-heart"/></svg>Donate</a>
   <a class="btn icon quiet" id="adminlink" hidden href="/admin" title="Admin: print-check settings and design system" aria-label="Admin"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-settings"/></svg></a>
   <button id="secbtn" class="icon quiet" hidden title="Account: passkeys, connecting Claude, tokens, logout" aria-label="Account"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-key"/></svg></button>
 </header>
@@ -48,6 +49,10 @@
     </ol>
   </div>
 </main>
+<footer class="foot">
+  Like autosmith? <a href="https://github.com/htilly/stl-mcp" target="_blank" rel="noopener noreferrer">Star it on GitHub</a>
+  &middot; pull requests are always appreciated.
+</footer>
 <dialog id="sec">
   <div class="sec">
     <h2>Account</h2>
@@ -171,6 +176,9 @@ const $ = (id) => document.getElementById(id);
 const sec = $("sec");
 const pkerr = $("pkerr");
 let auth = null;
+api("/auth/config").then((c) => {
+  if (c.donate_url) { $("donate").href = c.donate_url; $("donate").hidden = false; }
+}).catch(() => {});
 
 function renderAuth() {
   const u = auth.user;
