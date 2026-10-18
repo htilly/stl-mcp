@@ -1,5 +1,5 @@
 /* stl-mcp web UI. Tokens and components are documented in docs/DESIGN.md and shown live at
-   /static/design.html. Change a value here, not in a page: every page reads these tokens. */
+   /admin/design. Change a value here, not in a page: every page reads these tokens. */
 
 @font-face {
   font-family: "Archivo";
@@ -95,6 +95,18 @@ code, .mono { font-family: var(--mono); font-size: var(--t-sm); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
+
+/* text styles: the named roles from docs/DESIGN.md#text-styles. Components set the same values;
+   use a class directly when markup has no component of its own. */
+.ts-page    { font-size: var(--t-xl);   font-weight: 650; font-stretch: 96%; letter-spacing: -.015em; line-height: 1.2; }
+.ts-title   { font-size: var(--t-lg);   font-weight: 650; font-stretch: 96%; letter-spacing: -.01em;  line-height: 1.25; }
+.ts-heading { font-size: var(--t-md);   font-weight: 650; line-height: 1.3; }
+.ts-section { font-size: var(--t-base); font-weight: 650; line-height: 1.4; }
+.ts-body    { font-size: var(--t-base); font-weight: 400; line-height: 1.5; }
+.ts-hint    { font-size: var(--t-sm);   font-weight: 400; line-height: 1.5; color: var(--scribe); }
+.ts-label   { font-size: var(--t-xs);   font-weight: 500; font-stretch: var(--condensed); letter-spacing: .01em; line-height: 1.3; color: var(--scribe); }
+.ts-value   { font-size: var(--t-sm);   font-weight: 600; line-height: 1.4; }
+.ts-code    { font-family: var(--mono); font-size: var(--t-sm); font-weight: 400; line-height: 1.55; }
 
 /* icons: <svg class="i"><use href="/static/icons.svg#i-name"/></svg> */
 .i {
@@ -420,6 +432,15 @@ ol.steps .row { margin: var(--s1) 0; }
 ol.steps code { overflow-wrap: anywhere; }
 
 /* ---------------------------------------------------------------- settings (admin) */
+/* tabs between the admin pages; the current page has aria-current="page" */
+.tabs { display: flex; gap: var(--s1); align-self: stretch; margin-left: var(--s3); }
+.tabs a {
+  display: inline-flex; align-items: center; gap: 6px; padding: 0 var(--s3);
+  color: var(--scribe); font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.tabs a:hover { color: var(--graphite); text-decoration: none; }
+.tabs a[aria-current="page"] { color: var(--graphite); border-bottom-color: var(--layout); }
+
 .admin { max-width: 760px; margin: 0 auto; padding: var(--s5) var(--s4) var(--s7); display: flex; flex-direction: column; gap: var(--s4); }
 .admin > h1 { font-size: var(--t-xl); font-weight: 650; font-stretch: 96%; letter-spacing: -.015em; }
 .admin .group { background: var(--sheet); border: 1px solid var(--rule); border-radius: var(--r-panel); padding: var(--s4) var(--s4) var(--s2); }
@@ -453,6 +474,9 @@ ol.steps code { overflow-wrap: anywhere; }
   .viewer-layout { grid-template-columns: 1fr; grid-template-rows: 62vh auto; height: auto; }
   aside.side { border-left: 0; border-top: 1px solid var(--rule); }
   .toolbar .label { display: none; }
+  .tabs { margin-left: 0; }
+  .tabs a { padding: 0 var(--s2); }
+  header.top .crumb.admin-crumb { display: none; }
 }
 @media (max-width: 520px) {
   .wordmark .name { display: none; }

@@ -3,12 +3,42 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Design system · STL library</title>
+<title>Design system · Admin · STL library</title>
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/style.css">
 <style>
   /* page-only layout for the reference; the components themselves come from style.css */
-  .ref { max-width: 1080px; margin: 0 auto; padding: var(--s6) var(--s5) var(--s7); }
+  .refwrap { display: grid; grid-template-columns: 188px minmax(0, 1fr); gap: var(--s6); max-width: 1240px; margin: 0 auto; padding: 0 var(--s5); }
+  .refnav { position: sticky; top: calc(var(--header-h) + var(--s5)); align-self: start; padding-top: var(--s6); }
+  .refnav ol { list-style: none; margin: 0; padding: 0; border-left: 1px solid var(--rule); }
+  .refnav a { display: block; padding: 5px var(--s3); margin-left: -1px; border-left: 2px solid transparent; color: var(--scribe); font-size: 13px; }
+  .refnav a:hover { color: var(--graphite); text-decoration: none; }
+  .refnav a.here { color: var(--graphite); border-left-color: var(--layout); font-weight: 500; }
+  .ref { min-width: 0; padding: var(--s6) 0 var(--s7); }
+  .ref section { scroll-margin-top: calc(var(--header-h) + var(--s3)); }
+  .styles { width: 100%; border-collapse: collapse; }
+  .styles th, .styles td { text-align: left; padding: var(--s3) var(--s3) var(--s3) 0; border-top: 1px solid var(--rule); vertical-align: baseline; }
+  .styles thead th { border-top: 0; padding-top: 0; }
+  .styles td.spec { white-space: nowrap; width: 1%; }
+  .styles td.name { width: 1%; white-space: nowrap; }
+  .specimen { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: var(--s5); }
+  .specimen .aa { font-size: 112px; line-height: 1; font-weight: 600; letter-spacing: -.03em; }
+  .specimen .tb dd { white-space: normal; }
+  .specimen.mono .aa { font-family: var(--mono); font-weight: 500; letter-spacing: 0; font-size: 96px; }
+  .glyphs { font-size: 22px; line-height: 1.45; overflow-wrap: anywhere; margin-top: var(--s4); }
+  .specimen.mono .glyphs { font-family: var(--mono); font-size: 18px; }
+  .ramp { display: grid; gap: 2px; margin-top: var(--s4); }
+  .ramp div { display: grid; grid-template-columns: 56px minmax(0, 1fr); align-items: baseline; gap: var(--s3); }
+  .ramp span:last-child { font-size: 26px; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .numerals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s4); margin-top: var(--s4); }
+  .numerals div { font-size: var(--t-md); line-height: 1.6; text-align: right; }
+  .numerals .prop { font-variant-numeric: proportional-nums; }
+  @media (max-width: 860px) {
+    .refwrap { grid-template-columns: 1fr; padding: 0 var(--s4); }
+    .refnav { display: none; }
+    .specimen { grid-template-columns: 1fr; }
+    .styles td.spec { white-space: normal; }
+  }
   .ref > header { margin-bottom: var(--s6); max-width: 64ch; }
   .ref > header h1 { font-size: var(--t-xl); font-stretch: 96%; letter-spacing: -.015em; margin-bottom: var(--s2); }
   .ref > header p { color: var(--scribe); }
@@ -43,7 +73,11 @@
 <body>
 <header class="top">
   <a class="wordmark" href="/"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-mark"/></svg><span class="name">STL library</span></a>
-  <span class="crumb">/ <b>Design system</b></span>
+  <span class="crumb admin-crumb">/ <b>Admin</b></span>
+  <nav class="tabs" aria-label="Admin pages">
+    <a href="/admin"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-settings"/></svg>Print check</a>
+    <a href="/admin/design" aria-current="page"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-swatch"/></svg>Design system</a>
+  </nav>
   <div class="grow"></div>
   <div class="seg" role="group" aria-label="Theme">
     <button data-theme-set="light">Light</button>
@@ -52,11 +86,24 @@
   </div>
 </header>
 
+<div class="refwrap">
+<nav class="refnav" aria-label="Sections"><ol id="toc">
+  <li><a href="#colour">Colour</a></li>
+  <li><a href="#text-styles">Text styles</a></li>
+  <li><a href="#fonts">Fonts</a></li>
+  <li><a href="#title-block">Title block</a></li>
+  <li><a href="#icons">Icons</a></li>
+  <li><a href="#space">Space and shape</a></li>
+  <li><a href="#controls">Controls</a></li>
+  <li><a href="#library">Library</a></li>
+  <li><a href="#viewer">3D view</a></li>
+</ol></nav>
 <main class="ref">
   <header>
-    <h1>Design system</h1>
-    <p>The tokens, icons and components the web UI is built from, rendered from the live
-      <code>style.css</code> and <code>icons.svg</code>. The written rules are in <code>docs/DESIGN.md</code>.</p>
+    <h1 class="ts-page">Design system</h1>
+    <p>The colours, text styles, fonts, icons and components the web UI is built from. Every value on this
+      page is read from the live <code>style.css</code> and <code>icons.svg</code>, so it shows what is
+      deployed. The written rules are in <code>docs/DESIGN.md</code>.</p>
   </header>
 
   <section id="colour">
@@ -68,18 +115,60 @@
     <div class="swatches" id="parts"></div>
   </section>
 
-  <section id="type">
-    <h2>Type</h2>
-    <p>Archivo for the interface, with its width axis doing structural work. IBM Plex Mono only for things
-      you would copy into code. Every figure is tabular so dimensions line up.</p>
+  <section id="text-styles">
+    <h2>Text styles</h2>
+    <p>Nine named roles. Components already use them; reach for a <code>.ts-*</code> class only when markup
+      has no component of its own. The specs are measured from the page, not typed in.</p>
+    <div class="demo" style="padding-top:var(--s4)">
+      <table class="styles">
+        <thead><tr><th class="ts-label">Style</th><th class="ts-label">Sample</th><th class="ts-label">Spec</th></tr></thead>
+        <tbody id="styles"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="fonts">
+    <h2>Fonts</h2>
+    <p>Two families, both self-hosted from <code>web/fonts</code> under the SIL Open Font License, so the UI
+      makes no third-party requests.</p>
+    <div class="demo specimen">
+      <div>
+        <div class="aa">Aa</div>
+        <div class="glyphs">ABCDEFGHIJKLMNOPQRSTUVWXYZ<br>abcdefghijklmnopqrstuvwxyz<br>0123456789 × ± ° ³ Ø ≤ ≥ → … “ ” – —</div>
+        <h3>Weight</h3>
+        <div class="ramp" id="weights"></div>
+        <h3>Width</h3>
+        <div class="ramp" id="widths"></div>
+      </div>
+      <dl class="tb full" style="grid-auto-flow:row;grid-template-columns:1fr;align-self:start">
+        <div><dt>Family</dt><dd>Archivo</dd></div>
+        <div><dt>Role</dt><dd>Interface: everything except code</dd></div>
+        <div><dt>File</dt><dd class="mono">archivo-latin-wdth-normal.woff2</dd></div>
+        <div><dt>Axes</dt><dd>Weight 100–900, width 62–125%</dd></div>
+        <div><dt>In use</dt><dd>400, 500, 600, 650, 700; widths 78, 96, 100, 112%</dd></div>
+        <div><dt>Status</dt><dd id="st-archivo">Checking</dd></div>
+      </dl>
+    </div>
     <div class="demo">
-      <div class="typerow"><span class="hint">28 / 650</span><span style="font-size:var(--t-xl);font-weight:650;font-stretch:96%;letter-spacing:-.015em">Print-check settings</span></div>
-      <div class="typerow"><span class="hint">21 / 650</span><span style="font-size:var(--t-lg);font-weight:650;font-stretch:96%">Pen holder with three 12 mm holes</span></div>
-      <div class="typerow"><span class="hint">16 / 700 / 112%</span><span class="wordmark" style="font-size:var(--t-md)">STL library</span></div>
-      <div class="typerow"><span class="hint">14 / 400</span><span>Click the model where something should change, then tell Claude to look at the comments.</span></div>
-      <div class="typerow"><span class="hint">12 / 400</span><span class="hint" style="font-family:var(--sans)">80 × 50 × 25 mm, 41.2 cm³</span></div>
-      <div class="typerow"><span class="hint">11 / 500 / 78%</span><span style="font-size:var(--t-xs);font-weight:500;font-stretch:78%;color:var(--scribe)">Revision</span></div>
-      <div class="typerow"><span class="hint">Mono 12</span><code>update_model("pen-holder", {"n": 4, "h": 50})</code></div>
+      <h3 style="margin-top:0">Figures</h3>
+      <p class="ts-hint">All text uses tabular figures, so dimensions line up in lists and tables. Proportional figures, right, are shown only for comparison.</p>
+      <div class="numerals">
+        <div>80 × 50 × 25 mm<br>111.1 × 11.4 × 9 mm<br>101.714 cm³</div>
+        <div class="prop">80 × 50 × 25 mm<br>111.1 × 11.4 × 9 mm<br>101.714 cm³</div>
+      </div>
+    </div>
+    <div class="demo specimen mono">
+      <div>
+        <div class="aa">{ }</div>
+        <div class="glyphs">{"vars": {"w": 80, "wall": 2.4},<br>&nbsp;"root": {"op": "difference"}}<br>0O 1lI 5S 8B ; : , .</div>
+      </div>
+      <dl class="tb full" style="grid-auto-flow:row;grid-template-columns:1fr;align-self:start">
+        <div><dt>Family</dt><dd>IBM Plex Mono</dd></div>
+        <div><dt>Role</dt><dd>Recipes, ids, parameter names</dd></div>
+        <div><dt>Files</dt><dd class="mono">ibm-plex-mono-latin-400/500</dd></div>
+        <div><dt>In use</dt><dd>400, 500</dd></div>
+        <div><dt>Status</dt><dd id="st-mono">Checking</dd></div>
+      </dl>
     </div>
   </section>
 
@@ -219,9 +308,10 @@
     </div>
   </section>
 </main>
+</div>
 
 <script type="module">
-import { icon, PART_COLORS } from "/static/common.js";
+import { esc, icon, PART_COLORS } from "/static/common.js";
 const $ = (id) => document.getElementById(id);
 
 const TOKENS = [
@@ -230,7 +320,18 @@ const TOKENS = [
   ["--layout", "Accent"], ["--layout-wash", "Selection"], ["--pei", "Comments"],
   ["--fault", "Faults"], ["--sound", "Live, current"], ["--stage", "Viewport"], ["--plate", "Preview plate"],
 ];
-const ICONS = ["mark", "search", "key", "settings", "comment", "warning", "download", "copy", "duplicate",
+const STYLES = [
+  ["ts-page", "Page", "Print-check settings", "Page titles"],
+  ["ts-title", "Title", "Pen holder with three 12 mm holes", "Model name, login heading"],
+  ["ts-heading", "Heading", "Wall thickness", "Groups in settings and dialogs"],
+  ["ts-section", "Section", "Comments", "Side panel sections"],
+  ["ts-body", "Body", "Click the model where something should change.", "Running text, buttons, inputs"],
+  ["ts-hint", "Hint", "Saved. Applies to new builds.", "Help, metadata, dimensions"],
+  ["ts-label", "Label", "Revision", "Title block labels"],
+  ["ts-value", "Value", "80 × 50 × 25 mm", "Title block values"],
+  ["ts-code", "Code", "update_model(\"pen-holder\", {\"h\": 50})", "Recipes, ids, parameters"],
+];
+const ICONS = ["mark", "search", "key", "settings", "swatch", "type", "comment", "warning", "download", "copy", "duplicate",
   "back", "plus", "close", "check", "reply", "restore", "trash", "logout",
   "fit", "spin", "edges", "wire", "spread", "dimension"];
 
@@ -244,6 +345,39 @@ function drawSwatches() {
 }
 $("parts").innerHTML = PART_COLORS.map((c, i) => `<div class="sw"><div class="chip" style="background:${c}"></div>
   <dl class="tb"><div><dt>Part</dt><dd>${i + 1}</dd></div><div><dt>Value</dt><dd class="mono">${c}</dd></div></dl></div>`).join("");
+$("weights").innerHTML = [300, 400, 500, 600, 650, 700, 800].map((w) =>
+  `<div><span class="ts-label">${w}</span><span style="font-weight:${w}">Revision 12 of 12</span></div>`).join("");
+$("widths").innerHTML = [62, 78, 96, 100, 112, 125].map((w) =>
+  `<div><span class="ts-label">${w}%</span><span style="font-stretch:${w}%;font-weight:600">Revision 12 of 12</span></div>`).join("");
+
+function drawStyles() {
+  $("styles").innerHTML = STYLES.map(([cls, name, sample, use]) =>
+    `<tr><td class="name"><b>${name}</b><div class="ts-hint"><code>.${cls}</code></div></td>
+      <td><div class="${cls}" data-measure>${esc(sample)}</div><div class="ts-hint">${use}</div></td>
+      <td class="spec ts-hint" data-spec></td></tr>`).join("");
+  document.querySelectorAll("#styles tr").forEach((tr) => {
+    const cs = getComputedStyle(tr.querySelector("[data-measure]"));
+    const family = cs.fontFamily.split(",")[0].replace(/"/g, "");
+    const lh = (parseFloat(cs.lineHeight) / parseFloat(cs.fontSize)).toFixed(2).replace(/0$/, "");
+    tr.querySelector("[data-spec]").innerHTML = `${family}<br>${parseFloat(cs.fontSize)} px, weight ${cs.fontWeight}<br>`
+      + `width ${cs.fontStretch}, line ${lh}`;
+  });
+}
+
+async function fontStatus() {
+  await document.fonts.ready;
+  const ok = (spec) => document.fonts.check(spec) && [...document.fonts].some((f) => spec.includes(f.family.replace(/"/g, "")) && f.status === "loaded");
+  $("st-archivo").textContent = ok('600 16px "Archivo"') ? "Loaded" : "Not loaded: falling back to system-ui";
+  $("st-mono").textContent = ok('400 16px "Plex Mono"') ? "Loaded" : "Not loaded: falling back to ui-monospace";
+}
+
+// highlight the section in view
+const links = [...document.querySelectorAll("#toc a")];
+const toc = new IntersectionObserver((entries) => entries.forEach((e) => {
+  if (e.isIntersecting) links.forEach((a) => a.classList.toggle("here", a.hash === "#" + e.target.id));
+}), { rootMargin: "-20% 0px -70% 0px" });
+document.querySelectorAll(".ref section").forEach((sec) => toc.observe(sec));
+
 $("iconlist").innerHTML = ICONS.map((n) => `<figure>${icon(n)}<figcaption>i-${n}</figcaption></figure>`).join("");
 $("spacing").innerHTML = [4, 8, 12, 16, 24, 32, 48].map((n, i) =>
   `<figure><div style="width:${n}px;height:${n}px"></div>--s${i + 1}<br>${n}</figure>`).join("");
@@ -253,10 +387,12 @@ document.querySelectorAll("[data-theme-set]").forEach((b) => b.onclick = () => {
   if (t === "auto") delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = t;
   document.querySelectorAll("[data-theme-set]").forEach((x) => x.classList.toggle("on", x === b));
-  drawSwatches();
+  drawSwatches(); drawStyles();
 });
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", drawSwatches);
 drawSwatches();
+drawStyles();
+fontStatus();
 </script>
 </body>
 </html>

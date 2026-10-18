@@ -15,7 +15,7 @@
   <label class="search"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-search"/></svg>
     <input type="search" id="q" placeholder="Search models" autocomplete="off" aria-label="Search models"></label>
   <span class="live" id="live" title="Updates automatically when Claude changes something"><span class="dot"></span><span class="label">Live</span></span>
-  <a class="btn icon quiet" href="/admin" title="Print-check settings" aria-label="Print-check settings"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-settings"/></svg></a>
+  <a class="btn icon quiet" href="/admin" title="Admin: print-check settings and design system" aria-label="Admin"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-settings"/></svg></a>
   <button id="secbtn" class="icon quiet" hidden title="Passkeys, connected apps and logout" aria-label="Security"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-key"/></svg></button>
 </header>
 <main class="lib">
@@ -151,7 +151,7 @@ document.getElementById("secclose").addEventListener("click", () => sec.close())
 document.getElementById("copymcp").addEventListener("click", async (e) => {
   try {
     await navigator.clipboard.writeText(auth.mcp_url);
-    e.currentTarget.textContent = "Copied";
+    e.target.textContent = "Copied";
     setTimeout(() => { e.target.textContent = "Copy"; }, 1500);
   } catch {}
 });

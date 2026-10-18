@@ -21,7 +21,6 @@ def client(out_dir, monkeypatch):
 
 
 @pytest.mark.parametrize("path,ctype", [
-    ("/static/design.html", "text/html"),
     ("/static/icons.svg", "image/svg+xml"),
     ("/static/favicon.svg", "image/svg+xml"),
     ("/static/fonts/archivo-latin-wdth-normal.woff2", "font/woff2"),
@@ -72,3 +71,32 @@ def test_tokens_have_dark_values():
     forced = re.search(r':root\[data-theme="dark"\] \{(.*?)\}', css, re.S).group(1)
     names = lambda block: set(re.findall(r"(--[a-z-]+):", block))
     assert names(auto) == names(forced) and "--stage" in names(auto)
+
+
+def test_design_page_is_in_admin(client):
+    r = client.get("/admin/design")
+    assert r.status_code == 200 and "Design system" in r.text
+    for section in ("colour", "text-styles", "fonts", "icons"):
+        assert f'id="{section}"' in r.text
+    assert 'href="/admin/design" aria-current="page"' in r.text
+
+
+def test_admin_pages_link_to_each_other():
+    assert 'href="/admin/design"' in (WEB / "admin.html").read_text()
+    assert 'href="/admin"' in (WEB / "design.html").read_text()
+
+
+def test_design_page_requires_login_even_when_ui_is_public(client, monkeypatch):
+    monkeypatch.setattr(server, "TOKEN", "secret")
+    monkeypatch.setattr(server, "UI_PUBLIC", True)
+    assert client.get("/admin/design").status_code == 401
+    assert client.get("/admin/design", headers={"Authorization": "Bearer secret"}).status_code == 200
+
+
+def test_text_styles_are_defined_and_documented():
+    css = (WEB / "style.css").read_text()
+    doc = (Path(server.__file__).parent / "docs" / "DESIGN.md").read_text()
+    used = set(re.findall(r'\["(ts-[a-z]+)"', (WEB / "design.html").read_text()))
+    assert len(used) == 9
+    for cls in used:
+        assert re.search(rf"\.{cls}\s*\{{", css) and f"`.{cls}`" in doc

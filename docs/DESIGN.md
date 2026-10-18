@@ -4,8 +4,9 @@ The web UI is a workbench for parts that Claude builds and you print. It should 
 measuring tool: calm, exact, and quiet enough that the model on screen is the loudest thing.
 
 Everything below lives in [`web/style.css`](../web/style.css) (tokens and components) and
-[`web/icons.svg`](../web/icons.svg) (icons). A live reference with every token, icon and component
-is served at **`/static/design.html`**. Change a value in `style.css`, never in a page.
+[`web/icons.svg`](../web/icons.svg) (icons). A live reference with every colour, text style, font, icon and
+component is in the admin section at **`/admin/design`** (next to the print-check settings; it needs a
+login like the rest of admin). Change a value in `style.css`, never in a page.
 
 ## Principles
 
@@ -82,6 +83,23 @@ Scale (px), from the classical 11 / 12 / 14 / 16 / 21 / 28 steps:
 
 Weights: 400 body, 500 buttons and labels, 600 values, 650 headings, 700 wordmark and badges.
 
+### Text styles
+
+Named roles, defined as `.ts-*` classes in `style.css`. Components set the same values themselves;
+use a class directly only when the markup has no component of its own.
+
+| Class | Size / weight / width | Use |
+|---|---|---|
+| `.ts-page` | 28 / 650 / 96% | Page titles |
+| `.ts-title` | 21 / 650 / 96% | Model name, login heading |
+| `.ts-heading` | 16 / 650 | Groups in settings and dialogs |
+| `.ts-section` | 14 / 650 | Side panel sections |
+| `.ts-body` | 14 / 400 | Running text, buttons, inputs |
+| `.ts-hint` | 12 / 400, `--scribe` | Help, metadata, dimensions |
+| `.ts-label` | 11 / 500 / 78%, `--scribe` | Title block labels |
+| `.ts-value` | 12 / 600 | Title block values |
+| `.ts-code` | Plex Mono 12 / 400 | Recipes, ids, parameters |
+
 ## Space, shape, depth
 
 - Spacing is a 4 px grid: `--s1` 4 · `--s2` 8 · `--s3` 12 · `--s4` 16 · `--s5` 24 · `--s6` 32 · `--s7` 48.
@@ -108,7 +126,9 @@ gives the 14 px size. An icon-only button needs `class="icon"` and an `aria-labe
 | `i-mark` | The product mark (isometric block with a blue top face) |
 | `i-search` | Search |
 | `i-key` | Passkeys and login security |
-| `i-settings` | Print-check settings |
+| `i-settings` | Admin: print-check settings |
+| `i-swatch` | Admin: design system |
+| `i-type` | Typography |
 | `i-comment` | Comments, comment mode |
 | `i-warning` | Print-check warning |
 | `i-download` | Download STL |
@@ -143,6 +163,7 @@ The browser tab icon is [`web/favicon.svg`](../web/favicon.svg): the mark with f
 | `.hud`, `.toast` | Viewport overlays: overall size (bottom left), notifications (bottom right) |
 | `.gate .panel` | Centred panel for login and app consent |
 | `dialog` | Modal: passkeys and connected apps |
+| `.tabs` | Links between admin pages; the current one has `aria-current="page"` |
 | `.admin` | Settings page layout |
 
 ## Writing
