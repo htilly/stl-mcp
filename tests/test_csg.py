@@ -108,9 +108,18 @@ def test_resolve_vars_in_order():
     assert csg.resolve_vars({"a": 2, "b": "=a*3", "c": "=a+b"}) == {"a": 2, "b": 6, "c": 8}
 
 
-def test_resolve_vars_forward_reference_fails():
+def test_resolve_vars_any_order():
+    assert csg.resolve_vars({"c": "=a+b", "b": "=a*3", "a": 2}) == {"c": 8, "b": 6, "a": 2}
+
+
+def test_resolve_vars_cycle_fails():
+    with pytest.raises(ValueError, match="circular"):
+        csg.resolve_vars({"a": "=b", "b": "=a"})
+
+
+def test_resolve_vars_unknown_fails():
     with pytest.raises(ValueError, match="unknown variable"):
-        csg.resolve_vars({"a": "=b", "b": 1})
+        csg.resolve_vars({"a": "=nope"})
 
 
 def test_resolve_vars_empty():
