@@ -132,11 +132,36 @@ python -m pytest
 
 ## Connecting to Claude
 - Claude Desktop/Code: `claude mcp add --transport http stl https://<your-url>/mcp --header "Authorization: Bearer <token>"`
-- claude.ai (and the Claude apps): Settings → Connectors → Add custom connector →
-  `https://<your-url>/mcp`, then Connect. The server is its own OAuth authorization server: you
-  log in to the web UI (passkey or token) and approve the connection. Connected apps are listed
-  under 🔑 in the library, where they can be disconnected. Requires `PUBLIC_URL` on https (or
-  localhost); `OAUTH=0` turns it off.
+- claude.ai and the Claude apps: see below. No token is needed, you approve the connection with
+  your passkey.
+
+### Connecting claude.ai, step by step
+Once, about a minute. The connector then also works in the Claude apps on your phone and desktop.
+
+1. **Get a passkey (recommended).** Open the library (`https://<your-url>/`, for this deployment
+   `https://stl.tilly.se/`), log in with the token once and click **Add passkey** in the banner
+   (or under 🔑 in the header). Without a passkey you can still log in with the token in step 5.
+2. In claude.ai, open **Settings → Connectors** and click **Add custom connector**.
+3. Name: `STL library`. URL: `https://<your-url>/mcp` (here: `https://stl.tilly.se/mcp`).
+   Leave the advanced settings (OAuth client id/secret) empty. Click **Add**.
+4. Click **Connect** next to the new connector. A page from your server opens.
+5. If you are not logged in there, click **Log in with passkey** (or use the token).
+6. The page asks *Connect Claude?* and says where you will be sent back to. Check that it is
+   `https://claude.ai`, then click **Allow**. You are sent back and the connector shows as
+   connected.
+7. In a chat, turn the connector on in the tools menu and ask, for example, *"Make a box
+   80×50×25 mm with a lid"*. Claude answers with a link to the model in the library.
+
+**If something goes wrong**
+- *"The request has expired"*: the approval page is valid for 10 minutes. Click Connect again.
+- Connect fails before any page opens: `PUBLIC_URL` must be the exact https address (here
+  `https://stl.tilly.se`), and the server log must not say `OAuth disabled`.
+- **Disconnecting:** 🔑 → Connected apps → **Disconnect** stops the app's access at once (it must
+  be approved again to reconnect). Rotating `MCP_TOKEN` logs browsers out but does *not*
+  disconnect apps, so use Disconnect for that.
+
+The server is its own OAuth authorization server (dynamic client registration, PKCE, consent
+page). It requires `PUBLIC_URL` on https (or localhost); `OAUTH=0` turns it off.
 
 ## MCP tools
 | tool | |

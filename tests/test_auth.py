@@ -496,3 +496,9 @@ def test_passkey_login_then_approve_oauth(client):
     r = client.post("/oauth/consent", data={"req": req, "decision": "allow"})
     code = parse_qs(urlparse(r.headers["location"]).query)["code"][0]
     assert exchange(client, c, verifier, code).status_code == 200
+
+
+def test_library_page_has_claude_connect_guide(client):
+    login(client)
+    page = client.get("/").text
+    assert 'id="howto"' in page and 'id="copymcp"' in page and "Add custom connector" in page
