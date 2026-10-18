@@ -95,13 +95,17 @@ without guessing:
 Comments belong to the version they were made on (shown as `v1 · model` in the list), so you can still tell what
 a comment referred to after the model has changed.
 
-### Having Claude react to comments immediately
-Instead of saying *"look at the comments"*, run `tools/stl_watch.py watch` as a background monitor in a
-Claude Code session. It follows the server's `/api/events` stream and prints one
+### Having Claude react to comments
+Nothing to set up: every tool result (and `whoami`) carries a `comments_waiting` list of the models
+that have open comments, and the server instructions tell Claude to read and handle them as part of
+its answer. So Claude picks up your comments the next time it does anything in the conversation, in
+claude.ai, ChatGPT or Claude Code alike. A server can not wake a chat client by itself (MCP has no
+push that claude.ai acts on), so Claude still waits for your next message.
+
+For an *instant* reaction in Claude Code, optionally run `tools/stl_watch.py watch` as a background
+monitor in the session. It follows the server's `/api/events` stream and prints one
 `NEW_COMMENT model=<id> open=<n> url=...` line for each new open comment, which wakes Claude, who
 reads it (`tools/stl_watch.py comments`) and answers it with `update_model(..., resolves=[...])`.
-Claude can not be woken by the server on its own (connecting claude.ai does not start this), so this
-watcher is what makes the reaction instant.
 ```
 export STL_MCP_URL=https://your-server          # default: https://stl.tilly.se
 python3 tools/stl_watch.py login                # once: sign in in the browser, like connecting claude.ai

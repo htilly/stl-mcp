@@ -130,7 +130,11 @@ mcp = FastMCP(
         "get_model shows the recipe and the user's comments: they are points the user "
         "clicked in the 3D view, with near_nodes = the nodes in the recipe that are closest. "
         "Resolve them with update_model(..., resolves=[id]) or answer with reply_to_comment. "
-        "list_models shows open_comments per model. Always give the user the viewer_url. "
+        "list_models shows open_comments per model. Comments are not pushed to you, so every result "
+        "that has comments_waiting lists models with open comments the user has left in the 3D "
+        "view: read them with get_model and handle them (update_model with resolves, or "
+        "reply_to_comment) as part of your answer, without waiting to be asked; call whoami or "
+        "list_models at the start of a conversation to see whether any are waiting. Always give the user the viewer_url. "
         "Every build runs a print check; problems (not watertight, thin walls, overhangs, too big "
         "for the bed ...) come back as print_warnings. Fix them when you can, otherwise tell the "
         "user; check_print re-checks a model or file with the current settings. "
@@ -143,7 +147,13 @@ mcp = FastMCP(
 
 # ---------------------------------------------------------------- helpers
 
-def _summary(m: dict, full: bool = False) -> dict:
+def _waiting(lib: Lib) -> list[dict]:
+    """Models in the user's library with open comments from the web UI."""
+    return [{"model_id": m["id"], "name": m["name"], "open": n,
+             "viewer_url": f"{PUBLIC_URL}/m/{m['id']}"} for m in lib.models.list() if (n := _open(m))]
+
+
+def _summary(m: dict, full: bool = False, lib: Lib | None = None) -> dict:
     cur = Store.current(m)
     out = {
         "model_id": m["id"],
@@ -166,6 +176,8 @@ def _summary(m: dict, full: bool = False) -> dict:
         comments = m.get("comments", [])
         out["comments"] = [_comment_view(c) for c in comments if c["status"] == "open"]
         out["resolved_comments"] = sum(c["status"] != "open" for c in comments)
+    if lib and (waiting := _waiting(lib)):
+        out["comments_waiting"] = waiting
     return out
 
 
@@ -251,7 +263,7 @@ async def create_model(name: str, spec: dict, description: str = "", ctx: Contex
     lib = _lib(ctx)
     lib.ensure_room(new_model=True)
     m = await _run(lib.models.create, name, "csg", spec, description)
-    return _summary(m)
+    return _summary(m, lib=lib)
 
 
 @mcp.tool()
@@ -283,7 +295,7 @@ async def create_enclosure(
               "standoffs": standoffs or [], "cutouts": cutouts or [], "lid_holes": lid_holes or [],
               "lid_slots": lid_slots or []}
     m = await _run(lib.models.create, name, "enclosure", params, description)
-    return _summary(m)
+    return _summary(m, lib=lib)
 
 
 @mcp.tool()
@@ -296,7 +308,7 @@ async def create_from_script(name: str, code: str, description: str = "", ctx: C
     if lib.user["role"] != "admin":
         raise PermissionError("script models are for admins only")
     m = await _run(lib.models.create, name, "script", {"code": code}, description)
-    return _summary(m)
+    return _summary(m, lib=lib)
 
 
 @mcp.tool()
@@ -318,7 +330,7 @@ async def update_model(model_id: str, changes: dict | None = None, remove: list[
     lib.ensure_room()
     m = await _run(lib.models.update, model_id, params=params, changes=changes, remove=remove,
                    note=note, name=name, description=description, resolves=resolves)
-    return _summary(m)
+    return _summary(m, lib=lib)
 
 
 @mcp.tool()
@@ -327,7 +339,7 @@ def get_model(model_id: str, ctx: Context = None) -> dict:
     comments. A comment has text, point (mm, in the part's coordinates = the STL file's), part,
     version and near_nodes (JSON pointers to the nearest nodes in the recipe)."""
     lib = _lib(ctx)
-    return _summary(lib.models.get(model_id), full=True)
+    return _summary(lib.models.get(model_id), full=True, lib=lib)
 
 
 @mcp.tool()
@@ -358,7 +370,7 @@ async def render_model(model_id: str, version: int | None = None,
         parts = {n: trimesh.load(lib.models.file(model_id, p["file"])) for n, p in v["parts"].items()}
         return render.render_png(parts, vw)
     png = await _run(work)
-    info = _summary(m)
+    info = _summary(m, lib=lib)
     info["rendered_version"] = v["version"]
     return [json.dumps(info, ensure_ascii=False), Image(data=png, format="png")]
 
@@ -381,7 +393,7 @@ async def revert_model(model_id: str, version: int, ctx: Context = None) -> dict
     """Restores the model to an earlier version (created as a new version)."""
     lib = _lib(ctx)
     lib.ensure_room()
-    return _summary(await _run(lib.models.revert, model_id, version))
+    return _summary(await _run(lib.models.revert, model_id, version), lib=lib)
 
 
 @mcp.tool()
@@ -389,7 +401,7 @@ async def duplicate_model(model_id: str, name: str, ctx: Context = None) -> dict
     """Copies a model to a new one (to try a variant without touching the original)."""
     lib = _lib(ctx)
     lib.ensure_room(new_model=True)
-    return _summary(await _run(lib.models.duplicate, model_id, name))
+    return _summary(await _run(lib.models.duplicate, model_id, name), lib=lib)
 
 
 @mcp.tool()
@@ -404,7 +416,10 @@ def delete_model(model_id: str, ctx: Context = None) -> str:
 def whoami(ctx: Context) -> dict:
     """The account this connection is signed in as (models and files belong to it)."""
     u = _mcp_user(ctx)
-    return {"name": u["display_name"], "email": u["email"], "role": u["role"]}
+    out = {"name": u["display_name"], "email": u["email"], "role": u["role"]}
+    if waiting := _waiting(Lib(u)):
+        out["comments_waiting"] = waiting
+    return out
 
 
 # ---------------------------------------------------------------- standalone files (Tinkercad etc.)
