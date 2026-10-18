@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Client helper for a deployed stl-mcp server: react to web UI comments as they are made.
 
+  stl_watch.py login                 sign in once through the browser (OAuth), no token to copy
   stl_watch.py watch                 stream /api/events; print one line per NEW open comment
   stl_watch.py comments              print every open comment (model, id, text, point, normal)
   stl_watch.py call <tool> [json]    call an MCP tool, print its text result
@@ -8,25 +9,157 @@
 Run `watch` as a background monitor in a Claude Code session: each printed line wakes Claude, who
 reads the comment with `comments` and answers it with update_model(..., resolves=[...]).
 
+Sign-in: run `login` once. It opens the server's normal consent page in your browser (the same
+OAuth flow claude.ai uses), so the watcher acts as the account you sign in with and sees exactly
+that account's models and comments. The refresh token is kept in ~/.config/stl-watch/oauth.json
+(mode 0600) and renewed automatically; sign in again if it is revoked or expires (90 days idle).
+
 Configuration (nothing is ever printed):
   STL_MCP_URL    server base URL, default https://stl.tilly.se
-  STL_MCP_TOKEN  the server's MCP_TOKEN. If unset, the macOS keychain item "stl-mcp-token" is used.
+  STL_MCP_TOKEN  optional, overrides `login`: the server's MCP_TOKEN (admin, sees everything).
+                 If unset and not signed in, the macOS keychain item "stl-mcp-token" is tried.
                  Add that once, with a hidden prompt:
                    security add-generic-password -a "$USER" -s stl-mcp-token -U -w
 """
-import os
+import base64
+import hashlib
+import http.server
 import json
+import os
+import secrets
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
+import webbrowser
+from pathlib import Path
 
 BASE = os.environ.get("STL_MCP_URL", "https://stl.tilly.se").rstrip("/")
 
 
+CREDENTIALS = Path(os.environ.get("STL_WATCH_CREDENTIALS",
+                                  Path.home() / ".config" / "stl-watch" / "oauth.json"))
+RENEW_MARGIN = 300  # renew the access token when it has less than this many seconds left
+
+
+def _load_oauth() -> dict | None:
+    try:
+        d = json.loads(CREDENTIALS.read_text()).get(BASE)
+    except (OSError, ValueError):
+        return None
+    return d if isinstance(d, dict) and d.get("refresh_token") else None
+
+
+def _save_oauth(d: dict) -> None:
+    try:
+        all_ = json.loads(CREDENTIALS.read_text())
+    except (OSError, ValueError):
+        all_ = {}
+    all_[BASE] = d
+    CREDENTIALS.parent.mkdir(parents=True, exist_ok=True)
+    tmp = CREDENTIALS.with_name(CREDENTIALS.name + ".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(all_, f)
+    os.replace(tmp, CREDENTIALS)
+
+
+def _form(url: str, fields: dict) -> dict:
+    req = urllib.request.Request(url, urllib.parse.urlencode(fields).encode(),
+                                 {"User-Agent": "stl-watch/1"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.load(r)
+
+
+def _json(url: str, data: dict | None = None) -> dict:
+    h = {"User-Agent": "stl-watch/1"}
+    if data is not None:
+        h["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, json.dumps(data).encode() if data is not None else None, h)
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.load(r)
+
+
+def _store_tokens(cred: dict, tok: dict) -> dict:
+    cred = {**cred, "access_token": tok["access_token"],
+            "refresh_token": tok.get("refresh_token", cred["refresh_token"]),
+            "expires_at": time.time() + int(tok.get("expires_in", 3600))}
+    _save_oauth(cred)
+    return cred
+
+
+def oauth_token() -> str | None:
+    """A valid OAuth access token from `login`, renewed through the refresh token; None if not signed in."""
+    cred = _load_oauth()
+    if not cred:
+        return None
+    if cred.get("access_token") and cred.get("expires_at", 0) - time.time() > RENEW_MARGIN:
+        return cred["access_token"]
+    try:
+        tok = _form(cred["token_endpoint"], {"grant_type": "refresh_token", "client_id": cred["client_id"],
+                                             "refresh_token": cred["refresh_token"]})
+    except urllib.error.HTTPError as e:
+        if e.code in (400, 401):  # refresh token revoked, rotated away or expired
+            sys.exit("WATCH_STOPPED sign-in expired or revoked - run `stl_watch.py login` again")
+        raise  # a server hiccup: the caller retries
+    return _store_tokens(cred, tok)["access_token"]
+
+
+def cmd_login():
+    meta = _json(BASE + "/.well-known/oauth-authorization-server")
+    result: dict = {}
+    state = secrets.token_urlsafe(16)
+
+    class Callback(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            if urllib.parse.urlparse(self.path).path != "/callback" or q.get("state") != [state]:
+                self.send_error(404)
+                return
+            result.update({k: v[0] for k, v in q.items()})
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b"<h3>autosmith watcher signed in.</h3><p>You can close this tab.</p>")
+
+        def log_message(self, *a):
+            pass
+
+    httpd = http.server.HTTPServer(("127.0.0.1", 0), Callback)
+    redirect = f"http://127.0.0.1:{httpd.server_port}/callback"
+    client = _json(meta["registration_endpoint"], {
+        "client_name": "stl-watch", "redirect_uris": [redirect], "grant_types": ["authorization_code", "refresh_token"],
+        "response_types": ["code"], "token_endpoint_auth_method": "none"})
+    verifier = secrets.token_urlsafe(48)
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+    url = meta["authorization_endpoint"] + "?" + urllib.parse.urlencode({
+        "response_type": "code", "client_id": client["client_id"], "redirect_uri": redirect, "state": state,
+        "code_challenge": challenge, "code_challenge_method": "S256", "scope": "stl"})
+    print("Opening your browser to sign in. If it does not open, visit:\n" + url, flush=True)
+    webbrowser.open(url)
+    httpd.timeout = 300  # the consent request itself expires after 10 minutes
+    deadline = time.time() + 300
+    while not result and time.time() < deadline:
+        httpd.handle_request()
+    httpd.server_close()
+    if "code" not in result:
+        sys.exit(f"login failed: {result.get('error_description') or result.get('error') or 'timed out'}")
+    tok = _form(meta["token_endpoint"], {
+        "grant_type": "authorization_code", "code": result["code"], "redirect_uri": redirect,
+        "client_id": client["client_id"], "code_verifier": verifier})
+    _store_tokens({"client_id": client["client_id"], "token_endpoint": meta["token_endpoint"],
+                   "refresh_token": ""}, tok)
+    print(f"Signed in. Credentials saved to {CREDENTIALS}")
+
+
 def token() -> str:
     t = os.environ.get("STL_MCP_TOKEN", "").strip()
+    if t:
+        return t
+    t = oauth_token()
     if t:
         return t
     try:
@@ -35,8 +168,8 @@ def token() -> str:
     except FileNotFoundError:  # not macOS
         r = None
     if r is None or r.returncode != 0 or not r.stdout.strip():
-        sys.exit("no token: set STL_MCP_TOKEN or add the keychain item 'stl-mcp-token' "
-                 "(see the docstring in stl_watch.py)")
+        sys.exit("not signed in: run `stl_watch.py login` (or set STL_MCP_TOKEN, "
+                 "see the docstring in stl_watch.py)")
     return r.stdout.strip()
 
 
@@ -138,14 +271,16 @@ def cmd_watch():
                         check()
         except (urllib.error.URLError, OSError, TimeoutError, ValueError) as e:
             if isinstance(e, urllib.error.HTTPError) and e.code in (401, 403):
-                sys.exit(f"WATCH_STOPPED auth failed (http {e.code}) - token rotated?")
+                sys.exit(f"WATCH_STOPPED auth failed (http {e.code}) - run `stl_watch.py login` again")
             time.sleep(delay)
             delay = min(delay * 2, 60)
 
 
 if __name__ == "__main__":
     a = sys.argv[1:]
-    if a[:1] == ["watch"]:
+    if a[:1] == ["login"]:
+        cmd_login()
+    elif a[:1] == ["watch"]:
         cmd_watch()
     elif a[:1] == ["comments"]:
         cmd_comments()

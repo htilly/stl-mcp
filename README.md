@@ -95,18 +95,31 @@ without guessing:
 Comments belong to the version they were made on (shown as `v1 · model` in the list), so you can still tell what
 a comment referred to after the model has changed.
 
-### Having Claude react to comments immediately
-Instead of saying *"look at the comments"*, run `tools/stl_watch.py watch` as a background monitor in a
-Claude Code session. It follows the server's `/api/events` stream and prints one
+### Having Claude react to comments
+Nothing to set up: every tool result (and `whoami`) carries a `comments_waiting` list of the models
+that have open comments, and the server instructions tell Claude to read and handle them as part of
+its answer. So Claude picks up your comments the next time it does anything in the conversation, in
+claude.ai, ChatGPT or Claude Code alike. A server can not wake a chat client by itself (MCP has no
+push that claude.ai acts on), so Claude still waits for your next message.
+
+For an *instant* reaction in Claude Code, optionally run `tools/stl_watch.py watch` as a background
+monitor in the session. It follows the server's `/api/events` stream and prints one
 `NEW_COMMENT model=<id> open=<n> url=...` line for each new open comment, which wakes Claude, who
 reads it (`tools/stl_watch.py comments`) and answers it with `update_model(..., resolves=[...])`.
 ```
 export STL_MCP_URL=https://your-server          # default: https://stl.tilly.se
-export STL_MCP_TOKEN=...                        # or store it once in the macOS keychain:
-security add-generic-password -a "$USER" -s stl-mcp-token -U -w
+python3 tools/stl_watch.py login                # once: sign in in the browser, like connecting claude.ai
 python3 tools/stl_watch.py watch
 ```
-The script needs only the standard library and never prints the token. It runs while that session
+`login` runs the server's normal OAuth consent flow (the same one claude.ai uses): it opens your
+browser, you sign in and press **Allow**, and the watcher then acts as that account and sees exactly
+its models and comments. The refresh token is kept in `~/.config/stl-watch/oauth.json` (mode 0600)
+and renewed automatically. If it is revoked (the account's *Connected apps* list, or "log out
+everywhere") or unused for 90 days, `watch` exits with `WATCH_STOPPED`; run `login` again.
+Use `STL_MCP_TOKEN` (or the keychain item `stl-mcp-token`) to authenticate with the server's
+`MCP_TOKEN` instead; it overrides `login` and sees everything.
+
+The script needs only the standard library and never prints a token. It runs while that session
 is open; comments made while nothing is watching simply wait.
 
 ## Running
