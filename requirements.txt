@@ -1,4 +1,4 @@
-mcp>=1.2,<2
+mcp>=1.30,<2
 trimesh
 manifold3d
 numpy
@@ -10,3 +10,4 @@ scipy
 networkx
 fast-simplification
 httpx
+webauthn>=3,<4

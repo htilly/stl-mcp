@@ -14,8 +14,14 @@
   <input type="search" id="q" placeholder="Search models…" autocomplete="off">
   <a href="/admin" title="Print-check settings">Settings</a>
   <span class="live" id="live" title="Updates automatically when Claude changes something"><span class="dot"></span>live</span>
+  <button id="secbtn" hidden title="Passkeys, connected apps and logout">🔑</button>
 </header>
 <main class="lib">
+  <div class="banner" id="pkbanner" hidden>
+    <span>Log in with one tap next time: add a passkey (Face ID, Touch ID or your password manager).</span>
+    <button class="primary" id="pkadd1">Add passkey</button>
+    <button id="pkdismiss">Not now</button>
+  </div>
   <div class="grid" id="grid"></div>
   <div class="empty" id="empty" hidden>
     <h2>No models yet</h2>
@@ -23,8 +29,37 @@
        The model shows up here right away.</p>
   </div>
 </main>
+<dialog id="sec">
+  <div class="sec">
+    <h2>Passkeys</h2>
+    <ul class="plain" id="pklist"></ul>
+    <div class="row"><input type="text" id="pkname" placeholder="Name, e.g. iPhone" style="flex:1">
+      <button class="primary" id="pkadd2">Add passkey</button></div>
+    <p class="warn" id="pkerr" hidden></p>
+  </div>
+  <div class="sec" id="appsec" hidden>
+    <h2>Connected apps</h2>
+    <ul class="plain" id="applist"></ul>
+    <details id="howto">
+      <summary>How to connect claude.ai</summary>
+      <ol class="steps">
+        <li>In claude.ai, open <b>Settings → Connectors</b> and click <b>Add custom connector</b>.</li>
+        <li>Name it <code class="mono">STL library</code> and paste this URL:
+          <span class="row"><code class="mono" id="mcpurl"></code><button id="copymcp">Copy</button></span>
+          Leave the advanced settings empty and click <b>Add</b>.</li>
+        <li>Click <b>Connect</b>. A page from this library opens; log in with your passkey if asked.</li>
+        <li>Check that it sends you back to <b>https://claude.ai</b>, then click <b>Allow</b>.</li>
+        <li>In a chat, turn the connector on in the tools menu and ask Claude for a model.</li>
+      </ol>
+    </details>
+  </div>
+  <div class="sec row">
+    <button id="logout">Log out</button><div class="grow"></div>
+    <button id="secclose">Close</button>
+  </div>
+</dialog>
 <script type="module">
-import { api, subscribe, ago, fmt, esc } from "/static/common.js";
+import { api, subscribe, ago, fmt, esc, passkeyRegister, passkeysSupported } from "/static/common.js";
 
 const grid = document.getElementById("grid");
 const q = document.getElementById("q");
@@ -58,6 +93,85 @@ q.addEventListener("input", () => render());
 subscribe((d) => load(d.id), document.getElementById("live"));
 load();
 setInterval(() => render(), 60000);  // refresh "x min ago"
+
+// ---- login security: passkeys, connected OAuth apps, logout
+const sec = document.getElementById("sec");
+const pkerr = document.getElementById("pkerr");
+let auth = null;
+
+function renderAuth() {
+  document.getElementById("secbtn").hidden = !auth.login_required;
+  let dismissed = false;
+  try { dismissed = localStorage.getItem("pk-banner-dismissed") === "1"; } catch {}
+  document.getElementById("pkbanner").hidden =
+    !auth.login_required || auth.passkeys.length > 0 || dismissed || !passkeysSupported();
+  document.getElementById("pklist").innerHTML = auth.passkeys.map((p) => `<li>
+    <span><b>${esc(p.name)}</b> <span class="hint">added ${ago(p.created)}${p.last_used ? `, used ${ago(p.last_used)}` : ""}</span></span>
+    <button class="danger" data-pk="${esc(p.id)}">Remove</button></li>`).join("")
+    || `<li class="hint">No passkeys yet.</li>`;
+  document.getElementById("appsec").hidden = !auth.oauth;
+  document.getElementById("mcpurl").textContent = auth.mcp_url;
+  document.getElementById("howto").open = auth.clients.length === 0;
+  document.getElementById("applist").innerHTML = auth.clients.map((c) => `<li>
+    <span><b>${esc(c.name)}</b> <span class="hint">${esc((c.redirect_uris[0] || "").replace(/^(\w+:\/\/[^/]+).*/, "$1"))}, approved ${ago(c.last_authorized)}</span></span>
+    <button class="danger" data-app="${esc(c.client_id)}">Disconnect</button></li>`).join("")
+    || `<li class="hint">No apps connected.</li>`;
+}
+
+async function loadAuth() {
+  try { auth = await api("/api/auth"); } catch { return; }  // e.g. UI_PUBLIC without a login
+  renderAuth();
+}
+
+async function addPasskey() {
+  pkerr.hidden = true;
+  const name = document.getElementById("pkname").value.trim()
+    || (/iPhone|iPad/.test(navigator.userAgent) ? "iPhone/iPad" : /Mac/.test(navigator.userAgent) ? "Mac" : "passkey");
+  try {
+    await passkeyRegister(name);
+    document.getElementById("pkname").value = "";
+    await loadAuth();
+  } catch (e) {
+    if (e.name === "NotAllowedError") return;
+    if (e.name === "InvalidStateError") e.message = "This device already has a passkey for the library.";
+    pkerr.textContent = e.message;
+    pkerr.hidden = false;
+    sec.open || sec.showModal();
+  }
+}
+
+document.getElementById("secbtn").addEventListener("click", () => { loadAuth(); sec.showModal(); });
+document.getElementById("secclose").addEventListener("click", () => sec.close());
+document.getElementById("copymcp").addEventListener("click", async (e) => {
+  try {
+    await navigator.clipboard.writeText(auth.mcp_url);
+    e.target.textContent = "Copied";
+    setTimeout(() => { e.target.textContent = "Copy"; }, 1500);
+  } catch {}
+});
+document.getElementById("pkadd1").addEventListener("click", addPasskey);
+document.getElementById("pkadd2").addEventListener("click", addPasskey);
+document.getElementById("pkdismiss").addEventListener("click", () => {
+  try { localStorage.setItem("pk-banner-dismissed", "1"); } catch {}
+  document.getElementById("pkbanner").hidden = true;
+});
+document.getElementById("pklist").addEventListener("click", async (e) => {
+  const id = e.target.dataset.pk;
+  if (!id || !confirm("Remove this passkey? You can no longer log in with it.")) return;
+  await api(`/api/auth/passkeys/${encodeURIComponent(id)}`, { method: "DELETE" });
+  loadAuth();
+});
+document.getElementById("applist").addEventListener("click", async (e) => {
+  const id = e.target.dataset.app;
+  if (!id || !confirm("Disconnect this app? It has to be approved again to reconnect.")) return;
+  await api(`/api/auth/clients/${encodeURIComponent(id)}`, { method: "DELETE" });
+  loadAuth();
+});
+document.getElementById("logout").addEventListener("click", async () => {
+  await api("/auth/logout", { method: "POST", body: {} });
+  location.reload();
+});
+loadAuth();
 </script>
 </body>
 </html>

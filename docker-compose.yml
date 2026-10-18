@@ -10,6 +10,7 @@ services:
       ALLOW_SCRIPT: ${ALLOW_SCRIPT:-0}
       FILES_PUBLIC: ${FILES_PUBLIC:-0}
       UI_PUBLIC: ${UI_PUBLIC:-0}
+      OAUTH: ${OAUTH:-1}
     volumes: ["${DATA_DIR:-./data}:/data"]
 
   # Optional HTTPS with an automatic certificate: `docker compose --profile caddy up -d`

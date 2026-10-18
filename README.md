@@ -119,7 +119,9 @@ or set `DOMAIN` and run `docker compose --profile caddy up -d` for automatic HTT
 [`deploy/README.md`](deploy/README.md).
 
 Open `http://localhost:8765/` and log in with the token, or go to `/?token=<token>`, which
-sets a cookie.
+sets a session cookie. Then add a passkey (the banner in the library, or 🔑 in the header):
+from then on, logging in is one tap with Face ID, Touch ID or your password manager. Passkeys
+are bound to the host name in `PUBLIC_URL`.
 
 ## Tests
 ```
@@ -130,9 +132,36 @@ python -m pytest
 
 ## Connecting to Claude
 - Claude Desktop/Code: `claude mcp add --transport http stl https://<your-url>/mcp --header "Authorization: Bearer <token>"`
-- claude.ai: Settings → Connectors → Add custom connector → `https://<your-url>/mcp`
-  (claude.ai cannot send a custom header. Put the server behind your reverse proxy/OAuth,
-  or use Claude Desktop/Code.)
+- claude.ai and the Claude apps: see below. No token is needed, you approve the connection with
+  your passkey.
+
+### Connecting claude.ai, step by step
+Once, about a minute. The connector then also works in the Claude apps on your phone and desktop.
+
+1. **Get a passkey (recommended).** Open the library (`https://<your-url>/`, for this deployment
+   `https://stl.tilly.se/`), log in with the token once and click **Add passkey** in the banner
+   (or under 🔑 in the header). Without a passkey you can still log in with the token in step 5.
+2. In claude.ai, open **Settings → Connectors** and click **Add custom connector**.
+3. Name: `STL library`. URL: `https://<your-url>/mcp` (here: `https://stl.tilly.se/mcp`).
+   Leave the advanced settings (OAuth client id/secret) empty. Click **Add**.
+4. Click **Connect** next to the new connector. A page from your server opens.
+5. If you are not logged in there, click **Log in with passkey** (or use the token).
+6. The page asks *Connect Claude?* and says where you will be sent back to. Check that it is
+   `https://claude.ai`, then click **Allow**. You are sent back and the connector shows as
+   connected.
+7. In a chat, turn the connector on in the tools menu and ask, for example, *"Make a box
+   80×50×25 mm with a lid"*. Claude answers with a link to the model in the library.
+
+**If something goes wrong**
+- *"The request has expired"*: the approval page is valid for 10 minutes. Click Connect again.
+- Connect fails before any page opens: `PUBLIC_URL` must be the exact https address (here
+  `https://stl.tilly.se`), and the server log must not say `OAuth disabled`.
+- **Disconnecting:** 🔑 → Connected apps → **Disconnect** stops the app's access at once (it must
+  be approved again to reconnect). Rotating `MCP_TOKEN` logs browsers out but does *not*
+  disconnect apps, so use Disconnect for that.
+
+The server is its own OAuth authorization server (dynamic client registration, PKCE, consent
+page). It requires `PUBLIC_URL` on https (or localhost); `OAUTH=0` turns it off.
 
 ## MCP tools
 | tool | |
@@ -255,11 +284,17 @@ The thin-wall and overhang checks are sampling-based estimates, not a slicer.
 versions keep their files. Older versions can be recreated with `revert_model`.
 
 ## Security
-Always set `MCP_TOKEN` and put the server behind HTTPS. The web interface requires a token (cookie)
-unless `UI_PUBLIC=1`, which makes it readable by everyone while changes still require a token.
+Always set `MCP_TOKEN` and put the server behind HTTPS. The web interface requires a login
+(passkey or token, kept as a signed session cookie for 90 days) unless `UI_PUBLIC=1`, which makes it readable by everyone while changes still require a token.
 `FILES_PUBLIC=1` only makes the STL links clickable without a token (model ids are guessable). Keep
 `ALLOW_SCRIPT` off if the server is reachable from outside. `/upload/*` always requires a token when
 `MCP_TOKEN` is set. The CSG spec is safe to let Claude write.
+
+Sessions are signed with a key derived from `MCP_TOKEN`, so rotating the token logs every browser
+out. OAuth access tokens live 24 h and refresh tokens 90 days (rotated on every use); only their
+sha256 hashes are stored, together with the passkeys' public keys, in `STL_DIR/auth.json`.
+Client registration is open (as MCP requires), but nothing gets a token without your approval
+on the consent page, which shows where the app will be sent back to.
 
 three.js (MIT) is shipped locally from `web/vendor/three`, so the interface needs no CDN.
 The DejaVu Sans font (free license, see `fonts/LICENSE`) is used for the text template.

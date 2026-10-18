@@ -28,7 +28,11 @@ target and break the image-id provenance check.
 - `/config/secrets/stl-mcp.env`: `MCP_TOKEN`, `PUBLIC_URL`, `FILES_PUBLIC=0`, `ALLOW_SCRIPT=0`.
 - `/config/secrets/stl-mcp-runner.env`: `RUNNER_TOKEN`, `NTFY_TOKEN`, `MCP_TOKEN`.
 - SWAG site-conf `stl.tilly.se.conf` proxies to `127.0.0.1:8892` with `proxy_buffering off`
-  (MCP's streamable HTTP transport uses SSE).
+  (MCP's streamable HTTP transport uses SSE). It must pass every path through unchanged,
+  including `/.well-known/oauth-*`, `/authorize`, `/token`, `/register` and `/revoke`, which
+  claude.ai uses to connect. `PUBLIC_URL` must be `https://stl.tilly.se` exactly: it is the
+  OAuth issuer and the passkeys' relying party id.
+- Passkeys and OAuth tokens live in `/config/stl-mcp/data/auth.json`.
 
 The repo's own `docker-compose.yml` (with `build: .` and the optional Caddy profile) is for
 running stl-mcp on other machines; tillyse does not read it.

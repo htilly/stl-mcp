@@ -7,13 +7,40 @@
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<main class="empty">
+<main class="empty login">
   <h2>STL library</h2>
-  <p>Enter the server token (MCP_TOKEN) to continue.</p>
-  <form method="get" class="row" style="justify-content:center">
-    <input type="password" name="token" placeholder="token" autofocus required style="width:260px">
-    <button class="primary">Log in</button>
-  </form>
+  <div id="pk" hidden>
+    <button class="primary big" id="pkbtn">🔑 Log in with passkey</button>
+    <p class="warn" id="pkerr" hidden></p>
+    <p class="hint">No passkey yet? Log in once with the token below, then add one from the library.</p>
+  </div>
+  <details id="tok" open>
+    <summary>Log in with the server token (MCP_TOKEN)</summary>
+    <form method="get" class="row" style="justify-content:center; margin-top:10px">
+      <input type="password" name="token" placeholder="token" required style="width:260px">
+      <button>Log in</button>
+    </form>
+  </details>
 </main>
+<script type="module">
+import { passkeyLogin, passkeysSupported } from "/static/common.js";
+
+if (passkeysSupported()) {
+  const err = document.getElementById("pkerr");
+  document.getElementById("pk").hidden = false;
+  document.getElementById("tok").open = false;
+  document.getElementById("pkbtn").addEventListener("click", async () => {
+    err.hidden = true;
+    try {
+      await passkeyLogin();
+      location.reload();  // this page stands in for the one that was asked for
+    } catch (e) {
+      if (e.name === "NotAllowedError") return;  // the user cancelled
+      err.textContent = e.message;
+      err.hidden = false;
+    }
+  });
+}
+</script>
 </body>
 </html>
