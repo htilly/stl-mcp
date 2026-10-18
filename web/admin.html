@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <a href="/">← Library</a>
+  <h1>Print-check settings</h1>
+</header>
+<main class="admin">
+  <p class="msg">Thresholds for the print check that runs on every build. Problems are shown as warnings and
+     returned to Claude; nothing is ever blocked. A blue dot marks values that differ from the defaults.</p>
+  <div id="groups"></div>
+  <div class="actions">
+    <button class="primary" id="save">Save</button>
+    <button id="resetall" class="danger">Reset all to defaults</button>
+    <button id="recheck" title="Re-run the checks on the current version of every model">Re-check all models</button>
+    <span class="msg" id="msg"></span>
+  </div>
+</main>
+<script type="module">
+import { api, esc } from "/static/common.js";
+
+let state = null;
+const $ = (id) => document.getElementById(id);
+const say = (t, err) => { $("msg").textContent = t; $("msg").className = "msg" + (err ? " err" : ""); };
+
+function draw() {
+  const { values, defaults, schema } = state;
+  const groups = {};
+  for (const [k, d] of Object.entries(schema)) (groups[d.group] ||= []).push([k, d]);
+  $("groups").innerHTML = Object.entries(groups).map(([g, fields]) => `
+    <section class="group"><h2>${esc(g)}</h2>${fields.map(([k, d]) => {
+      const bool = d.type === "bool";
+      const input = bool
+        ? `<input type="checkbox" data-key="${k}" ${values[k] ? "checked" : ""}>`
+        : `<input type="number" data-key="${k}" value="${values[k]}" min="${d.min}" max="${d.max}" step="any">
+           <span class="unit">${esc(d.unit || "")}</span>`;
+      return `<div class="field${values[k] !== defaults[k] ? " changed" : ""}" data-field="${k}">
+        <label class="lbl" for="${k}">${esc(d.label)}</label>
+        <div class="ctl">${input.replace("data-key", `id="${k}" data-key`)}
+          <button type="button" data-reset="${k}" title="Back to the default (${defaults[k]})"
+                  ${values[k] === defaults[k] ? "disabled" : ""}>↺</button></div>
+        ${d.help ? `<p class="help">${esc(d.help)} <span class="dflt">Default: ${esc(defaults[k])}${esc(d.unit ? " " + d.unit : "")}.</span></p>` : ""}
+      </div>`;
+    }).join("")}</section>`).join("");
+}
+
+function collect() {
+  const out = {};
+  for (const el of document.querySelectorAll("[data-key]")) {
+    out[el.dataset.key] = el.type === "checkbox" ? el.checked : el.value === "" ? NaN : Number(el.value);
+  }
+  return out;
+}
+
+async function load() { state = await api("/api/settings"); draw(); }
+
+$("groups").addEventListener("click", async (e) => {
+  const k = e.target.dataset?.reset;
+  if (!k) return;
+  try { state = await api("/api/settings", { method: "POST", body: { reset: [k] } }); draw(); say(`Reset ${k}.`); }
+  catch (err) { say(err.message, true); }
+});
+
+$("save").addEventListener("click", async () => {
+  try {
+    const values = collect();
+    if (Object.values(values).some((v) => Number.isNaN(v))) throw new Error("fill in all number fields");
+    state = await api("/api/settings", { method: "POST", body: { values } });
+    draw();
+    say("Saved. Applies to new builds - use “Re-check all models” for existing ones.");
+  } catch (err) { say(err.message, true); }
+});
+
+$("resetall").addEventListener("click", async () => {
+  if (!confirm("Reset every setting to its default?")) return;
+  try { state = await api("/api/settings", { method: "POST", body: { reset: true } }); draw(); say("All settings reset."); }
+  catch (err) { say(err.message, true); }
+});
+
+$("recheck").addEventListener("click", async () => {
+  say("Checking…");
+  try { const r = await api("/api/recheck", { method: "POST" }); say(`Re-checked ${r.models} model(s).`); }
+  catch (err) { say(err.message, true); }
+});
+
+load();
+</script>
+</body>
+</html>

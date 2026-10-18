@@ -44,6 +44,7 @@ from starlette.staticfiles import StaticFiles
 
 import csg
 import geometry as g
+import printcheck
 import render
 from store import Store
 
@@ -77,6 +78,9 @@ mcp = FastMCP(
         "clicked in the 3D view, with near_nodes = the nodes in the recipe that are closest. "
         "Resolve them with update_model(..., resolves=[id]) or answer with reply_to_comment. "
         "list_models shows open_comments per model. Always give the user the viewer_url. "
+        "Every build runs a print check; problems (not watertight, thin walls, overhangs, too big "
+        "for the bed ...) come back as print_warnings. Fix them when you can, otherwise tell the "
+        "user; check_print re-checks a model or file with the current settings. "
         "Tinkercad: import_file takes in STL/OBJ exported from Tinkercad (standalone file), "
         "modify_file builds on a file, export_obj makes a colored OBJ with several parts "
         "(also from the model library) that can be imported into Tinkercad."),
@@ -96,9 +100,12 @@ def _summary(m: dict, full: bool = False) -> dict:
         "viewer_url": f"{PUBLIC_URL}/m/{m['id']}",
         "parts": {n: {"url": f"{PUBLIC_URL}/files/{m['id']}/{p['file']}",
                       "extents_mm": p["extents_mm"], "volume_cm3": p["volume_cm3"],
-                      "watertight": p["watertight"]}
+                      "watertight": p["watertight"], "warnings": p.get("warnings", [])}
                   for n, p in cur["parts"].items()},
     }
+    flat = [f"{n}: {w['message']}" for n, p in cur["parts"].items() for w in p.get("warnings", [])]
+    if flat:
+        out["print_warnings"] = flat
     if full:
         out["description"] = m.get("description", "")
         out["params"] = cur["params"]
@@ -294,6 +301,9 @@ def _save(mesh, name: str) -> dict:
         "triangles": len(mesh.faces),
         "size_bytes": path.stat().st_size,
     }
+    warnings = printcheck.check(mesh, store.settings.get())
+    if warnings:
+        info["print_warnings"] = [w["message"] for w in warnings]
     if info["size_bytes"] > TINKERCAD_MAX:
         small = g.simplify_to(mesh, TINKERCAD_MAX)
         sp = OUT / f"{name}_tinkercad.stl"
@@ -382,6 +392,24 @@ def file_info(file: str) -> dict:
 
 
 @mcp.tool()
+def check_print(model_id: str | None = None, file: str | None = None) -> dict:
+    """Print check (watertight, disconnected shells, thin walls, overhangs, build volume) of a
+    library model's current version (model_id) or a standalone STL file (file), using the
+    thresholds configured in the admin UI. Warnings only - nothing is changed."""
+    if bool(model_id) == bool(file):
+        raise ValueError("give exactly one of model_id or file")
+    settings = store.settings.get()
+    if file:
+        warnings = {"model": printcheck.check(_load(file), settings)}
+    else:
+        import trimesh
+        cur = Store.current(store.get(model_id))
+        warnings = {n: printcheck.check(trimesh.load(store.file(model_id, p["file"]), force="mesh"),
+                                        settings) for n, p in cur["parts"].items()}
+    return {"ok": not any(warnings.values()), "warnings": warnings, "settings": settings}
+
+
+@mcp.tool()
 def modify_file(file: str, name: str = "", scale: float | list[float] | None = None,
                 rotate: list[float] | None = None, mirror: str = "", place_on_bed: bool = True,
                 center_xy: bool = False, add: list[dict] | None = None,
@@ -467,10 +495,11 @@ class Auth(BaseHTTPMiddleware):
         path, method = request.url.path, request.method
         ok = _token_ok(request)
         read = method in ("GET", "HEAD")
-        public = (path == "/health" or path.startswith("/static/")
-                  or (FILES_PUBLIC and read and path.startswith("/files/"))
-                  or (UI_PUBLIC and read and (path == "/" or path.startswith("/m/")
-                                              or path.startswith("/api/"))))
+        admin = path == "/admin" or path.startswith("/api/settings") or path == "/api/recheck"
+        public = not admin and (path == "/health" or path.startswith("/static/")
+                                or (FILES_PUBLIC and read and path.startswith("/files/"))
+                                or (UI_PUBLIC and read and (path == "/" or path.startswith("/m/")
+                                                            or path.startswith("/api/"))))
         if not ok and not public:
             if read and "text/html" in request.headers.get("accept", ""):
                 return HTMLResponse((WEB / "login.html").read_text(), status_code=401)
@@ -505,6 +534,7 @@ async def api_models(_):
         out.append({"id": m["id"], "name": m["name"], "description": m.get("description", ""),
                     "updated": m["updated"], "version": cur["version"], "kind": cur["kind"],
                     "versions": len(m["versions"]), "open_comments": _open(m),
+                    "warnings": sum(len(p.get("warnings", [])) for p in cur["parts"].values()),
                     "parts": {n: {"url": f"/files/{m['id']}/{p['file']}",
                                   "extents_mm": p["extents_mm"]} for n, p in cur["parts"].items()}})
     return JSONResponse({"models": out, "revision": store.revision})
@@ -548,6 +578,31 @@ async def api_model(request):
             p["url"] = f"/files/{m['id']}/{p['file']}"
     m["revision"] = store.revision
     return JSONResponse(m)
+
+
+async def page_admin(_):
+    return FileResponse(WEB / "admin.html")
+
+
+async def api_settings(request):
+    """GET: values + defaults + schema. POST {values: {...}} saves; POST {reset: true | [keys]} resets."""
+    try:
+        if request.method == "POST":
+            body = await request.json()
+            if "reset" in body:
+                r = body["reset"]
+                store.settings.reset(None if r is True else list(r))
+            if body.get("values"):
+                store.settings.update(body["values"])
+    except Exception as e:  # noqa: BLE001 – the error is shown in the UI
+        return _err(e)
+    return JSONResponse(store.settings.describe())
+
+
+async def api_recheck(request):
+    """Re-run the print checks on the current version of every model with the current settings."""
+    n = await _run(store.recheck)
+    return JSONResponse({"ok": True, "models": n})
 
 
 async def api_events(request):
@@ -636,6 +691,9 @@ app = Starlette(
         Route("/api/models/{id}", api_model, methods=["GET", "POST", "DELETE"]),
         Route("/api/models/{id}/preview.png", preview),
         Route("/api/events", api_events),
+        Route("/admin", page_admin),
+        Route("/api/settings", api_settings, methods=["GET", "POST"]),
+        Route("/api/recheck", api_recheck, methods=["POST"]),
         Route("/files/{name}", flat_files),
         Route("/files/{id}/{rel:path}", files),
         Route("/upload/{name}", upload, methods=["PUT", "POST"]),
