@@ -20,7 +20,7 @@ from auth import AuthState
 from db import Database
 from store import Store
 
-TABLES = "users, oauth_clients, models"  # everything else hangs off these (ON DELETE CASCADE)
+TABLES = "users, oauth_clients, models, admin_grants"  # everything else hangs off these (ON DELETE CASCADE)
 
 
 @pytest.fixture(scope="session")

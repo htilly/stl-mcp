@@ -192,6 +192,18 @@ class AuthState:
     def set_role(self, uid: str, role: str):
         self.db.execute("UPDATE users SET role = %s WHERE id = %s", (role, uid))
 
+    def claim_admin_grant(self, email: str, uid: str) -> bool:
+        """Records that ADMIN_EMAILS has made `email` an admin; False if it already did once."""
+        return self.db.execute(
+            "INSERT INTO admin_grants (email, user_id, granted_at) VALUES (lower(%s), %s, %s) "
+            "ON CONFLICT DO NOTHING", (email, uid, time.time())) > 0
+
+    def has_way_in(self, uid: str) -> bool:
+        """Whether the user can already log in with a passkey or a linked sign-in."""
+        return bool(self.db.one(
+            "SELECT 1 FROM passkeys WHERE user_id = %s UNION ALL "
+            "SELECT 1 FROM identities WHERE user_id = %s LIMIT 1", (uid, uid)))
+
     def set_email(self, uid: str, email: str) -> bool:
         """Sets a (verified) email if the user has none and nobody else uses it."""
         return self.db.execute(
