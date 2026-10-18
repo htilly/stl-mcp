@@ -20,6 +20,8 @@ let spec = null;            // the recipe being edited; nodes are its own object
 let env = {};               // resolved vars
 let sel = [];               // selected nodes
 let dirty = false, viewResult = false, spread = true;
+let showHoles = false;      // false: differences are drawn cut (as built); true: holes drawn as orange ghosts
+try { showHoles = localStorage.getItem("editor.showHoles") === "1"; } catch {}
 let tool = null;            // null | "measure" | "workplane" | "comment"
 const undoStack = [], redoStack = [];
 const objOf = new Map();    // node -> THREE.Group (its frame)
@@ -164,6 +166,9 @@ function primGeometry(p) {
 }
 
 function materialFor(ctx) {
+  // Shapes inside a cut difference: invisible (the cut result shows them) until selected, then
+  // see-through on top of it so they can be found and moved.
+  if (ctx.proxy && !ctx.ghost) return new THREE.MeshStandardMaterial({ color: ctx.hole ? HOLE : ctx.color, roughness: 0.6, transparent: true, opacity: 0.35, depthWrite: false, depthTest: false, visible: false });
   if (ctx.ghost) return new THREE.MeshBasicMaterial({ color: GHOST, transparent: true, opacity: 0.18, depthWrite: false });
   // Holes show through the solids they cut (otherwise a hole inside a block is invisible).
   if (ctx.hole) return new THREE.MeshStandardMaterial({ color: HOLE, roughness: 0.6, transparent: true, opacity: 0.4, depthWrite: false, depthTest: false });
@@ -181,18 +186,31 @@ function setContent(obj, geom) {
   refreshHighlight();
 }
 
-// Builds a node's frame and what it shows. Unions and differences show their children (holes ghosted
-// in orange); everything else shows one mesh, drawn here when it is a plain primitive and by the server
-// otherwise, with its children as faint ghosts that appear when selected.
+// Builds a node's frame and what it shows. Unions show their children. Differences show the cut result
+// (built by the server) with their children as invisible proxies that still take clicks and appear
+// when selected; with "Holes" on they show their children instead, holes ghosted in orange.
+// Everything else shows one mesh, drawn here when it is a plain primitive and by the server otherwise,
+// with its children as faint ghosts that appear when selected.
 function buildNode(node, parent, ctx) {
   const obj = new THREE.Group();
   obj.matrixAutoUpdate = false;
   obj.matrix.copy(localMatrix(node));
   obj.userData.node = node;
+  obj.userData.inCut = !!ctx.proxy;
   obj.visible = !node.hidden;
   objOf.set(node, obj);
   parent.add(obj);
   const plainOp = isOp(node) && ["union", "group", "difference"].includes(node.op) && !("array" in node) && !("polar" in node);
+  if (plainOp && node.op === "difference" && !showHoles && !ctx.proxy && !ctx.ghost) {
+    const mesh = new THREE.Mesh(lastGeom.get(node) || new THREE.BufferGeometry(), materialFor(ctx));
+    mesh.userData.node = node;
+    mesh.add(edgesFor(mesh.geometry));
+    obj.userData.content = mesh;
+    obj.add(mesh);
+    meshFromServer(node, obj, mesh);
+    kids(node).forEach((c, i) => buildNode(c, obj, { ...ctx, proxy: true, hole: ctx.hole || i > 0 }));
+    return;
+  }
   if (plainOp) {
     kids(node).forEach((c, i) => buildNode(c, obj, { ...ctx, hole: ctx.hole || (node.op === "difference" && i > 0) }));
     return;
@@ -205,23 +223,26 @@ function buildNode(node, parent, ctx) {
   const mesh = new THREE.Mesh(geom, materialFor(ctx));
   mesh.userData.node = node;
   mesh.userData.ghost = !!ctx.ghost;
-  if (ctx.hole && !ctx.ghost) mesh.renderOrder = 2;
+  mesh.userData.proxy = !!ctx.proxy && !ctx.ghost;
+  if ((ctx.hole || ctx.proxy) && !ctx.ghost) mesh.renderOrder = 2;
   mesh.add(edgesFor(geom, 0x1b2a41, ctx.ghost ? 0.25 : 0.45));
   obj.userData.content = mesh;
   obj.add(mesh);
   if (ctx.ghost) mesh.visible = false;
   else pickables.push(mesh);
-  if (!prim && (resolved || isOp(node))) {
-    serverGeometry(strip(node)).then((g) => {
-      lastGeom.set(node, g);
-      errors.delete(node);
-      if (objOf.get(node) === obj) { setContent(obj, g); if (!spreadAt) layout(); refit(false); }
-    }, (e) => {
-      errors.set(node, e.message);
-      if (objOf.get(node) === obj) { mesh.material.color.set(ERR); renderTree(); fillInspector(); }
-    });
-  }
+  if (!prim && (resolved || isOp(node))) meshFromServer(node, obj, mesh);
   if (isOp(node)) kids(node).forEach((c) => buildNode(c, obj, { ...ctx, ghost: true }));
+}
+
+function meshFromServer(node, obj, mesh) {
+  serverGeometry(strip(node)).then((g) => {
+    lastGeom.set(node, g);
+    errors.delete(node);
+    if (objOf.get(node) === obj) { setContent(obj, g); if (!spreadAt) layout(); refit(false); }
+  }, (e) => {
+    errors.set(node, e.message);
+    if (objOf.get(node) === obj) { mesh.material.visible = true; mesh.material.color.set(ERR); renderTree(); fillInspector(); }
+  });
 }
 
 function clearWorld() {
@@ -313,14 +334,19 @@ function refit(force) {
 
 // ------------------------------------------------------------ selection
 function refreshHighlight() {
-  const chosen = new Set();
-  sel.forEach((n) => objOf.get(n)?.traverse((o) => { if (o.isMesh) chosen.add(o); }));
+  const chosen = new Set(), shown = new Set();
+  sel.forEach((n) => {
+    const obj = objOf.get(n);
+    // Selecting a cut difference (or above) highlights its result; shapes inside it show when picked.
+    obj?.traverse((o) => { if (o.isMesh) { chosen.add(o); if (obj.userData.inCut) shown.add(o); } });
+  });
   world.traverse((o) => {
     if (!o.isMesh || !o.userData.node) return;
     const on = chosen.has(o);
     const edges = o.children[0];
     if (edges) { edges.material.color.set(on ? 0xffffff : 0x1b2a41); edges.material.opacity = on ? 0.9 : o.userData.ghost ? 0.25 : 0.45; }
     if (o.userData.ghost) o.visible = on;
+    if (o.userData.proxy) { o.material.visible = shown.has(o); if (edges) edges.visible = shown.has(o); }
     if (o.material.emissive) o.material.emissive.set(on ? 0x223355 : 0x000000);
   });
 }
@@ -1179,6 +1205,11 @@ $("workplane").onclick = () => setTool("workplane");
 $("commentmode").onclick = () => setTool("comment");
 $("fit").onclick = () => refit("iso");
 $("spread").onclick = () => { spread = !spread; spreadAt = null; $("spread").classList.toggle("on", spread); layout(); attachGizmo(); };
+$("holes").onclick = () => {
+  showHoles = !showHoles;
+  try { localStorage.setItem("editor.showHoles", showHoles ? "1" : "0"); } catch {}
+  render();
+};
 $("result").onclick = () => {
   viewResult = !viewResult;
   $("result").classList.toggle("on", viewResult);
@@ -1198,6 +1229,7 @@ function refreshButtons() {
   const multi = spec && partEntries(spec).length > 1;
   $("spread").hidden = !multi;
   $("spread").classList.toggle("on", spread);
+  $("holes").classList.toggle("on", showHoles);
 }
 
 addEventListener("keydown", (e) => {
