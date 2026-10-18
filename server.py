@@ -147,13 +147,13 @@ mcp = FastMCP(
 
 # ---------------------------------------------------------------- helpers
 
-def _waiting(lib: Lib) -> list[dict]:
+def _waiting(lib: "Lib") -> list[dict]:
     """Models in the user's library with open comments from the web UI."""
     return [{"model_id": m["id"], "name": m["name"], "open": n,
              "viewer_url": f"{PUBLIC_URL}/m/{m['id']}"} for m in lib.models.list() if (n := _open(m))]
 
 
-def _summary(m: dict, full: bool = False, lib: Lib | None = None) -> dict:
+def _summary(m: dict, full: bool = False, lib: "Lib | None" = None) -> dict:
     cur = Store.current(m)
     out = {
         "model_id": m["id"],
