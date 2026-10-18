@@ -812,7 +812,7 @@ def _admin_path(path: str) -> bool:
 def _public_path(path: str, read: bool) -> bool:
     if _admin_path(path):
         return False  # admin is never public, not even with UI_PUBLIC
-    return (path == "/health" or path.startswith("/static/") or path in PASSKEY_LOGIN_PATHS
+    return (path in ("/health", "/demo") or path.startswith("/static/") or path in PASSKEY_LOGIN_PATHS
             or path in SIGNUP_PATHS or path.startswith("/auth/sso/")
             or (bool(OAUTH_ROUTES) and (path in OAUTH_PATHS or path.startswith("/.well-known/oauth-")))
             or (FILES_PUBLIC and read and path.startswith(("/files/", "/f/")))
@@ -1171,6 +1171,10 @@ async def api_auth_identity(request):
 
 async def page_privacy(_):
     return FileResponse(WEB / "privacy.html")
+
+
+async def page_demo(_):
+    return FileResponse(WEB / "demo.html")
 
 
 # ---- the account: name, personal tokens, deletion
@@ -1629,6 +1633,7 @@ app = Starlette(
         Route("/auth/signup/options", signup_options, methods=["POST"]),
         Route("/auth/signup/verify", signup_verify, methods=["POST"]),
         Route("/privacy", page_privacy),
+        Route("/demo", page_demo),
         Route("/auth/sso/{provider}/start", sso_start),
         Route("/auth/sso/{provider}/callback", sso_callback, methods=["GET", "POST"]),
         Route("/api/auth/identities/{provider}", api_auth_identity, methods=["DELETE"]),

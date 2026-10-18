@@ -172,6 +172,13 @@ def test_privacy_page_is_public(client):
     assert r.status_code == 200 and "Privacy" in r.text
 
 
+def test_demo_page_and_video_are_public_and_seekable(client):
+    r = client.get("/demo")
+    assert r.status_code == 200 and '<video class="demo" src="/static/demo.mp4"' in r.text
+    r = client.get("/static/demo.mp4", headers={"Range": "bytes=0-99"})
+    assert r.status_code == 206 and len(r.content) == 100
+
+
 # ---- limits
 
 @pytest.fixture
