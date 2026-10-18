@@ -17,7 +17,7 @@
 <body>
 <main class="gate"><div class="panel"><div class="body">
   <div class="wordmark"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-mark"/></svg><span>auto<b>smith</b></span></div>
-  <h2>Log in</h2>
+  <h2 id="title">Log in</h2>
   <p>STL, made by AI. Describe a part to Claude; it builds a printable 3D model that shows up here, with every revision.</p>
 
   <div class="stack" id="sso" hidden></div>
@@ -25,6 +25,15 @@
     <button class="primary big" id="pkbtn"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-key"/></svg>Log in with passkey</button>
   </div>
   <p class="warn" id="pkerr" hidden></p>
+
+  <div id="here" hidden>
+    <p>You logged in with a passkey from another device. Save one on this computer too, so next time
+      it is Touch ID or Windows Hello instead of a QR code.</p>
+    <div class="stack">
+      <button class="primary big" id="herebtn"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-key"/></svg>Save a passkey here</button>
+      <button class="big" id="hereskip">Not now</button>
+    </div>
+  </div>
 
   <form id="signup" hidden>
     <div class="or">New here?</div>
@@ -50,7 +59,7 @@
   </details>
 </div></div></main>
 <script type="module">
-import { api, passkeyLogin, passkeySignup, passkeysSupported } from "/static/common.js";
+import { api, passkeyLogin, passkeyRegister, passkeySignup, passkeysSupported } from "/static/common.js";
 
 const $ = (id) => document.getElementById(id);
 const err = $("pkerr");
@@ -88,7 +97,26 @@ $("sso").hidden = !(cfg.providers || []).length;
 
 $("pkbtn").addEventListener("click", async () => {
   err.hidden = true;
-  try { await passkeyLogin(); done(); } catch (e) { show(e); }
+  try {
+    const { crossDevice } = await passkeyLogin();
+    if (!crossDevice) return done();
+    for (const id of ["sso", "pk", "signup", "tok", "nopk"]) $(id).hidden = true;
+    $("here").hidden = false;
+    $("title").textContent = "Logged in";
+  } catch (e) { show(e); }
+});
+
+$("hereskip").addEventListener("click", done);
+$("herebtn").addEventListener("click", async () => {
+  err.hidden = true;
+  try {
+    const device = /Mac/.test(navigator.userAgent) ? "Mac" : /Windows/.test(navigator.userAgent) ? "Windows" : "computer";
+    await passkeyRegister(device);
+    done();
+  } catch (e) {
+    if (e.name === "InvalidStateError") return done();  // this computer already has one
+    show(e);
+  }
 });
 
 let turnstileToken = "";
