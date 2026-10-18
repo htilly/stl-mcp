@@ -188,6 +188,7 @@ page). It requires `PUBLIC_URL` on https (or localhost); `OAUTH=0` turns it off.
 |---|---|
 | `create_model` | new model from a CSG spec (shapes, boolean operations, transforms, variables) |
 | `create_enclosure` | box + lid with corner screws, standoffs, cutouts and lid holes |
+| `create_from_openscad` | OpenSCAD code with the bundled BOSL2 library (threads, gears, rounding, sweeps), sandboxed; see below |
 | `create_from_script` | arbitrary trimesh Python (requires `ALLOW_SCRIPT=1`, runs code on the server!) |
 | `update_model` | change variables/parameters or any value via JSON pointer → new version |
 | `get_model` | the recipe, dimensions, history and open comments (with `near_nodes`) |
@@ -247,6 +248,38 @@ Example with templates, a plate with countersunk M3 holes and engraved text:
    "translate": [30, 15, "=t-0.6"]}
 ]}}
 ```
+
+### OpenSCAD models
+For shapes the CSG spec cannot express, Claude can write OpenSCAD with
+`create_from_openscad(name, code, vars=None, parts=None)`. The Docker image ships `openscad` and a
+pinned [BOSL2](https://github.com/BelfrySCAD/BOSL2), so threaded rods and nuts
+(`BOSL2/threading.scad`), gears (`BOSL2/gears.scad`), screws, rounded/chamfered cuboids and
+cylinders, `offset_sweep`, `path_sweep`, `skin` and knurling are all available:
+```scad
+include <BOSL2/std.scad>
+include <BOSL2/threading.scad>
+d = 10; l = 30;
+threaded_rod(d=d, l=l, pitch=1.5, anchor=BOTTOM, $fn=48);
+```
+Top-level variables can be changed without touching the code: `update_model(id, {"l": 40})`
+(passed to OpenSCAD as `-D l=40`); `{"code": "..."}` replaces the code. For several parts pass
+`parts=["body", "lid"]`; the code is run once per part with `PART` set to the part name.
+The tool descriptions still steer Claude to `create_model`, which the editor and the
+comment hints understand.
+
+OpenSCAD runs sandboxed, so unlike `ALLOW_SCRIPT` it is safe for every user and on by default
+whenever the binary is installed (`ALLOW_OPENSCAD=0` turns it off):
+- the code is tokenized before it runs and rejected if it uses `import()`, `surface()`,
+  `dxf_dim()`/`dxf_cross()` (they read files) or `include`/`use` anything but `<BOSL2/...>`
+  (absolute paths and `..` are rejected; strings and comments are skipped, not matched);
+- it runs in a fresh empty temp dir (cwd and `HOME`) with `OPENSCADPATH` set to the read-only
+  library dir only, as its own process group that is killed after `OPENSCAD_TIMEOUT` seconds
+  (default 60, all parts together);
+- on Linux with rlimits: `OPENSCAD_MEM_MB` address space (default 2048), CPU seconds, 200 MB
+  per written file (the STL and the log), 256 open files; only the tail of its log is read back.
+
+Locally: install OpenSCAD and put BOSL2 in `./openscad-libs/BOSL2` (or set `OPENSCAD_LIBS`).
+The OpenSCAD tests skip when `openscad` is not installed.
 
 ### Before and after: adding screws and text
 Start from a plain plate (v1) and let Claude add two countersunk M3 screw holes (v2) and engraved text (v3).
@@ -356,7 +389,8 @@ Always set `MCP_TOKEN` and put the server behind HTTPS. The web interface requir
 `FILES_PUBLIC=1` only makes the STL links clickable without a token (model ids are guessable); for
 anonymous visitors, `UI_PUBLIC` and `FILES_PUBLIC` cover the admin's library only. Keep
 `ALLOW_SCRIPT` off if the server is reachable from outside. `/upload/*` always requires a token when
-`MCP_TOKEN` is set. The CSG spec is safe to let Claude write.
+`MCP_TOKEN` is set. The CSG spec is safe to let Claude write, and so is OpenSCAD code (it is
+checked and sandboxed, see [OpenSCAD models](#openscad-models)).
 
 Every login belongs to a user. `MCP_TOKEN` logs in as the bootstrap admin; without it set, every
 request runs as that admin (local single-user mode). Sessions are random ids stored server side

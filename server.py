@@ -15,6 +15,12 @@ Environment variables:
   UI_PUBLIC      1 = web UI + files readable without a token (changes require a token)
   FILES_PUBLIC   1 = only /files/* without a token (download links are clickable)
   ALLOW_SCRIPT   1 = enable script models (runs arbitrary Python!; admins only)
+  ALLOW_OPENSCAD 0 = disable OpenSCAD models (default on when the openscad binary is found).
+                 Safe for all users: the code is checked so it cannot read files (no import(),
+                 surface(), include/use outside the bundled BOSL2) and runs sandboxed with a
+                 timeout and resource limits; see openscad.py
+  OPENSCAD_TIMEOUT / OPENSCAD_MEM_MB  per-build limits (default 60 s / 2048 MB);
+                 OPENSCAD_BIN / OPENSCAD_LIBS override the binary and the libraries dir
   SIGNUP         1 = anyone can create an account with a passkey (needs MCP_TOKEN)
   TURNSTILE_SITE_KEY / TURNSTILE_SECRET  Cloudflare Turnstile on the signup form (off when unset)
   SIGNUPS_PER_HOUR  new accounts per client IP and hour (default 5)
@@ -79,6 +85,7 @@ from webauthn.helpers.structs import (AuthenticatorSelectionCriteria, PublicKeyC
 
 import csg
 import geometry as g
+import openscad
 import printcheck
 import render
 import sso
@@ -94,6 +101,7 @@ TOKEN = os.environ.get("MCP_TOKEN", "")
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 ADMIN_EMAILS = [e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()]
 ALLOW_SCRIPT = os.environ.get("ALLOW_SCRIPT") == "1"
+ALLOW_OPENSCAD = os.environ.get("ALLOW_OPENSCAD", "1") != "0" and openscad.available()
 UI_PUBLIC = os.environ.get("UI_PUBLIC") == "1"
 FILES_PUBLIC = UI_PUBLIC or os.environ.get("FILES_PUBLIC") == "1"
 WEB = Path(__file__).parent / "web"
@@ -115,7 +123,7 @@ MAX_DISK_PER_USER = int(float(os.environ.get("MAX_DISK_MB_PER_USER", "500")) * 1
 FILE_TYPES = {".stl": "model/stl", ".obj": "model/obj", ".mtl": "text/plain", ".zip": "application/zip"}
 
 db = Database(DATABASE_URL)
-store = Store(DATA, db, allow_script=ALLOW_SCRIPT)
+store = Store(DATA, db, allow_script=ALLOW_SCRIPT, allow_openscad=ALLOW_OPENSCAD)
 
 mcp = FastMCP(
     "stl-maker",
@@ -149,6 +157,13 @@ mcp = FastMCP(
         "which face or side it goes on, and its size and depth; or let them click the spot with a "
         "comment. After the change, say where you put it (centered / offset from which edge) so "
         "they can correct it. "
+        "For shapes the CSG spec and templates cannot express (threads, gears, knurling, "
+        "filleted/rounded edges along arbitrary paths, sweeps, lofts, organic or twisted shapes) "
+        "use create_from_openscad with OpenSCAD code and the bundled BOSL2 library "
+        "(include <BOSL2/std.scad>; BOSL2/threading.scad for threaded rods, nuts and bolts, "
+        "BOSL2/gears.scad for gears, rounding/offset_sweep/path_sweep/skin for fillets and sweeps). "
+        "Prefer create_model and the templates otherwise: they are easier to adjust and the web "
+        "editor and comment hints understand them. "
         "Every build runs a print check; problems (not watertight, thin walls, overhangs, too big "
         "for the bed ...) come back as print_warnings. Fix them when you can, otherwise tell the "
         "user; check_print re-checks a model or file with the current settings. "
@@ -326,6 +341,36 @@ async def create_from_script(name: str, code: str, description: str = "", ctx: C
 
 
 @mcp.tool()
+async def create_from_openscad(name: str, code: str, description: str = "",
+                               vars: dict | None = None, parts: list[str] | None = None,
+                               ctx: Context = None) -> dict:
+    """Creates a model from OpenSCAD code (mm, z up). Use it for shapes the CSG spec of
+    create_model cannot express; prefer create_model / templates for everything else.
+
+    The BOSL2 library is bundled – include it with `include <BOSL2/std.scad>` (plus e.g.
+    `include <BOSL2/threading.scad>` for threaded_rod/threaded_nut, `include <BOSL2/gears.scad>`
+    for spur_gear/rack, `include <BOSL2/screws.scad>` for screw/nut). BOSL2 also has
+    cuboid(rounding=..)/cyl(rounding=..), offset_sweep, path_sweep, skin, knurling and more.
+    Not allowed (sandbox): import(), surface(), include/use of anything except <BOSL2/...>.
+    Builds time out after a minute, so keep $fn moderate (e.g. 64).
+
+    Put dimensions in top-level variables (`width = 40;`) – they can then be changed with
+    update_model(model_id, {"width": 60}) without rewriting the code. vars sets initial
+    overrides. For several printable parts pass parts=["body", "lid"]: the code is run once
+    per part with the variable PART set to its name (`if (PART == "lid") lid();`).
+    """
+    lib = _lib(ctx)
+    lib.ensure_room(new_model=True)
+    params = {"code": code}
+    if vars:
+        params["vars"] = vars
+    if parts:
+        params["parts"] = parts
+    m = await _run(lib.models.create, name, "openscad", params, description)
+    return _summary(m, lib=lib)
+
+
+@mcp.tool()
 async def update_model(model_id: str, changes: dict | None = None, remove: list[str] | None = None,
                        params: dict | None = None, note: str = "", name: str | None = None,
                        description: str | None = None, resolves: list[str] | None = None, ctx: Context = None) -> dict:
@@ -335,7 +380,10 @@ async def update_model(model_id: str, changes: dict | None = None, remove: list[
              {"/json/pointer": value} – sets any value in the recipe, e.g.
              {"/root/children/2/translate/0": 15} or {"/root/children/-": {...}} (append).
     remove:  list of JSON pointers to remove, e.g. ["/root/children/3"].
-    params:  replace the whole recipe (spec for CSG, {"code": ...} for script).
+    params:  replace the whole recipe (spec for CSG, {"code": ...} for script,
+             {"code": ..., "vars": {...}, "parts": [...]} for OpenSCAD).
+             OpenSCAD: changes={"code": "..."} replaces only the code; {"wall": 3} overrides the
+             top-level variable wall (like openscad -D) without touching the code.
     note:    short description of the change (shown in the history).
     resolves: comment ids (e.g. ["c2"]) that the change addresses – marked resolved with a reply.
     Read the recipe with get_model first if you are unsure of the structure.
