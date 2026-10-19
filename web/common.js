@@ -13,6 +13,7 @@ export async function api(path, opts = {}) {
 }
 
 // Live updates via server-sent events. cb({revision, id}) is called on every change.
+// statusEl (the Live dot) also shows whether Claude is connected over MCP; see setStatus.
 //
 // Phones suspend pages: a locked screen, a backgrounded tab or a network switch drops the stream,
 // often without any error event, and changes made meanwhile would never be fetched. So the server's
@@ -20,21 +21,36 @@ export async function api(path, opts = {}) {
 // {revision, resync: true} - "something changed, re-read everything". The stream is also re-opened
 // whenever the page becomes visible again.
 export function subscribe(cb, statusEl) {
-  let es, last = null, retry;
-  const setStatus = (on) => {
+  let es, last = null, retry, claude = null, ok = true;
+  // Four states: red ("down") = the page lost the server, or the server reports it is unhealthy
+  // (database unreachable, ...); amber ("wait") = live, but no AI client has connected over MCP yet;
+  // green ("on") = an AI client (Claude, ChatGPT, ...) is connected. Anonymous viewers
+  // (claude: null) skip amber, since there is no account to connect a client to.
+  const setStatus = (live) => {
     if (!statusEl) return;
+    const down = !live || !ok, wait = !down && claude === false, on = !down && !wait;
+    statusEl.classList.toggle("down", down);
+    statusEl.classList.toggle("wait", wait);
     statusEl.classList.toggle("on", on);
-    statusEl.title = on
-      ? "Connected: this page updates automatically when Claude changes something"
-      : "Connection lost, retrying. Changes will not appear until it is back (reload if it persists)";
+    const label = statusEl.querySelector(".label");
+    if (label) label.textContent = !live ? "Offline" : !ok ? "Server problem" : wait ? "Waiting for AI" : "Live";
+    statusEl.title = !live
+      ? "Connection lost, retrying. Changes will not appear until it is back (reload if it persists)"
+      : !ok
+      ? "The server has a problem (e.g. its database is unreachable). Changes may not be saved or shown"
+      : wait
+      ? "No AI client connected yet: add this library to claude.ai, ChatGPT, Claude Code or another MCP client"
+      : "Connected: this page updates automatically when Claude changes something";
   };
   const connect = () => {
     clearTimeout(retry);
     es?.close();
     es = new EventSource("/api/events");
-    es.onopen = () => setStatus(true);
     es.onmessage = (e) => {
       const d = JSON.parse(e.data);
+      if ("claude" in d) claude = d.claude;
+      if ("ok" in d) ok = d.ok !== false;
+      setStatus(true);
       const before = last;
       last = d.revision;
       if (before === null) return;                     // first connection: nothing to catch up on

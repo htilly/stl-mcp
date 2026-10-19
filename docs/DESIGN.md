@@ -43,8 +43,9 @@ dark set applies automatically (`prefers-color-scheme`) or with `<html data-them
 | `--layout-wash` | `#e0ebff` | `#172554` | Selected rows, active toggles, banners |
 | `--ember` | `#06b6d4` | `#22d3ee` | Brand Teal: logo gradient end, small accents. Never used for UI state |
 | `--pei` | `#e2ad45` | `#e8b552` | Comments and pins. The gold of a PEI build plate |
-| `--fault` | `#b8322a` | `#f0735f` | Print-check warnings, destructive actions, errors |
-| `--sound` | `#2a7d4f` | `#52c486` | Live connection, current revision |
+| `--fault` | `#b8322a` | `#f0735f` | Print-check warnings, destructive actions, errors, the Live dot when offline or the server is unhealthy |
+| `--sound` | `#2a7d4f` | `#52c486` | Live connection with Claude connected, current revision |
+| `--wait` | `#c27c0e` | `#f2a93b` | Live dot while the page is live but no AI client has connected over MCP |
 | `--stage` | `#eef2f7` | `#0d1424` | 3D viewport background (read by `viewer.html`) |
 | `--stage-grid`, `--stage-grid-major` | `#dde4ec`, `#c3ccd8` | `#18233a`, `#2a3a58` | Build plate grid in the viewport |
 | `--plate` | `#f6f7f9` | same | Behind preview PNGs; matches `render.BG` |

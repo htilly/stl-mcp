@@ -546,8 +546,49 @@ def test_api_events_streams_initial_and_changes():
         return first, second
 
     first, second = run(go())
-    assert json.loads(first.removeprefix("data: ")) == {"revision": server.store.revision - 1}
+    assert json.loads(first.removeprefix("data: ")) == {"revision": server.store.revision - 1, "claude": None, "ok": True}
     assert json.loads(second.removeprefix("data: ")) == {"revision": server.store.revision, "id": "zzz"}
+
+
+def test_api_events_tell_when_claude_connects(monkeypatch):
+    """The Live dot waits (amber) until an AI client reaches /mcp, then turns green."""
+    user = server._admin()
+    monkeypatch.setattr(server, "mcp_seen", {})
+
+    class Req:
+        state = type("State", (), {"user": user})()
+
+        async def is_disconnected(self):
+            return False
+
+    async def go():
+        resp = await server.api_events(Req())
+        first = await resp.body_iterator.__anext__()
+        server.mcp_seen[user["id"]] = 1.0  # what the Auth middleware records on a /mcp request
+        second = await resp.body_iterator.__anext__()
+        await resp.body_iterator.aclose()
+        return first, second
+
+    first, second = run(go())
+    assert json.loads(first.removeprefix("data: "))["claude"] is False
+    assert json.loads(second.removeprefix("data: "))["claude"] is True
+
+
+def test_health_reports_a_broken_database(client, monkeypatch):
+    assert client.get("/health").status_code == 200
+
+    def boom(*a, **k):
+        raise RuntimeError("db down")
+    monkeypatch.setattr(server.oauth.state.db, "one", boom)
+    assert server._healthy() is False
+    assert run(server.health(None)).status_code == 503
+
+
+def test_mcp_request_marks_claude_connected(client, monkeypatch):
+    monkeypatch.setattr(server, "mcp_seen", {})
+    assert not server._claude_connected(server._admin())
+    client.post("/mcp/", json={})
+    assert server._claude_connected(server._admin())
 
 
 def test_upload_converts_to_stl(client, out_dir):
