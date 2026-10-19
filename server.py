@@ -1873,41 +1873,49 @@ async def preview(request):
     return Response(png, media_type="image/png", headers={"Cache-Control": "private"})
 
 
-_NOT_SPLITTABLE = ("scale", "rotate", "mirror", "translate", "array", "polar")
+_NOT_SPLITTABLE = ("array", "polar")      # copies of the children cannot be taken apart
+_TRANSFORMS = ("scale", "rotate", "mirror", "translate")
 
 
-def _components(v: dict) -> list[tuple[str, dict]]:
-    """The recipe nodes a version is made of: [(part name, node)]. A csg part whose top node is an
-    operation (union, difference ...) without its own transform gives its children one by one,
-    opening nested operations the same way;
-    anything else (a single shape, other recipe kinds) stays as the whole part."""
+def _components(v: dict) -> list[tuple[str, dict | None, dict | None]]:
+    """The recipe nodes a version is made of: [(part name, node to build, the shape it stands for)].
+    A csg part whose top node is an operation (union, difference ...) gives its children one by one,
+    opening nested operations the same way; a group's own scale/rotate/mirror/translate is carried
+    along. A single shape, a group with an array and other recipe kinds stay as the whole part
+    (node None)."""
     spec = v.get("params") or {}
     if v.get("kind") != "csg" or not isinstance(spec, dict):
         return []
     nodes = spec.get("parts") if isinstance(spec.get("parts"), dict) else {"model": spec.get("root")}
     out = []
     for pname, node in nodes.items():
-        kids = node.get("children") if isinstance(node, dict) else None
-        if (isinstance(node, dict) and "op" in node and kids
-                and not any(k in node for k in _NOT_SPLITTABLE)):
-            out += [(pname, c) for c in _leaves(kids)]
+        if _splittable(node):
+            out += [(pname, w, leaf) for w, leaf in _leaves([node])]
         else:
-            out.append((pname, None))
+            out.append((pname, None, None))
     return out
 
 
-def _leaves(nodes: list, depth: int = 0) -> list[dict]:
-    """Nodes to export one by one: operations without their own transform are opened up
-    (their children share the parent's frame), everything else is kept as it is."""
+def _splittable(node) -> bool:
+    return (isinstance(node, dict) and "op" in node and bool(node.get("children"))
+            and not any(k in node for k in _NOT_SPLITTABLE))
+
+
+def _leaves(nodes: list, wrap: tuple = (), depth: int = 0) -> list[tuple[dict, dict]]:
+    """[(node to build, the leaf itself)]: operations that can be opened are opened, and the
+    transforms of the groups around a leaf are put back around it as one-child groups."""
     out = []
     for c in nodes:
         if not isinstance(c, dict) or c.get("hidden"):
             continue
-        kids = c.get("children")
-        if depth < 16 and "op" in c and kids and not any(k in c for k in _NOT_SPLITTABLE):
-            out += _leaves(kids, depth + 1)
-        else:
-            out.append(c)
+        if depth < 16 and _splittable(c):
+            tf = {k: c[k] for k in _TRANSFORMS if k in c}
+            out += _leaves(c["children"], ((tf,) if tf else ()) + wrap, depth + 1)
+            continue
+        w = c
+        for tf in wrap:                      # innermost group first
+            w = {"op": "group", "children": [w], **tf}
+        out.append((w, c))
     return out
 
 
@@ -1936,13 +1944,13 @@ async def export_obj_zip(request):
                     n, i = f"{base}_{i}", i + 1
                 seen.add(n)
                 items.append((n, mesh, ""))
-            kept = {p for p, node in comps if node is None}
-            for pname, node in comps:
+            kept = {p for p, node, _ in comps if node is None}
+            for pname, node, leaf in comps:
                 if node is None:
                     continue
                 mesh = buildworker.mesh_node(node, env_vars)
                 if mesh is not None:
-                    label = node.get("name") or node.get("shape") or node.get("op") or "part"
+                    label = leaf.get("name") or leaf.get("shape") or leaf.get("op") or "part"
                     add(label if len(v["parts"]) == 1 else f"{pname}_{label}", mesh)
             for pname, mesh in wholes.items():
                 if not comps or pname in kept:
