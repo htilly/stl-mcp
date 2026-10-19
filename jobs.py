@@ -14,6 +14,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import deque
 
 _lock = threading.Lock()
 _jobs: dict[int, "Job"] = {}
@@ -154,7 +155,7 @@ def _rate(key: tuple, cpu: float | None, now: float) -> float | None:
     return rate
 
 
-def _system() -> dict:
+def system() -> dict:
     out = {"cpus": os.cpu_count(), "load": None, "mem_total_mb": None, "mem_available_mb": None}
     try:
         out["load"] = [round(x, 2) for x in os.getloadavg()]
@@ -214,4 +215,60 @@ def snapshot() -> dict:
             rows.append(row)
         if server["cpu"] is not None:
             server["cpu"] = round(server["cpu"], 1)
-    return {"system": _system(), "server": server, "jobs": rows}
+    return {"system": system(), "server": server, "jobs": rows}
+
+
+# ---------------------------------------------------------------- the machine's CPU over time
+
+HISTORY = 60          # samples kept: 5 minutes at PULSE_SECONDS
+PULSE_SECONDS = 5
+_history: deque = deque(maxlen=HISTORY)   # (unix time, machine CPU % 0-100)
+_sampler: threading.Thread | None = None
+_last_stat: tuple[int, int] | None = None  # (busy, total) jiffies from /proc/stat
+
+
+def machine_cpu() -> float | None:
+    """The whole machine's CPU use in % (0-100, all cores) since the previous call: /proc/stat on
+    Linux; elsewhere the 1-minute load average per core, capped at 100."""
+    global _last_stat
+    try:
+        with open("/proc/stat") as f:
+            vals = [int(x) for x in f.readline().split()[1:]]
+        idle = vals[3] + (vals[4] if len(vals) > 4 else 0)   # idle + iowait
+        total = sum(vals[:8])
+        prev, _last_stat = _last_stat, (total - idle, total)
+        if prev is None or total <= prev[1]:
+            return None
+        return round(100 * (total - idle - prev[0]) / (total - prev[1]), 1)
+    except (OSError, ValueError, IndexError):
+        try:
+            return round(min(100.0, os.getloadavg()[0] / (os.cpu_count() or 1) * 100), 1)
+        except OSError:
+            return None
+
+
+def _sample_forever():
+    while True:
+        cpu = machine_cpu()
+        if cpu is not None:
+            _history.append((round(time.time()), cpu))
+        time.sleep(PULSE_SECONDS)
+
+
+def cpu_history() -> list[tuple[int, float]]:
+    """The machine's CPU % over the last few minutes; starts the sampler on first use."""
+    global _sampler
+    with _lock:
+        if _sampler is None:
+            machine_cpu()                                    # the baseline for the first delta
+            _sampler = threading.Thread(target=_sample_forever, name="cpu-pulse", daemon=True)
+            _sampler.start()
+    return list(_history)
+
+
+def counts() -> dict:
+    """Running and waiting jobs, without measuring anything."""
+    with _lock:
+        running = sum(1 for j in _jobs.values() if j.started)
+        return {"running": running, "waiting": len(_jobs) - running,
+                "users": sorted({j.user_id for j in _jobs.values()})}

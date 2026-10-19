@@ -60,6 +60,7 @@ function bar(v, cpus) {
 function online(u) {
   const ways = [];
   if (u.web_pages) ways.push(`${u.web_pages} page${u.web_pages === 1 ? "" : "s"} open`);
+  else if (u.admin_page) ways.push("admin page open");
   if (u.mcp_seconds_ago != null && u.mcp_seconds_ago < 600) ways.push(`Claude ${u.mcp_seconds_ago < 60 ? "just now" : `${Math.round(u.mcp_seconds_ago / 60)} min ago`}`);
   return ways.join(" · ") || "building";
 }

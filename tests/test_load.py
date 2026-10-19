@@ -85,3 +85,24 @@ def test_load_api_is_admin_only(out_dir, monkeypatch):
     monkeypatch.setattr(server, "TOKEN", "secret")
     c = TestClient(server.app, follow_redirects=False)
     assert c.get("/api/admin/load").status_code == 401
+
+
+def test_pulse_for_the_admin_bar(client):
+    d = client.get("/api/admin/pulse").json()
+    for k in ("cpu", "seconds", "cpus", "mem_total_mb", "disk_free_gb", "disk_total_gb",
+              "builds_running", "builds_waiting", "online"):
+        assert k in d
+    assert isinstance(d["cpu"], list) and d["disk_total_gb"] >= d["disk_free_gb"] >= 0
+
+
+def test_machine_cpu_is_a_percentage():
+    jobs.machine_cpu()
+    time.sleep(0.2)
+    v = jobs.machine_cpu()
+    assert v is None or 0 <= v <= 100
+
+
+def test_pulse_is_admin_only(out_dir, monkeypatch):
+    monkeypatch.setattr(server, "TOKEN", "secret")
+    c = TestClient(server.app, follow_redirects=False)
+    assert c.get("/api/admin/pulse").status_code == 401
