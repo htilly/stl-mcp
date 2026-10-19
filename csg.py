@@ -25,6 +25,8 @@ import numpy as np
 import trimesh
 
 import fnshapes
+import outline
+import sdf
 from templates import HELP as TEMPLATE_HELP, TEMPLATES
 
 M = mf.Manifold
@@ -227,6 +229,8 @@ def _profile_cs(p, depth=0):
             if p.get("radius"):
                 r = float(p["radius"])
                 cs = cs.offset(-r, mf.JoinType.Miter).offset(r, mf.JoinType.Round, circular_segments=segs)
+        elif kind == "svg":
+            cs = outline.profile(p, CS, {"evenodd": mf.FillRule.EvenOdd, "nonzero": mf.FillRule.NonZero})
         elif kind == "spline":
             pts = p.get("points")
             if not pts or len(pts) < 3:
@@ -234,7 +238,7 @@ def _profile_cs(p, depth=0):
             curve = fnshapes._catmull(np.asarray(pts, np.float64), int(p.get("steps", 12)), True)
             cs = CS([curve.tolist()], mf.FillRule.NonZero)
         else:
-            raise ValueError(f"unknown profile '{kind}' (polygon, circle, rect, spline, or "
+            raise ValueError(f"unknown profile '{kind}' (polygon, circle, rect, spline, svg, or "
                              f"op: union/difference/intersection/hull with 'profiles')")
     if p.get("offset"):
         cs = cs.offset(float(p["offset"]), mf.JoinType.Round, circular_segments=segs)
@@ -293,13 +297,15 @@ def _shape(n, env=None) -> M:
                           tuple(n.get("scale_top", (1.0, 1.0))))
     if kind == "revolve":
         return _profile(n).revolve(segs, float(n.get("degrees", 360)))
+    if kind == "sdf":
+        return sdf.build(n, lambda d: resolve(d, env or {}))
     if kind in fnshapes.SHAPES:
         args = (_profile,) if kind in fnshapes.NEEDS_PROFILE else ()
         return fnshapes.SHAPES[kind](n, env or {}, *args)
     if kind in TEMPLATES:
         return TEMPLATES[kind](n)
     raise ValueError(f"unknown shape '{kind}'. Available: box, cylinder, cone, sphere, tube, torus, "
-                     f"wedge, extrude, revolve, {', '.join(fnshapes.SHAPES)}, {', '.join(TEMPLATES)}")
+                     f"wedge, extrude, revolve, sdf, {', '.join(fnshapes.SHAPES)}, {', '.join(TEMPLATES)}")
 
 
 def _transform(m: M, n: dict) -> M:
@@ -483,8 +489,10 @@ Shapes ("shape"):
   extrude  h, profile, twist?, scale_top?:[sx,sy]
   revolve  profile (in the xz plane: x=radius), degrees?
   radial, heightmap, sweep, loft – expression/path shapes, see below
+  sdf      blended organic shapes (smooth unions, shells, twists), see below
   profile: {"shape":"polygon","points":[[x,y],...],"holes":[[...]]} | {"shape":"circle","d":..}
            | {"shape":"rect","size":[x,y],"radius"?, "center"?} | {"shape":"spline","points":[..]}
+           | {"shape":"svg","path":"M…Z","size"?:[w,h]} (logos, imported outlines, see below)
            | {"op":"union|difference|intersection|hull","profiles":[...]}
            (+ "offset"?, "rotate"?: deg, "translate"?: [x,y])
 Operations ("op") with "children":[...]: union, difference (first minus the rest), intersection,
@@ -494,4 +502,4 @@ All nodes: translate:[x,y,z], rotate:[rx,ry,rz] (degrees), scale, mirror:[nx,ny,
   name:"optional label"
 Values can be expressions: "=w/2+wall", "=max(a,b)", "=sqrt(x)", "=cos(30)" (degrees).
 
-""" + fnshapes.HELP + "\n" + TEMPLATE_HELP
+""" + fnshapes.HELP + outline.HELP + "\n" + sdf.HELP + "\n" + TEMPLATE_HELP

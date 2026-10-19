@@ -103,6 +103,7 @@ import geometry as g
 import openscad
 import printcheck
 import reference
+import relief
 import render
 import sso
 from auth import (CHALLENGE_TTL, SCOPE, SESSION_TTL, AuthState, Expiring, OAuthProvider, RateLimiter,
@@ -172,7 +173,12 @@ mcp = FastMCP(
         "transitions between outlines) use the expression shapes radial (radius = expression of "
         "z and angle), heightmap (z = expression of x, y), sweep (profile along a path/helix/"
         "spline with twist/taper) and loft (between outlines at different heights) – they cover "
-        "what would otherwise need a script model. "
+        "what would otherwise need a script model. For blended, organic solids - shapes that "
+        "melt into each other with a fillet, hollow shells with an even wall, twisted forms, "
+        "grips and figures - use the sdf shape (smooth union/difference of spheres, capsules, "
+        "boxes, tori ...). For a logo or a drawing, import_outline turns an SVG/DXF file into a "
+        "profile ({\"shape\": \"svg\", \"outline\": name}) to extrude, emboss or cut; for a "
+        "photo or picture use create_relief (a lithophane, or an embossed plate). "
         "get_model shows the recipe and the user's comments: they are points the user "
         "clicked in the 3D view, with near_nodes = the nodes in the recipe that are closest. "
         "Resolve them with update_model(..., resolves=[id]) or answer with reply_to_comment. "
@@ -263,7 +269,7 @@ def _summary(m: dict, full: bool = False, lib: "Lib | None" = None) -> dict:
         if lib and not lib.models.can_edit(m):
             out["read_only"] = ("someone else's public model: read it, or copy it with "
                                 "duplicate_model to change your own copy")
-        out["params"] = cur["params"]
+        out["params"] = _elide(cur["params"])
         out["history"] = [{"version": v["version"], "note": v["note"]} for v in m["versions"][-15:]]
         comments = m.get("comments", [])
         out["comments"] = [_comment_view(c) for c in comments if c["status"] == "open"]
@@ -383,7 +389,84 @@ def _open(m: dict) -> int:
 
 # ---------------------------------------------------------------- MCP tools
 
-KINDS = ("csg", "enclosure", "openscad", "script")
+KINDS = ("csg", "enclosure", "openscad", "script", "relief")
+MAX_OUTLINE_FILE = 10_000_000
+ELIDED = "…("     # starts the short note that stands in for long data in get_model's recipe
+
+
+def _elide(v):
+    """Long data in a recipe (an imported outline's path, a relief's picture) as a short note,
+    so get_model stays readable. The server puts the real value back when a recipe comes back
+    with the note in it (_prepare)."""
+    if isinstance(v, dict):
+        out = {}
+        for k, x in v.items():
+            if k == "path" and isinstance(x, str) and len(x) > 1500:
+                out[k] = f"{ELIDED}outline path, {len(x):,} characters, kept on the server)"
+            elif k == "image" and isinstance(x, str) and len(x) > 200:
+                out[k] = f"{ELIDED}picture, kept on the server)"
+            else:
+                out[k] = _elide(x)
+        return out
+    if isinstance(v, list):
+        return [_elide(x) for x in v]
+    return v
+
+
+def _outline_file(lib: "Lib", name: str) -> Path:
+    return lib.dir / "outlines" / f"{_safe(name)}.json"
+
+
+def _inline_outlines(lib: "Lib", v):
+    """{"shape": "svg", "outline": name} without a path (or with get_model's short note) gets the
+    path of the outline imported under that name, so the recipe itself holds the outline."""
+    if isinstance(v, list):
+        return [_inline_outlines(lib, x) for x in v]
+    if not isinstance(v, dict):
+        return v
+    v = {k: _inline_outlines(lib, x) for k, x in v.items()}
+    if v.get("shape") == "svg" and isinstance(v.get("outline"), str):
+        path = v.get("path")
+        if not isinstance(path, str) or path.startswith(ELIDED):
+            f = _outline_file(lib, v["outline"])
+            if not f.is_file():
+                raise ValueError(f"no outline '{v['outline']}': import it with import_outline first")
+            v["path"] = json.loads(f.read_text())["path"]
+    return v
+
+
+def _restore(new, old):
+    """get_model's short notes in a recipe that comes back, replaced by the stored values at the
+    same place (the rest are left for _inline_outlines)."""
+    if isinstance(new, str) and new.startswith(ELIDED):
+        return old if isinstance(old, str) and not old.startswith(ELIDED) else new
+    if isinstance(new, dict):
+        return {k: _restore(x, old.get(k) if isinstance(old, dict) else None) for k, x in new.items()}
+    if isinstance(new, list):
+        return [_restore(x, old[i] if isinstance(old, list) and i < len(old) else None)
+                for i, x in enumerate(new)]
+    return new
+
+
+def _has_elided(v) -> bool:
+    if isinstance(v, str):
+        return v.startswith(ELIDED)
+    if isinstance(v, dict):
+        return any(_has_elided(x) for x in v.values())
+    if isinstance(v, list):
+        return any(_has_elided(x) for x in v)
+    return False
+
+
+def _prepare(lib: "Lib", params, model_id: str = ""):
+    """A recipe from the AI, ready to store: short notes restored, imported outlines filled in."""
+    old = Store.current(lib.models.get(model_id))["params"] if model_id else None
+    params = _inline_outlines(lib, _restore(params, old))
+    if _has_elided(params):
+        raise ValueError("a shortened value from get_model ('…(… kept on the server)') can only "
+                         "be sent back in the same place of the recipe - leave it where it was, or "
+                         "change the model with changes={...} instead of the whole params")
+    return params
 
 REPLACE_DOC = """
 model_id: rebuild this existing model instead of making a new one - the new recipe becomes its
@@ -394,6 +477,7 @@ add text); make a new model only when the user asks for a separate one or a copy
 
 async def _create_or_replace(lib: "Lib", model_id: str, name: str, kind: str, params: dict,
                              description: str) -> dict:
+    params = await _run(_prepare, lib, params, model_id)
     if model_id:
         lib.ensure_room()
         m = await lib.build(lib.models.update, model_id, params=params, kind=kind,
@@ -539,6 +623,10 @@ async def update_model(model_id: str, changes: dict | None = None, remove: list[
         raise ValueError(f"unknown kind '{kind}' - use one of {', '.join(KINDS)}")
     if kind == "script" and lib.user["role"] != "admin":
         raise PermissionError("script models are for admins only")
+    if params is not None:
+        params = await _run(_prepare, lib, params, model_id)
+    if changes:
+        changes = await _run(_inline_outlines, lib, changes)
     rebuild = params is not None or bool(changes) or bool(remove)
     m = await (lib.build if rebuild else _run)(
         lib.models.update, model_id, params=params, changes=changes, remove=remove, note=note,
@@ -806,6 +894,84 @@ def import_file(name: str, url: str = "", data_base64: str = "", format: str = "
         if len(data) > MAX_UPLOAD:
             raise ValueError(f"the file is larger than {MAX_UPLOAD // 1_000_000} MB")
     return _save(lib, g.load_mesh(data, format or "stl"), _safe(name))
+
+
+@mcp.tool()
+async def import_outline(name: str, url: str = "", data_base64: str = "", format: str = "",
+                         ctx: Context = None) -> dict:
+    """Imports a 2D outline from an SVG or DXF file (a logo, a laser-cut part, a drawing) for use
+    in a CSG recipe: every closed shape, in mm, y up, moved to start at (0, 0); inner loops become
+    holes. Provide url (http/https) OR data_base64; format svg or dxf (guessed from the url).
+    Text in an SVG must be converted to paths first.
+
+    It is stored under `name`; use it as a profile with {"shape": "svg", "outline": name}, e.g.
+    {"shape": "extrude", "h": 2, "profile": {"shape": "svg", "outline": "logo", "size": [60, null]}}
+    (size fits it into a width/height keeping the proportions; "center": true centres it). The
+    recipe then holds a copy of the outline, so later changes and copies need nothing else."""
+    lib = _lib(ctx)
+    lib.ensure_room()
+    if bool(url) == bool(data_base64):
+        raise ValueError("provide either url or data_base64")
+    if url:
+        data, ext = await _run(_fetch, url)
+        format = format or ext
+    else:
+        data = base64.b64decode(data_base64, validate=True)
+    if len(data) > MAX_OUTLINE_FILE:
+        raise ValueError(f"the file is larger than {MAX_OUTLINE_FILE // 1_000_000} MB")
+    fmt = (format or "").lower().lstrip(".")
+    if fmt not in ("svg", "dxf"):
+        raise ValueError("format must be svg or dxf")
+    info = await _run(buildworker.import_outline, data, fmt)   # parsed in a sandboxed worker
+    f = _outline_file(lib, name)
+    f.parent.mkdir(exist_ok=True)
+    f.write_text(json.dumps(info))
+    profile = {"shape": "svg", "outline": _safe(name), "size": info["size"]}
+    out = {"outline": _safe(name), "size_mm": info["size"], "contours": info["contours"],
+           "points": info["points"], "profile": profile,
+           "example": {"shape": "extrude", "h": 2, "profile": profile}}
+    if len(info["path"]) <= 1500:
+        out["path"] = info["path"]
+    return out
+
+
+@mcp.tool()
+async def create_relief(name: str, url: str = "", data_base64: str = "", mode: str = "lithophane",
+                        width: float | None = None, invert: bool = False, pixels: int = 300,
+                        options: dict | None = None, description: str = "", model_id: str = "",
+                        ctx: Context = None) -> dict:
+    """Makes a model from a picture (PNG/JPEG via url or data_base64), one grid point per pixel:
+    - mode "lithophane": a thin plate whose thickness follows the darkness (min_thickness 0.8 to
+      max_thickness 3.0 mm), with a 3 mm frame (border); it shows the picture against a light.
+      Print it standing up with 100 % infill.
+    - mode "relief": base 1.5 mm + brightness × height 2 mm (bright = high, invert=true flips it),
+      no border by default - signs, logos, maps.
+    width: of the picture in mm (lithophane 100, relief 80; the border comes on top). pixels:
+    resolution of the longest side (16-600, default 300 ≈ 0.33 mm per pixel at 100 mm).
+    options: any of min_thickness, max_thickness, base, height, border. All of them can be
+    changed later with update_model(model_id, {"max_thickness": 3.5}); the picture is kept in
+    the recipe. model_id: rebuild this existing model instead of making a new one."""
+    lib = _lib(ctx)
+    if bool(url) == bool(data_base64):
+        raise ValueError("provide either url or data_base64")
+    if mode not in relief.DEFAULTS:
+        raise ValueError("mode must be 'lithophane' or 'relief'")
+    if url:
+        data, _ = await _run(_fetch, url)
+    else:
+        data = base64.b64decode(data_base64, validate=True)
+        if len(data) > MAX_UPLOAD:
+            raise ValueError(f"the file is larger than {MAX_UPLOAD // 1_000_000} MB")
+    image, size = await _run(relief.prepare, data, int(pixels))
+    unknown = set(options or {}) - set(relief.DEFAULTS[mode]) - {"invert"}
+    if unknown:
+        raise ValueError(f"unknown options {', '.join(sorted(unknown))} for {mode} "
+                         f"({', '.join(relief.DEFAULTS[mode])})")
+    params = {"mode": mode, **relief.DEFAULTS[mode], **(options or {}), "invert": bool(invert),
+              "image_size": size, "image": image}
+    if width is not None:
+        params["width"] = float(width)
+    return await _create_or_replace(lib, model_id, name, "relief", params, description)
 
 
 @mcp.tool()

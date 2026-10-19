@@ -46,7 +46,7 @@ WARM = int(os.environ.get("BUILD_WARM", "1"))
 WORKERS = int(os.environ.get("BUILD_WORKERS", "4"))
 MAX_OUTPUT = 1_000_000_000  # bytes per written file; 5M triangles are ~180 MB
 MAX_REPLY = 1_000_000       # bytes of the worker's JSON reply
-KINDS = ("csg", "enclosure", "primitive")
+KINDS = ("csg", "enclosure", "primitive", "relief")
 
 # Exceptions a build raises with messages meant for the user; they are raised again here with
 # the same type and message. Anything else becomes a RuntimeError (an "internal error").
@@ -153,6 +153,8 @@ def _job_in(p: subprocess.Popen, job: dict, timeout: float) -> list[tuple[str, t
             reply = None
         if reply is None:
             raise _died(p.returncode, err)
+        if "result" in reply and "error" not in reply:      # a job that returns data, not meshes
+            return reply["result"]
         if "error" in reply:
             if reply["error"] == "MemoryError":
                 raise _died(0, "MemoryError")
@@ -177,6 +179,13 @@ def build(kind: str, params: dict, timeout: float | None = None) -> dict[str, tr
     if kind not in KINDS:
         raise ValueError(f"unknown kind '{kind}'")
     return dict(_job({"op": "build", "kind": kind, "params": params}, timeout))
+
+
+def import_outline(data: bytes, fmt: str, timeout: float | None = None) -> dict:
+    """An SVG/DXF file as an outline path (outline.import_file), parsed in a worker: a crafted
+    file costs a throwaway process, not the server."""
+    import base64
+    return _job({"op": "outline", "data": base64.b64encode(data).decode(), "format": fmt}, timeout)
 
 
 def mesh_node(node, vars_: dict, timeout: float | None = None) -> trimesh.Trimesh | None:
@@ -211,6 +220,11 @@ def _apply_limits(lim: dict):
 def _run_job(job: dict) -> list:
     import csg
     import geometry as g
+    if job["op"] == "outline":
+        import base64
+
+        import outline
+        return outline.import_file(base64.b64decode(job["data"]), job["format"])
     if job["op"] == "node":
         m = csg.build_node(job["node"], csg.resolve_vars(job.get("vars") or {}))
         return [] if m.is_empty() else [("node", csg.to_trimesh(m))]
@@ -223,6 +237,9 @@ def _run_job(job: dict) -> list:
             wall=p.pop("wall", 2.4), floor=p.pop("floor", 2.4), lid_t=p.pop("lid_thickness", 2.4),
             screws=p.pop("corner_screws", True), **p)
         return [("body", body), ("lid", lid)]
+    if kind == "relief":
+        import relief
+        return [(k, csg.to_trimesh(m)) for k, m in relief.build(p).items()]
     if kind == "primitive":
         mesh = g.primitive(p.pop("shape"), **p)
         mesh.apply_translation([0, 0, -mesh.bounds[0][2]])
@@ -240,6 +257,9 @@ def _worker():
         return
     try:
         parts = _run_job(json.loads(data))
+        if isinstance(parts, dict):             # op "outline": plain data
+            sys.stdout.write(json.dumps({"result": parts}))
+            return
         for i, (_, mesh) in enumerate(parts):
             np.save(f"{i}.v.npy", np.asarray(mesh.vertices))
             np.save(f"{i}.f.npy", np.asarray(mesh.faces))
