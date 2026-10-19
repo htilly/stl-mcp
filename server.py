@@ -1838,6 +1838,14 @@ async def files(request):
         return PlainTextResponse("not found", status_code=404)
     # Version files never change, but only public ones may sit in shared caches (CDNs).
     scope = "public" if FILES_PUBLIC else "private"
+    if request.query_params.get("format") == "obj":
+        import trimesh
+        obj, _ = g.to_obj([(p.stem, trimesh.load(p), "")], "")
+        obj = obj.split("\n", 1)[1]  # no mtllib: a single part needs no .mtl
+        obj = "\n".join(l for l in obj.split("\n") if not l.startswith("usemtl"))
+        return Response(obj, media_type="model/obj", headers={
+            "Content-Disposition": f'attachment; filename="{request.path_params["id"]}_{p.stem}.obj"',
+            "Cache-Control": f"{scope}, max-age=31536000, immutable"})
     return FileResponse(p, media_type="model/stl", filename=f"{request.path_params['id']}_{p.name}",
                         headers={"Cache-Control": f"{scope}, max-age=31536000, immutable"})
 
@@ -1863,6 +1871,32 @@ async def preview(request):
     except Exception as e:  # noqa: BLE001
         return _err(e)
     return Response(png, media_type="image/png", headers={"Cache-Control": "private"})
+
+
+async def export_obj_zip(request):
+    """ZIP with <id>.obj + <id>.mtl: every part of a version (?version=N, default current) as a coloured object."""
+    mid = request.path_params["id"]
+    lib = _req_lib(request)
+    try:
+        m = lib.models.get(mid)
+        v = Store.version(m, int(request.query_params["version"])) if "version" in request.query_params \
+            else Store.current(m)
+
+        def work():
+            import trimesh
+            parts = [(n, trimesh.load(lib.models.file(mid, p["file"])), "") for n, p in v["parts"].items()]
+            obj, mtl = g.to_obj(parts, f"{mid}.mtl")
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+                z.writestr(f"{mid}.obj", obj)
+                z.writestr(f"{mid}.mtl", mtl)
+            return buf.getvalue()
+        data = await _run(work)
+    except Exception as e:  # noqa: BLE001
+        return _err(e)
+    return Response(data, media_type="application/zip", headers={
+        "Content-Disposition": f'attachment; filename="{mid}_v{v["version"]}_obj.zip"',
+        "Cache-Control": "private"})
 
 
 def _serve_file(d: Path, name: str):
@@ -1959,6 +1993,7 @@ app = Starlette(
         Route("/api/models", api_models, methods=["GET", "POST"]),
         Route("/api/models/{id}", api_model, methods=["GET", "POST", "DELETE"]),
         Route("/api/models/{id}/preview.png", preview),
+        Route("/api/models/{id}/export.zip", export_obj_zip),
         Route("/api/models/{id}/mesh", api_mesh, methods=["POST"]),
         Route("/api/events", api_events),
         Route("/admin", page_admin),
