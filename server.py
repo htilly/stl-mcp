@@ -1870,6 +1870,11 @@ async def api_auth_me(request):
     return resp
 
 
+# Every build's CPU time goes into the user's usage statistics (admin Users page).
+jobs.on_done = lambda job, cpu, wall: oauth.state.record_cpu(job.user_id, cpu, wall)
+CPU_STATS_DAYS = 30
+
+
 def _delete_account(uid: str) -> int:
     """Deletes a user with all their models and files. Returns how many models went."""
     n = store.delete_owner(uid)
@@ -1888,16 +1893,19 @@ async def api_admin_users(_):
     def collect():
         out = []
         stats = oauth.state.login_stats()
+        cpu = oauth.state.cpu_stats(CPU_STATS_DAYS)
         for u in oauth.state.users():
             lib = Lib(u)
             out.append({**{k: u[k] for k in ("id", "display_name", "email", "role", "bootstrap",
                                               "disabled", "created", "last_login", "passkeys",
                                               "providers", "tokens", "apps")},
                         **(stats.get(u["id"]) or {"logins": 0, "seconds": 0, "countries": []}),
+                        **(cpu.get(u["id"]) or {"builds": 0, "cpu_seconds": 0.0,
+                                                "builds_recent": 0, "cpu_seconds_recent": 0.0}),
                         "models": len(store.list(u["id"], everyone=False)),
                         "disk_mb": round(lib.disk_bytes() / 1e6, 1)})
         return out
-    return JSONResponse({"users": await _run(collect), "signup": SIGNUP})
+    return JSONResponse({"users": await _run(collect), "signup": SIGNUP, "cpu_days": CPU_STATS_DAYS})
 
 
 async def page_admin_load(_):
@@ -1959,6 +1967,11 @@ async def api_admin_load(_):
 async def api_admin_user_logins(request):
     rows = await _run(oauth.state.recent_logins, request.path_params["id"], 20)
     return JSONResponse({"logins": rows})
+
+
+async def api_admin_user_cpu(request):
+    rows = await _run(oauth.state.cpu_days, request.path_params["id"], CPU_STATS_DAYS)
+    return JSONResponse({"days": rows})
 
 
 async def api_admin_user(request):
@@ -2585,6 +2598,7 @@ app = Starlette(
         Route("/api/admin/pulse", api_admin_pulse),
         Route("/api/admin/users", api_admin_users),
         Route("/api/admin/users/{id}/logins", api_admin_user_logins),
+        Route("/api/admin/users/{id}/cpu", api_admin_user_cpu),
         Route("/api/admin/users/{id}", api_admin_user, methods=["POST", "DELETE"]),
         Route("/api/settings", api_settings, methods=["GET", "POST"]),
         Route("/api/recheck", api_recheck, methods=["POST"]),

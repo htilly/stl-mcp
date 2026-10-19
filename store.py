@@ -60,8 +60,8 @@ def _build_script(p, allow: bool):
         # A bare environment: the script must not see DATABASE_URL, MCP_TOKEN or SSO secrets.
         env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": td, "TMPDIR": td,
                "LANG": "C.UTF-8"}
-        p = subprocess.Popen([sys.executable, "-I", str(script)], stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE, text=True, cwd=td, env=env)
+        p = jobs.Popen([sys.executable, "-I", str(script)], stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, text=True, cwd=td, env=env)
         jobs.add_pid(p.pid)
         try:
             _, err = p.communicate(timeout=120)

@@ -45,6 +45,8 @@ const $ = (id) => document.getElementById(id);
 const say = (t, err) => { $("msg").textContent = t; $("msg").className = "msg" + (err ? " err" : ""); };
 let users = [], me = null;
 const history = new Map();  // user id -> recent logins, for the users whose list is open
+const cpuDays = new Map();  // user id -> CPU usage per day, for the users whose list is open
+let days = 30;
 
 const flag = (cc) => String.fromCodePoint(...[...cc.toUpperCase()].map((c) => 127397 + c.charCodeAt(0)));
 const country = (cc) => {
@@ -56,6 +58,9 @@ const dur = (s) => {
   const m = Math.round(s / 60);
   return m < 60 ? `${m} min` : m < 2880 ? `${(m / 60).toFixed(1).replace(/\.0$/, "")} h` : `${Math.round(m / 1440)} days`;
 };
+// CPU time: seconds below a minute, then the same as dur
+const cpu = (s) => (s < 60 ? `${s.toFixed(s < 10 ? 1 : 0)} s` : dur(s));
+const builds = (n) => `${n} build${n === 1 ? "" : "s"}`;
 
 function draw() {
   const term = $("q").value.trim().toLowerCase();
@@ -85,6 +90,8 @@ function draw() {
         <div><dt>Apps · tokens</dt><dd>${u.apps} · ${u.tokens}</dd></div>
         <div><dt>Logins</dt><dd>${u.logins}</dd></div>
         <div><dt>Time logged in</dt><dd title="Sum of login to last activity, approximate">${dur(u.seconds)}</dd></div>
+        <div><dt>CPU, last ${days} days</dt><dd title="${cpu(u.cpu_seconds_recent)} · ${builds(u.builds_recent)} (build CPU time, all cores together)">${cpu(u.cpu_seconds_recent)} · ${builds(u.builds_recent)}</dd></div>
+        <div><dt>CPU in total</dt><dd title="${cpu(u.cpu_seconds)} · ${builds(u.builds)} (build CPU time, all cores together)">${cpu(u.cpu_seconds)} · ${builds(u.builds)}</dd></div>
         <div><dt>Country</dt><dd title="${esc(u.countries.map(country).join(", "))}">${u.countries.length ? esc(u.countries.map(country).join(", ")) : "unknown"}</dd></div>
       </dl>
       <div class="row acts">
@@ -93,15 +100,20 @@ function draw() {
         <button class="sm" data-act="${u.disabled ? "enable" : "disable"}" ${locked ? "disabled" : ""}>${u.disabled ? "Enable" : "Disable"}</button>
         <button class="sm" data-act="logout" title="End all sessions and revoke connected apps and tokens">Log out everywhere</button>
         <button class="sm" data-act="logins" aria-expanded="${history.has(u.id)}" ${u.logins ? "" : "disabled"}>${history.has(u.id) ? "Hide logins" : "Recent logins"}</button>
+        <button class="sm" data-act="cpu" aria-expanded="${cpuDays.has(u.id)}" ${u.builds ? "" : "disabled"}>${cpuDays.has(u.id) ? "Hide CPU" : "CPU per day"}</button>
         <div class="grow"></div>
         <button class="sm danger" data-act="delete" ${locked ? "disabled" : ""}>Delete</button>
-      </div>${history.has(u.id) ? logins(history.get(u.id)) : ""}</section>`;
+      </div>${history.has(u.id) ? logins(history.get(u.id)) : ""}${cpuDays.has(u.id) ? perDay(cpuDays.get(u.id)) : ""}</section>`;
   }).join("") || `<p class="msg">No users match.</p>`;
 }
 
 function logins(rows) {
   return `<ul class="help logins">${rows.map((r) => `<li>${ago(r.at)} · ${r.country ? esc(country(r.country)) : "unknown country"}
     · ${dur(Math.round(r.last_seen - r.at))} · <span title="${esc(r.user_agent)}">${esc(browser(r.user_agent))}</span></li>`).join("")}</ul>`;
+}
+function perDay(rows) {
+  return `<ul class="help logins">${rows.map((r) => `<li>${esc(r.day)} · ${cpu(r.cpu_seconds)} CPU
+    · ${builds(r.builds)} · ${dur(Math.round(r.wall_seconds))} running</li>`).join("") || "<li>No builds in the last ${days} days</li>"}</ul>`;
 }
 const browser = (ua) => {
   const b = /Edg\//.test(ua) ? "Edge" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "";
@@ -112,7 +124,7 @@ const browser = (ua) => {
 let signup = false;
 async function load() {
   const [list, auth] = await Promise.all([api("/api/admin/users"), api("/api/auth")]);
-  users = list.users; signup = list.signup; me = auth.user;
+  users = list.users; signup = list.signup; days = list.cpu_days || days; me = auth.user;
   draw();
 }
 
@@ -131,6 +143,11 @@ $("users").addEventListener("click", async (e) => {
     if (act === "logins") {
       if (history.has(id)) history.delete(id);
       else history.set(id, (await api(`/api/admin/users/${encodeURIComponent(id)}/logins`)).logins);
+      return draw();
+    }
+    if (act === "cpu") {
+      if (cpuDays.has(id)) cpuDays.delete(id);
+      else cpuDays.set(id, (await api(`/api/admin/users/${encodeURIComponent(id)}/cpu`)).days);
       return draw();
     }
     if (act === "delete") {

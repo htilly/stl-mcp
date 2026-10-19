@@ -328,9 +328,9 @@ def _run(argv: list[str], cwd: Path, timeout: float) -> tuple[int, str]:
            "LANG": "C.UTF-8", "QT_QPA_PLATFORM": "offscreen", "TMPDIR": str(cwd)}
     log = cwd / "log.txt"
     with open(log, "wb") as out:
-        p = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=out,
-                             stderr=subprocess.STDOUT, start_new_session=True,
-                             preexec_fn=_limits(CPU_SECONDS) if os.name == "posix" else None)
+        p = jobs.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=out,
+                           stderr=subprocess.STDOUT, start_new_session=True,
+                           preexec_fn=_limits(CPU_SECONDS) if os.name == "posix" else None)
         jobs.add_pid(p.pid)
         try:
             rc = p.wait(timeout=timeout)
