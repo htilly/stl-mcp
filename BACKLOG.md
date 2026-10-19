@@ -138,6 +138,58 @@ In this order, re-measuring against the phase 0 baseline after each step.
   limits are. (S)
 - [ ] **Re-run the load test** and write the results next to this file. (S)
 
+## More tools for the AI
+
+Goal: let Claude/ChatGPT make more and better models. In three PRs; the first is done.
+
+- [x] **OpenSCAD libraries and reference material** (PR #56): NopSCADlib, Round-Anything,
+  gridfinity-rebuilt-openscad and MCAD next to BOSL2; the file-reader check per library;
+  `lookup_part` and `print_guide` (`reference/`). (M)
+- [ ] **Newer OpenSCAD with the Manifold backend.** Debian ships 2021.01 (CGAL), where booleans
+  are slow: `pcb(RPI4)` alone takes about 15-20 s. Install a pinned 2025 snapshot (AppImage or
+  tarball, checked against a sha256) in the `Dockerfile` and pass `--backend=manifold` in
+  `openscad.build` when the binary supports it (check `--help` once). Re-run the OpenSCAD tests
+  and the libraries against it. Blocked in the cloud session: files.openscad.org was not
+  reachable there. (S-M)
+- [ ] **More parts in `reference/parts.json`**: common displays (SSD1306 0.96" OLED, 1602 LCD),
+  USB-C/micro-USB breakout boards, buck converters, relay modules, fans (30/40/50 mm),
+  servos (SG90, MG996R), NEMA 17. Check every value against a datasheet or NopSCADlib. (S)
+
+### build123d and a real sandbox (PR 2) (L)
+- [ ] **Sandbox for Python builds**: a separate `sandbox` service in `docker-compose.yml` with
+  its own image, no internet (`network_mode: none`, only an internal socket/port to the server),
+  read-only rootfs, tmpfs `/tmp`, non-root, `cap_drop: ALL`, `no-new-privileges`, a seccomp
+  profile, mem/cpu/pids limits, and `runtime: runsc` (gVisor) where the host has it. Per job a
+  fresh process with the rlimit/timeout/process-group pattern from `buildworker.py`; meshes come
+  back as .npy like there.
+- [ ] **`build123d` kind** (OpenCascade B-rep): real fillets/chamfers on any edge, sketches,
+  shell, loft/sweep. New MCP tool `create_from_build123d` (the code sets `result` or
+  `parts={...}`), a new branch in `Store.build`, STEP export per version next to the STL
+  (download in the UI).
+- [ ] **Move the `script` kind into the same sandbox**, so `ALLOW_SCRIPT` can be on for everyone
+  (then drop the phase 1 item "Keep `ALLOW_SCRIPT=0`").
+- [ ] **STEP import** (`import_file` with `.step/.stp`) through the sandbox.
+- [ ] Tests that try to read files, reach the network, fork-bomb, eat memory and print the
+  environment from inside the sandbox: all must fail or come back empty.
+
+### SDF shapes and import (PR 3) (M-L)
+- [ ] **SDF kind as a data recipe** (not code, so safe like the CSG spec): `sphere/box/capsule/
+  torus/...`, `smooth_union/smooth_difference(k)`, `shell`, `twist`, `round`, `offset`; evaluated
+  with numpy and marching cubes (scikit-image) in `buildworker` (add it to `KINDS`). Reuse the
+  expression engine and limits from `fnshapes.py`/`csg.py`. For grips, figures and soft
+  transitions that CSG cannot do.
+- [ ] **SVG/DXF → extrusion**: a CSG node `outline` (svgpathtools + ezdxf + shapely → polygon),
+  files brought in with `import_file`. For logos and laser-cut outlines.
+- [ ] **Image → lithophane/relief**: a CSG node `image_relief` on top of the existing heightmap
+  (pillow is already there).
+- [ ] Pin the new packages in `requirements.txt`; a test that a `smooth_union` is watertight.
+
+### Ideas, not planned yet
+- [ ] **Better "eyes" for the AI**: a `measure` tool (distances between faces/parts, smallest wall
+  thickness, collisions such as lid vs box), section views as images (trimesh `section`), and a
+  headless slicer (PrusaSlicer/OrcaSlicer CLI) for print time, filament and where support is
+  needed. (M-L)
+
 ## Done when
 
 - A test group can use the service for a week without anyone able to fill the disk or starve the CPU.
