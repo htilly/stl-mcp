@@ -137,6 +137,8 @@ def _job(job: dict, timeout: float | None = None) -> list[tuple[str, trimesh.Tri
 
 
 def _job_in(p: subprocess.Popen, job: dict, timeout: float) -> list[tuple[str, trimesh.Trimesh]]:
+    import jobs  # here, not at the top: the worker (python -I) cannot import it before its path is set
+    jobs.add_pid(p.pid)
     try:
         try:
             out, err = p.communicate(json.dumps(job).encode(), timeout=timeout)
@@ -171,6 +173,7 @@ def _job_in(p: subprocess.Popen, job: dict, timeout: float) -> list[tuple[str, t
             parts.append((name, trimesh.Trimesh(vertices=v, faces=f, process=False)))
         return parts
     finally:
+        jobs.remove_pid(p.pid)
         _cleanup(p)
 
 

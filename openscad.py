@@ -45,6 +45,8 @@ from pathlib import Path
 
 import trimesh
 
+import jobs
+
 BIN = os.environ.get("OPENSCAD_BIN") or shutil.which("openscad") or ""
 _default_libs = Path("/opt/openscad-libs")
 LIBS = Path(os.environ.get("OPENSCAD_LIBS") or
@@ -291,6 +293,7 @@ def _run(argv: list[str], cwd: Path, timeout: float) -> tuple[int, str]:
         p = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=out,
                              stderr=subprocess.STDOUT, start_new_session=True,
                              preexec_fn=_limits(int(timeout) + 5) if os.name == "posix" else None)
+        jobs.add_pid(p.pid)
         try:
             rc = p.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -300,6 +303,7 @@ def _run(argv: list[str], cwd: Path, timeout: float) -> tuple[int, str]:
             raise OpenSCADError(f"OpenSCAD took longer than {timeout:g} s – simplify the model "
                                 "(lower $fn, fewer parts) or split it up") from None
         finally:
+            jobs.remove_pid(p.pid)
             with _quiet():                    # nothing it started may outlive it
                 os.killpg(p.pid, signal.SIGKILL)
     with open(log, "rb") as f:

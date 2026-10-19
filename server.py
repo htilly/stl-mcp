@@ -101,6 +101,7 @@ from webauthn.helpers.structs import (AuthenticatorSelectionCriteria, PublicKeyC
 
 import buildworker
 import csg
+import jobs
 import geometry as g
 import openscad
 import printcheck
@@ -339,9 +340,10 @@ class Lib:
                              "delete models or files (delete_model, delete_file) to make room")
 
 
-    async def build(self, fn, *a, mesh: bool = False, **kw):
+    async def build(self, fn, *a, mesh: bool = False, job: str = "", **kw):
         """Runs a build (fn in a thread) for this user: counted against their per-minute limit,
-        at most BUILDS_AT_ONCE at a time (the rest wait). Raises RateLimitError."""
+        at most BUILDS_AT_ONCE at a time (the rest wait). Raises RateLimitError. job names it on
+        the admin Load page (default: fn's name)."""
         uid = self.user["id"]
         if not (mesh_hits if mesh else build_hits).hit(uid):
             what = "previews" if mesh else "builds"
@@ -354,14 +356,17 @@ class Lib:
             if slot[1] >= BUILDS_WAITING:
                 raise RateLimitError("too many builds waiting - wait for the running ones to finish")
             slot[1] += 1
+        model = a[0] if a and isinstance(a[0], str) and fn.__name__ != "create" else None
+        running = jobs.start(self.user, job or fn.__name__, model)
         try:
             while not slot[0].acquire(blocking=False):   # wait without holding a thread
                 await anyio.sleep(0.05)
             try:
-                return await _run(fn, *a, **kw)
+                return await _run(jobs.run_in, running, fn, *a, **kw)
             finally:
                 slot[0].release()
         finally:
+            jobs.finish(running)
             with _build_slots_lock:
                 slot[1] -= 1
                 if slot[1] == 0:
@@ -1166,6 +1171,9 @@ public_hits = RateLimiter(AUTH_REQUESTS_PER_MINUTE, 60)  # per client IP and end
 # When each user last reached /mcp (in memory, per process): the web UI's Live dot turns from
 # "waiting for Claude" to "connected" as soon as an AI client talks to the MCP endpoint.
 mcp_seen: dict[str, float] = {}
+# Open web pages per user (their /api/events streams), for "who is online" on the admin Load page.
+web_open: dict[str, int] = {}
+ONLINE_MCP_SECONDS = 600  # MCP traffic this recent counts as online
 
 
 def _claude_connected(user: dict) -> bool:
@@ -1844,6 +1852,38 @@ async def api_admin_users(_):
     return JSONResponse({"users": await _run(collect), "signup": SIGNUP})
 
 
+async def page_admin_load(_):
+    return FileResponse(WEB / "load.html")
+
+
+async def api_admin_load(_):
+    """Live CPU and memory: the machine, the server process, and per online user their running
+    and waiting jobs (see jobs.py). Online = an open web page, recent MCP traffic or a job."""
+    def collect():
+        snap = jobs.snapshot()
+        now = time.time()
+        ids = ({u for u, n in web_open.items() if n > 0}
+               | {u for u, t in mcp_seen.items() if now - t < ONLINE_MCP_SECONDS}
+               | {j["user"] for j in snap["jobs"]})
+        users = []
+        for uid in ids:
+            u = oauth.state.user(uid) or {"display_name": "", "email": None, "role": "member"}
+            mine = [j for j in snap["jobs"] if j["user"] == uid]
+            cpus = [j["cpu"] for j in mine if j["cpu"] is not None]
+            users.append({"id": uid, "display_name": u.get("display_name") or "",
+                          "email": u.get("email"), "role": u.get("role"),
+                          "web_pages": web_open.get(uid, 0),
+                          "mcp_seconds_ago": round(now - mcp_seen[uid]) if uid in mcp_seen else None,
+                          "cpu": round(sum(cpus), 1) if cpus else (0.0 if not mine else None),
+                          "mem_mb": round(sum(j["mem_mb"] for j in mine), 1),
+                          "jobs": mine})
+        users.sort(key=lambda u: (-(u["cpu"] or 0), -len(u["jobs"]), u["display_name"].lower()))
+        return {"system": snap["system"], "server": snap["server"], "users": users,
+                "limits": {"workers": buildworker.WORKERS, "builds_at_once": BUILDS_AT_ONCE,
+                           "build_mem_mb": buildworker.MEM_MB, "build_timeout": buildworker.TIMEOUT}}
+    return JSONResponse(await _run(collect))
+
+
 async def api_admin_user_logins(request):
     rows = await _run(oauth.state.recent_logins, request.path_params["id"], 20)
     return JSONResponse({"logins": rows})
@@ -2135,7 +2175,7 @@ async def api_mesh(request):
             buf = io.BytesIO()
             mesh.export(buf, file_type="stl")
             return buf.getvalue()
-        stl = await lib.build(work, mesh=True)
+        stl = await lib.build(work, mesh=True, job="preview")
     except Exception as e:  # noqa: BLE001 – the error is shown in the editor
         return _err(e)
     return Response(stl, media_type="model/stl")
@@ -2185,23 +2225,32 @@ async def api_events(request):
         last = store.revision_for(user)
         yield f"data: {json.dumps({'revision': last, 'claude': claude, 'ok': ok})}\n\n"
         idle = 0
-        while not await request.is_disconnected():
-            await asyncio.sleep(0.5)
-            idle += 1
-            if claude is False and user["id"] in mcp_seen:
-                claude = True
-                yield f"data: {json.dumps({'revision': last, 'claude': True})}\n\n"
-            if store.revision_for(user) != last:
-                last = store.revision_for(user)
-                idle = 0
-                yield f"data: {json.dumps({'revision': last, 'id': store.last_changed_for(user)})}\n\n"
-            elif idle >= 30:
-                idle = 0
-                if (now := await _run(_healthy)) != ok:
-                    ok = now
-                    yield f"data: {json.dumps({'revision': last, 'ok': ok})}\n\n"
-                else:
-                    yield ": ping\n\n"
+        online = request.state.user is not None
+        if online:
+            web_open[user["id"]] = web_open.get(user["id"], 0) + 1
+        try:
+            while not await request.is_disconnected():
+                await asyncio.sleep(0.5)
+                idle += 1
+                if claude is False and user["id"] in mcp_seen:
+                    claude = True
+                    yield f"data: {json.dumps({'revision': last, 'claude': True})}\n\n"
+                if store.revision_for(user) != last:
+                    last = store.revision_for(user)
+                    idle = 0
+                    yield f"data: {json.dumps({'revision': last, 'id': store.last_changed_for(user)})}\n\n"
+                elif idle >= 30:
+                    idle = 0
+                    if (now := await _run(_healthy)) != ok:
+                        ok = now
+                        yield f"data: {json.dumps({'revision': last, 'ok': ok})}\n\n"
+                    else:
+                        yield ": ping\n\n"
+        finally:
+            if online and (n := web_open.get(user["id"], 0) - 1) > 0:
+                web_open[user["id"]] = n
+            elif online:
+                web_open.pop(user["id"], None)
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
@@ -2338,7 +2387,7 @@ async def export_obj_zip(request):
                 z.writestr(f"{mid}.obj", obj)
                 z.writestr(f"{mid}.mtl", mtl)
             return buf.getvalue()
-        data = await lib.build(work, mesh=True)
+        data = await lib.build(work, mesh=True, job="export")
     except Exception as e:  # noqa: BLE001
         return _err(e)
     return Response(data, media_type="application/zip", headers={
@@ -2458,6 +2507,8 @@ app = Starlette(
         Route("/admin", page_admin),
         Route("/admin/design", page_admin_design),
         Route("/admin/users", page_admin_users),
+        Route("/admin/load", page_admin_load),
+        Route("/api/admin/load", api_admin_load),
         Route("/api/admin/users", api_admin_users),
         Route("/api/admin/users/{id}/logins", api_admin_user_logins),
         Route("/api/admin/users/{id}", api_admin_user, methods=["POST", "DELETE"]),

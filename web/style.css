@@ -795,6 +795,16 @@ h3.sub { font-size: var(--t-base); margin: 0 0 var(--s2); }
 .admin .user.off { opacity: .7; }
 .admin .msg.err { color: var(--fault); }
 .admin .search input[type=search] { width: 100%; }
+.admin.load .num { font-variant-numeric: tabular-nums; }
+.admin.load .jobs-wrap { overflow-x: auto; }
+.admin.load .jobs { width: 100%; white-space: nowrap; border-collapse: collapse; font-size: var(--t-sm); margin-bottom: var(--s3); }
+.admin.load .jobs th { text-align: left; font-weight: 550; color: var(--scribe); padding: 4px var(--s2) 4px 0; border-bottom: 1px solid var(--rule); }
+.admin.load .jobs td { padding: 5px var(--s2) 5px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+.admin.load .jobs .num { text-align: right; }
+.admin.load .bar { display: inline-block; width: 56px; height: 6px; border-radius: 3px; background: var(--rule); vertical-align: middle; margin-right: 6px; overflow: hidden; }
+.admin.load .bar > i { display: block; height: 100%; background: var(--layout); }
+.admin.load .bar.warm > i { background: var(--wait); }
+.admin.load .bar.hot > i { background: var(--fault); }
 
 /* ---------------------------------------------------------------- touch
    Fingers need bigger targets than a mouse, and iOS zooms into any input under 16 px. */
@@ -849,6 +859,11 @@ h3.sub { font-size: var(--t-base); margin: 0 0 var(--s2); }
   .admin .user .tb > div { border-left: 0; border-top: 1px solid var(--rule); }
   .admin .user .tb > div:nth-child(-n+3) { border-top: 0; }
   .admin .user .tb > div:not(:nth-child(3n+1)) { border-left: 1px solid var(--rule); }
+  .admin.load .server .tb { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .admin.load .server .tb > div { border-left: 0; border-top: 1px solid var(--rule); }
+  .admin.load .server .tb > div:nth-child(-n+2) { border-top: 0; }
+  .admin.load .server .tb > div:nth-child(2n) { border-left: 1px solid var(--rule); }
+  .admin.load .tb .bar { width: 28px; }
   .admin .field { grid-template-columns: minmax(0, 1fr); }
   .admin .actions { bottom: var(--s2); }
   /* settings: a full-screen sheet with three equal tabs on top */

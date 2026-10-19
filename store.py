@@ -30,6 +30,7 @@ import trimesh
 from psycopg.types.json import Jsonb
 
 import buildworker
+import jobs
 import csg
 import openscad
 import printcheck
@@ -59,10 +60,19 @@ def _build_script(p, allow: bool):
         # A bare environment: the script must not see DATABASE_URL, MCP_TOKEN or SSO secrets.
         env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": td, "TMPDIR": td,
                "LANG": "C.UTF-8"}
-        r = subprocess.run([sys.executable, "-I", str(script)], capture_output=True, text=True,
-                           timeout=120, cwd=td, env=env)
-        if r.returncode != 0:
-            raise RuntimeError(r.stderr[-1500:])
+        p = subprocess.Popen([sys.executable, "-I", str(script)], stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True, cwd=td, env=env)
+        jobs.add_pid(p.pid)
+        try:
+            _, err = p.communicate(timeout=120)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            p.communicate()
+            raise
+        finally:
+            jobs.remove_pid(p.pid)
+        if p.returncode != 0:
+            raise RuntimeError(err[-1500:])
         return {f.stem[4:]: trimesh.load(f) for f in sorted(Path(td).glob("out_*.stl"))}
 
 

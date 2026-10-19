@@ -38,6 +38,7 @@
 <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6.5" height="6.5" rx="1.2"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.2"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.2"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.2"/></symbol>
 <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.500-7 10-7 10z"/></symbol>
 <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h9 M17 7h3 M4 17h3 M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
+<symbol id="i-gauge" viewBox="0 0 24 24"><path d="M4.5 17a8.5 8.5 0 1 1 15 0 M12 13.5 16 9"/><circle cx="12" cy="14" r="1.5"/></symbol>
 <symbol id="i-swatch" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><circle cx="16.5" cy="16.5" r="3.5"/></symbol>
 <symbol id="i-type" viewBox="0 0 24 24"><path d="M4 7V5h16v2 M12 5v14 M9 19h6"/></symbol>
 <symbol id="i-dimension" viewBox="0 0 24 24"><path d="M4 7v10 M20 7v10 M4 12h16 M7 9.5 4.5 12 7 14.5 M17 9.5l2.5 2.5-2.5 2.5"/></symbol>
