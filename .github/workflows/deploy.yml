@@ -112,6 +112,7 @@ jobs:
     env:
       IMAGE: ghcr.io/htilly/stl-mcp
       SERVICE: stl-mcp
+      SANDBOX_SERVICE: stl-mcp-sandbox
       CONTAINER: stl-mcp
       COMPOSE_PROJECT: config
       COMPOSE_DIR: /config
@@ -217,15 +218,25 @@ jobs:
           SINCE=$(date -u --date='-5 seconds' +%Y-%m-%dT%H:%M:%SZ)
           echo "since=$SINCE" >> "$GITHUB_OUTPUT"
 
-          # --no-deps plus naming the service explicitly keeps compose away
+          compose() {
+            docker compose \
+              -p "$COMPOSE_PROJECT" \
+              --project-directory "$COMPOSE_DIR" \
+              --env-file "$COMPOSE_ENV_FILE" \
+              -f "$COMPOSE_FILE_PATH" "$@"
+          }
+
+          # The Python sandbox (build123d) runs the same image as its own
+          # service; recreate it first when the compose file has it, so the
+          # server never talks to an older sandbox. See deploy/README.md.
+          services="$SERVICE"
+          if compose config --services | grep -qx "$SANDBOX_SERVICE"; then
+            services="$SANDBOX_SERVICE $SERVICE"
+          fi
+
+          # --no-deps plus naming the services explicitly keeps compose away
           # from the other containers on the machine.
-          docker compose \
-            -p "$COMPOSE_PROJECT" \
-            --project-directory "$COMPOSE_DIR" \
-            --env-file "$COMPOSE_ENV_FILE" \
-            -f "$COMPOSE_FILE_PATH" \
-            up -d --no-deps --force-recreate \
-            "$SERVICE"
+          compose up -d --no-deps --force-recreate $services
 
       # -----------------------------------------------------------------------
       # GATE: the app must say itself that it came up. server.py prints the
