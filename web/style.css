@@ -37,6 +37,7 @@
   --pei-ink: #2a2110;
   --fault: #b8322a;
   --sound: #2a7d4f;
+  --wait: #c27c0e;            /* Live dot: page live, Claude not connected yet */
   --stage: #eef2f7;          /* 3D viewport background */
   --stage-grid: #dde4ec;
   --stage-grid-major: #c3ccd8;
@@ -62,7 +63,7 @@
     --aluminium: #0b1220; --sheet: #0f172a; --inset: #172033;
     --graphite: #f1f5f9; --scribe: #94a3b8; --rule: #1e293b; --rule-strong: #334155;
     --layout: #60a5fa; --layout-ink: #0b1220; --layout-wash: #172554; --brand: #3b82f6;
-    --pei: #e8b552; --ember: #22d3ee; --fault: #f0735f; --sound: #52c486;
+    --pei: #e8b552; --ember: #22d3ee; --fault: #f0735f; --sound: #52c486; --wait: #f2a93b;
     --stage: #0d1424; --stage-grid: #18233a; --stage-grid-major: #2a3a58;
     --lift: 0 16px 40px rgb(0 0 0 / .55), 0 1px 3px rgb(0 0 0 / .4);
     color-scheme: dark;
@@ -72,7 +73,7 @@
   --aluminium: #0b1220; --sheet: #0f172a; --inset: #172033;
   --graphite: #f1f5f9; --scribe: #94a3b8; --rule: #1e293b; --rule-strong: #334155;
   --layout: #60a5fa; --layout-ink: #0b1220; --layout-wash: #172554; --brand: #3b82f6;
-  --pei: #e8b552; --ember: #22d3ee; --fault: #f0735f; --sound: #52c486;
+  --pei: #e8b552; --ember: #22d3ee; --fault: #f0735f; --sound: #52c486; --wait: #f2a93b;
   --stage: #0d1424; --stage-grid: #18233a; --stage-grid-major: #2a3a58;
   --lift: 0 16px 40px rgb(0 0 0 / .55), 0 1px 3px rgb(0 0 0 / .4);
   color-scheme: dark;
@@ -148,6 +149,8 @@ a.wordmark:hover { text-decoration: none; }
 .live { font-size: var(--t-sm); color: var(--scribe); display: inline-flex; align-items: center; gap: 6px; }
 .live .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--rule-strong); }
 .live.on .dot { background: var(--sound); box-shadow: 0 0 0 3px color-mix(in srgb, var(--sound) 22%, transparent); }
+.live.down .dot { background: var(--fault); box-shadow: 0 0 0 3px color-mix(in srgb, var(--fault) 22%, transparent); }
+.live.wait .dot { background: var(--wait); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wait) 22%, transparent); }
 
 /* ---------------------------------------------------------------- controls */
 input[type=search], input[type=text], input[type=number], input[type=password], textarea, select {

@@ -32,11 +32,16 @@ global.document = { hidden: false, addEventListener: (n, f) => { docListeners[n]
 global.window = { addEventListener: (n, f) => { winListeners[n] = f; } };
 const { subscribe } = new Function(src + "; return { subscribe };")();
 const calls = [];
-subscribe((d) => calls.push(d));
+const cls = new Set();
+const label = { textContent: "Live" };
+const statusEl = { title: "", querySelector: () => label,
+  classList: { toggle: (c, on) => (on ? cls.add(c) : cls.delete(c)) } };
+const status = () => ({ classes: [...cls].sort(), label: label.textContent });
+subscribe((d) => calls.push(d), statusEl);
 const cur = () => sources[sources.length - 1];
 const drop = () => { cur().onerror(); timers.splice(0).forEach((f) => f()); };
 const scenario = {
-  change() { cur().onopen(); cur().send({ revision: 1 }); cur().send({ revision: 2, id: "m" }); },
+  change() { cur().send({ revision: 1 }); cur().send({ revision: 2, id: "m" }); },
   missed_while_dropped() { cur().send({ revision: 1 }); drop(); cur().send({ revision: 5 }); },
   nothing_missed() { cur().send({ revision: 1 }); drop(); cur().send({ revision: 1 }); },
   foreground() {
@@ -47,6 +52,18 @@ const scenario = {
     cur().send({ revision: 3 });
     calls.push({ reconnected: cur() !== first, oldClosed: first.closed });
   },
+  claude_status() {
+    cur().send({ revision: 1, claude: false });
+    calls.push(status());
+    cur().send({ revision: 1, claude: true });
+    calls.push(status());
+    cur().send({ revision: 1, ok: false });
+    calls.push(status());
+    cur().send({ revision: 1, ok: true });
+    drop();
+    calls.push(status());
+  },
+  anonymous_status() { cur().send({ revision: 1, claude: null }); calls.push(status()); },
   bfcache() {
     cur().send({ revision: 1 });
     winListeners.pageshow({ persisted: true });
@@ -86,3 +103,16 @@ def test_returning_to_the_foreground_reconnects_and_catches_up():
 def test_restored_from_back_forward_cache_catches_up():
     calls = run("bfcache")
     assert any(c.get("resync") is True for c in calls)
+
+
+def test_live_dot_waits_for_claude_then_turns_green():
+    assert run("claude_status") == [
+        {"classes": ["wait"], "label": "Waiting for AI"},
+        {"classes": ["on"], "label": "Live"},
+        {"classes": ["down"], "label": "Server problem"},
+        {"classes": ["down"], "label": "Offline"},
+    ]
+
+
+def test_live_dot_is_green_for_anonymous_viewers():
+    assert run("anonymous_status") == [{"classes": ["on"], "label": "Live"}]

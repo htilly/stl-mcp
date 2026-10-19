@@ -60,6 +60,7 @@ import secrets
 import shutil
 import socket
 import threading
+import time
 import uuid
 import zipfile
 from pathlib import Path
@@ -834,6 +835,21 @@ SIGNUP_PATHS = ("/auth/config", "/auth/signup/options", "/auth/signup/verify", "
 signups = RateLimiter(SIGNUPS_PER_HOUR, 3600)
 AUTH_REQUESTS_PER_MINUTE = int(os.environ.get("AUTH_REQUESTS_PER_MINUTE", "30"))
 public_hits = RateLimiter(AUTH_REQUESTS_PER_MINUTE, 60)  # per client IP and endpoint group
+
+# When each user last reached /mcp (in memory, per process): the web UI's Live dot turns from
+# "waiting for Claude" to "connected" as soon as an AI client talks to the MCP endpoint.
+mcp_seen: dict[str, float] = {}
+
+
+def _claude_connected(user: dict) -> bool:
+    """Whether an AI client is connected for this user: it reached /mcp since this process
+    started, or (across restarts) it holds a live OAuth token or has used a personal token."""
+    if user["id"] in mcp_seen:
+        return True
+    if not TOKEN:
+        return False  # local single-user mode: no tokens, only actual /mcp traffic counts
+    return bool((oauth.state.clients(user["id"]) if OAUTH_ROUTES else [])
+                or any(t.get("last_used") for t in oauth.state.personal_tokens(user["id"])))
 SSO = sso.configured()
 sso_flows = Expiring(10 * 60)  # state -> {provider, nonce, verifier, next, link, browser}
 SSO_COOKIE = "stl_sso"
@@ -1038,6 +1054,8 @@ class Auth(BaseHTTPMiddleware):
             return JSONResponse({"error": "unauthorized"}, status_code=401, headers=headers)
         if user and _admin_path(path) and user["role"] != "admin":
             return JSONResponse({"error": "admins only"}, status_code=403)
+        if user and path.startswith("/mcp"):
+            mcp_seen[user["id"]] = time.time()
         if via == "token" and read and request.query_params.get("token") and not path.startswith("/mcp"):
             # login via ?token= : set a session cookie and remove the token from the URL
             rest = urlencode([(k, v) for k, v in request.query_params.multi_items() if k != "token"])
@@ -1221,6 +1239,7 @@ async def api_auth_passkey(request):
 async def api_auth_client(request):
     if not oauth.state.revoke_client(request.path_params["id"], _user(request)["id"]):
         return JSONResponse({"error": "no such app"}, status_code=404)
+    mcp_seen.pop(_user(request)["id"], None)  # the Live dot waits for Claude again
     return JSONResponse({"ok": True})
 
 
@@ -1550,6 +1569,7 @@ async def api_auth_token(request):
     if not oauth.state.delete_personal_token(request.path_params["id"], _user(request)["id"]):
         return JSONResponse({"error": "no such token"}, status_code=404)
     security_log("token_deleted", user=_user(request)["id"], token=request.path_params["id"])
+    mcp_seen.pop(_user(request)["id"], None)  # the Live dot waits for Claude again
     return JSONResponse({"ok": True})
 
 
@@ -1810,23 +1830,36 @@ async def api_recheck(request):
 
 
 async def api_events(request):
-    """Server-sent events: sends {revision, id} whenever something in the viewer's library changes."""
+    """Server-sent events: sends {revision, id} whenever something in the viewer's library changes,
+    {revision, claude} with whether an AI client is connected over MCP (sent again when one
+    connects; null for anonymous viewers), and {revision, ok} with the backend's health (_healthy,
+    re-checked every 15 s and sent when it changes)."""
     user = _req_lib(request).user
+    claude = await _run(_claude_connected, user) if request.state.user else None
+    ok = await _run(_healthy)
 
     async def gen():
+        nonlocal claude, ok
         last = store.revision_for(user)
-        yield f"data: {json.dumps({'revision': last})}\n\n"
+        yield f"data: {json.dumps({'revision': last, 'claude': claude, 'ok': ok})}\n\n"
         idle = 0
         while not await request.is_disconnected():
             await asyncio.sleep(0.5)
             idle += 1
+            if claude is False and user["id"] in mcp_seen:
+                claude = True
+                yield f"data: {json.dumps({'revision': last, 'claude': True})}\n\n"
             if store.revision_for(user) != last:
                 last = store.revision_for(user)
                 idle = 0
                 yield f"data: {json.dumps({'revision': last, 'id': store.last_changed_for(user)})}\n\n"
             elif idle >= 30:
                 idle = 0
-                yield ": ping\n\n"
+                if (now := await _run(_healthy)) != ok:
+                    ok = now
+                    yield f"data: {json.dumps({'revision': last, 'ok': ok})}\n\n"
+                else:
+                    yield ": ping\n\n"
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
@@ -2011,7 +2044,19 @@ async def upload(request):
         return _err(e)
 
 
+def _healthy() -> bool:
+    """Whether the backend can serve the library: the database answers and the model directory
+    is there. Shown on the Live dot (red when not) and returned by /health."""
+    try:
+        return bool(oauth.state.db.one("SELECT 1 AS ok")) and store.dir.is_dir()
+    except Exception:  # noqa: BLE001 - any failure here is exactly what is being reported
+        log.warning("health check failed", exc_info=True)
+        return False
+
+
 async def health(_):
+    if not await _run(_healthy):
+        return PlainTextResponse("unhealthy", status_code=503)
     return PlainTextResponse("ok")
 
 
