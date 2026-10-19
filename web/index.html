@@ -140,7 +140,7 @@
   </div>
 </dialog>
 <script type="module">
-import { api, subscribe, ago, fmt, esc, icon, visBadge, copyText, passkeyRegister, passkeysSupported } from "/static/common.js";
+import { api, subscribe, ago, fmt, esc, icon, visBadge, sourceBadge, sourceLabel, copyText, passkeyRegister, passkeysSupported } from "/static/common.js";
 
 const grid = document.getElementById("grid");
 const q = document.getElementById("q");
@@ -156,7 +156,7 @@ let models = [];
 
 function render(flashId) {
   const term = q.value.trim().toLowerCase();
-  const list = models.filter((m) => !term || (m.name + " " + m.id + " " + m.description).toLowerCase().includes(term));
+  const list = models.filter((m) => !term || (m.name + " " + m.id + " " + m.description + " " + sourceLabel(m.source)).toLowerCase().includes(term));
   document.getElementById("count").textContent = models.length === 1 ? "1 model" : `${models.length} models`;
   document.getElementById("empty").hidden = models.length > 0;
   grid.innerHTML = list.map((m) => {
@@ -164,8 +164,10 @@ function render(flashId) {
     const dims = parts.length === 1 ? fmt(parts[0].extents_mm) : `${parts.length}`;
     return `<a class="card${m.id === flashId ? " flash" : ""}" href="/m/${encodeURIComponent(m.id)}">
       <div class="thumb"><img loading="lazy" alt="" src="/api/models/${encodeURIComponent(m.id)}/preview.png?v=${m.version}.2">
-        ${m.open_comments ? `<span class="cbadge" title="Open comments">${icon("comment")}${m.open_comments}</span>` : ""}
-        ${m.warnings ? `<span class="cbadge wbadge" title="Print-check warnings">${icon("warning")}${m.warnings}</span>` : ""}
+        ${sourceBadge(m.source)}
+        ${m.open_comments || m.warnings ? `<span class="tbadges">
+          ${m.open_comments ? `<span class="cbadge" title="Open comments">${icon("comment")}${m.open_comments}</span>` : ""}
+          ${m.warnings ? `<span class="cbadge wbadge" title="Print-check warnings">${icon("warning")}${m.warnings}</span>` : ""}</span>` : ""}
         ${visBadge(m.visibility)}</div>
       <div class="name" title="${esc(m.name)}">${esc(m.name)}</div>
       <dl class="tb">

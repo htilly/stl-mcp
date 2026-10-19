@@ -65,6 +65,7 @@
     <div class="sec head">
       <input class="title-input" id="title" aria-label="Name">
       <textarea class="desc-input" id="desc" rows="1" placeholder="Add a description" aria-label="Description"></textarea>
+      <div id="srcbadge"></div>
       <dl class="tb">
         <div><dt>Revision</dt><dd id="tbrev"></dd></div>
         <div><dt>Saved</dt><dd id="tbsaved"></dd></div>
@@ -140,7 +141,7 @@
 import * as THREE from "three";
 import { createStage, loadSTL, spreadX } from "/static/stage.js";
 import { createComments } from "/static/comments.js";
-import { api, subscribe, ago, fmt, esc, icon, visBadge, warnHtml, PART_COLORS } from "/static/common.js";
+import { api, subscribe, ago, fmt, esc, icon, visBadge, warnHtml, sourceBadge, PART_COLORS } from "/static/common.js";
 
 const id = decodeURIComponent(location.pathname.split("/").pop());
 document.getElementById("editlink").href = `/edit/${encodeURIComponent(id)}`;
@@ -237,6 +238,7 @@ function renderSide() {
   const ver = model.versions.find((x) => x.version === viewVersion) || cur;
   document.title = `${model.name} · autosmith`;
   $("crumb").textContent = model.name;
+  $("srcbadge").innerHTML = sourceBadge(ver.source, "inline");
   $("tbrev").textContent = `v${ver.version} of ${model.versions.length}`;
   $("tbsaved").textContent = ago(ver.created);
   if (document.activeElement !== $("title")) $("title").value = model.name;
