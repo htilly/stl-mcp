@@ -62,6 +62,8 @@ def test_owner_publishes_and_it_appears_in_the_gallery(world):
         assert [(x["id"], x["owner_name"], x["mine"], x["copies"]) for x in g] == [("anns-box", "Ann", mine, 0)]
         assert "owner" not in g[0]  # user ids never reach other users
         assert g[0]["source"] == "csg"
+    assert world.annc.get("/api/models").json()["models"][0]["source"] == "csg"
+    assert world.annc.get("/api/models/anns-box").json()["versions"][0]["source"] == "csg"
     assert world.bobc.get("/gallery", headers={"accept": "text/html"}).status_code == 200
 
 

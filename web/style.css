@@ -376,6 +376,9 @@ main.lib { padding: var(--s5) var(--s5) var(--s4); max-width: 1440px; margin: 0 
 }
 .cbadge .i { width: 13px; height: 13px; stroke-width: 2; }
 .cbadge.wbadge { right: auto; left: var(--s2); background: var(--fault); color: #fff; }
+/* library cards: comments and warnings side by side, top right (the type badge is top left) */
+.tbadges { position: absolute; top: var(--s2); right: var(--s2); display: flex; gap: 4px; }
+.tbadges .cbadge { position: static; }
 /* visibility: on every card (bottom right of the thumbnail) and at the top of the model panel */
 .vbadge {
   position: absolute; bottom: var(--s2); right: var(--s2);
@@ -387,7 +390,7 @@ main.lib { padding: var(--s5) var(--s5) var(--s4); max-width: 1440px; margin: 0 
 .vbadge .i { width: 13px; height: 13px; stroke-width: 2; }
 .vbadge.public { background: #2563eb; color: #fff; border-color: transparent; }
 .vbadge.inline { position: static; vertical-align: 1px; }
-/* what a model is made from (gallery): top left of the thumbnail */
+/* what a model is made from (library, gallery): top left of the thumbnail */
 .sbadge {
   position: absolute; top: var(--s2); left: var(--s2);
   display: inline-flex; align-items: center; height: 22px; padding: 0 8px;
@@ -396,6 +399,8 @@ main.lib { padding: var(--s5) var(--s5) var(--s4); max-width: 1440px; margin: 0 
   -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
 }
 .sbadge.stl { background: #475161; color: #fff; border-color: transparent; }
+.sbadge.inline { position: static; vertical-align: 1px; }
+#srcbadge { margin-top: var(--s2); }
 .sbadge.openscad { background: #f9d71c; color: #3b3200; border-color: transparent; }
 /* a card with more than one link (gallery): .cover is the card's link, the maker link sits on top */
 div.card { position: relative; }

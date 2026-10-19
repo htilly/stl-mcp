@@ -1835,7 +1835,7 @@ _IMPORT_ONLY = re.compile(r'\s*import\s*\(\s*"[\w.]+"\s*\)\s*;?\s*')
 
 
 def _source(cur: dict) -> str:
-    """What a model is made from, for the gallery's type badge: its kind, or "stl" for an
+    """What a model is made from, for its type badge: its kind, or "stl" for an
     OpenSCAD recipe that only imports an attached mesh (a plain uploaded STL)."""
     p = cur.get("params") or {}
     if cur["kind"] == "openscad" and p.get("meshes") and _IMPORT_ONLY.fullmatch(p.get("code") or ""):
@@ -1867,7 +1867,7 @@ async def api_models(request):
         cur = Store.current(m)
         out.append({"id": m["id"], "name": m["name"], "description": m.get("description", ""),
                     "updated": m["updated"], "version": cur["version"], "kind": cur["kind"],
-                    "versions": len(m["versions"]), "open_comments": _open(m),
+                    "source": _source(cur), "versions": len(m["versions"]), "open_comments": _open(m),
                     "visibility": m.get("visibility", "private"),
                     "warnings": sum(len(p.get("warnings", [])) for p in cur["parts"].values()),
                     "parts": {n: {"url": f"/files/{m['id']}/{p['file']}",
@@ -1930,6 +1930,7 @@ async def api_model(request):
     except Exception as e:  # noqa: BLE001 – the error is shown in the UI
         return _err(e)
     for v in m["versions"]:
+        v["source"] = _source(v)
         for p in v["parts"].values():
             p["url"] = f"/files/{m['id']}/{p['file']}"
         if step := v.get("files", {}).get("step"):
