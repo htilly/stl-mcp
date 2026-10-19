@@ -139,6 +139,7 @@ gives the 14 px size. An icon-only button needs `class="icon"` and an `aria-labe
 | `i-comment` | Comments, comment mode |
 | `i-warning` | Print-check warning |
 | `i-download` | Download STL |
+| `i-play` | The demo video teaser (login page, library footer); drawn filled on the poster |
 | `i-copy` / `i-duplicate` | Copy to clipboard / duplicate a model |
 | `i-back`, `i-plus`, `i-close`, `i-check` | Navigation and confirmation |
 | `i-reply`, `i-restore`, `i-trash`, `i-logout` | Comment reply, restore a revision, delete, log out |
