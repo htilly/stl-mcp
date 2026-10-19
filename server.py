@@ -114,7 +114,7 @@ def security_log(event: str, **fields):
     """One line per security-relevant event (logins, tokens, admin actions) - never secrets."""
     security.warning(json.dumps({"event": event, **fields}, default=str))
 from db import Database
-from store import Store
+from store import Store, slug
 
 DATA = Path(os.environ.get("STL_DIR", "./out")).resolve()
 DATA.mkdir(parents=True, exist_ok=True)
@@ -1873,25 +1873,71 @@ async def preview(request):
     return Response(png, media_type="image/png", headers={"Cache-Control": "private"})
 
 
+_NOT_SPLITTABLE = ("scale", "rotate", "mirror", "translate", "array", "polar")
+
+
+def _components(v: dict) -> list[tuple[str, dict]]:
+    """The recipe nodes a version is made of: [(part name, node)]. A csg part whose top node is an
+    operation (union, difference ...) without its own transform gives its children one by one;
+    anything else (a single shape, other recipe kinds) stays as the whole part."""
+    spec = v.get("params") or {}
+    if v.get("kind") != "csg" or not isinstance(spec, dict):
+        return []
+    nodes = spec.get("parts") if isinstance(spec.get("parts"), dict) else {"model": spec.get("root")}
+    out = []
+    for pname, node in nodes.items():
+        kids = node.get("children") if isinstance(node, dict) else None
+        if (isinstance(node, dict) and "op" in node and kids
+                and not any(k in node for k in _NOT_SPLITTABLE)):
+            out += [(pname, c) for c in kids if isinstance(c, dict) and not c.get("hidden")]
+        else:
+            out.append((pname, None))
+    return out
+
+
 async def export_obj_zip(request):
-    """ZIP with <id>.obj + <id>.mtl: every part of a version (?version=N, default current) as a coloured object."""
+    """ZIP with <id>.obj + <id>.mtl: every component of a version (?version=N, default current) as its
+    own coloured object - the children of each part's top operation, or the whole part when it is a
+    single shape. ?split=0 gives one object per part instead."""
     mid = request.path_params["id"]
     lib = _req_lib(request)
     try:
         m = lib.models.get(mid)
         v = Store.version(m, int(request.query_params["version"])) if "version" in request.query_params \
             else Store.current(m)
+        comps = _components(v) if request.query_params.get("split") != "0" else []
+        env_vars = (v.get("params") or {}).get("vars") or {}
 
         def work():
             import trimesh
-            parts = [(n, trimesh.load(lib.models.file(mid, p["file"])), "") for n, p in v["parts"].items()]
-            obj, mtl = g.to_obj(parts, f"{mid}.mtl")
+            wholes = {n: trimesh.load(lib.models.file(mid, p["file"])) for n, p in v["parts"].items()}
+            items, seen = [], set()
+
+            def add(name, mesh):
+                base = slug(name).replace("-", "_") or "part"
+                n, i = base, 2
+                while n in seen:
+                    n, i = f"{base}_{i}", i + 1
+                seen.add(n)
+                items.append((n, mesh, ""))
+            kept = {p for p, node in comps if node is None}
+            for pname, node in comps:
+                if node is None:
+                    continue
+                mesh = buildworker.mesh_node(node, env_vars)
+                if mesh is not None:
+                    label = node.get("name") or node.get("shape") or node.get("op") or "part"
+                    add(label if len(v["parts"]) == 1 else f"{pname}_{label}", mesh)
+            for pname, mesh in wholes.items():
+                if not comps or pname in kept:
+                    add(pname, mesh)
+            obj, mtl = g.to_obj(items, f"{mid}.mtl")
             buf = io.BytesIO()
             with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
                 z.writestr(f"{mid}.obj", obj)
                 z.writestr(f"{mid}.mtl", mtl)
             return buf.getvalue()
-        data = await _run(work)
+        data = await lib.build(work, mesh=True)
     except Exception as e:  # noqa: BLE001
         return _err(e)
     return Response(data, media_type="application/zip", headers={
