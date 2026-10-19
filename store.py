@@ -76,11 +76,11 @@ def _build_script(p, allow: bool):
         return {f.stem[4:]: trimesh.load(f) for f in sorted(Path(td).glob("out_*.stl"))}
 
 
-def _build_openscad(p, allow: bool):
+def _build_openscad(p, allow: bool, mesh_dir: Path | None = None):
     if not allow:
         raise PermissionError("OpenSCAD models are disabled on this server (ALLOW_OPENSCAD=0 "
                               "or the openscad binary is missing)")
-    return openscad.build(p)
+    return openscad.build(p, mesh_dir)
 
 
 # ---------------------------------------------------------------- JSON pointers
@@ -184,6 +184,9 @@ class Store:
     def __init__(self, root: Path, db, allow_script: bool = False, allow_openscad: bool = False):
         self.dir = Path(root) / "models"
         self.dir.mkdir(parents=True, exist_ok=True)
+        # meshes attached to OpenSCAD recipes, by content: <sha256>.stl (see openscad.py)
+        self.mesh_dir = Path(root) / "meshes"
+        self.mesh_dir.mkdir(exist_ok=True)
         self.db = db
         self.allow_script = allow_script
         self.allow_openscad = allow_openscad
@@ -246,7 +249,7 @@ class Store:
         if kind == "script":
             return _build_script(params, self.allow_script)
         if kind == "openscad":
-            return _build_openscad(params, self.allow_openscad)
+            return _build_openscad(params, self.allow_openscad, self.mesh_dir)
         if kind == "build123d":                # in the sandbox container, see sandboxd.py
             return sandbox.build(kind, params)
         raise ValueError(f"unknown kind '{kind}'")
