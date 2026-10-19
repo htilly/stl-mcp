@@ -195,7 +195,7 @@ def test_tools_are_registered():
         "get_model", "set_visibility",
         "reply_to_comment", "render_model", "list_models", "revert_model", "duplicate_model",
         "delete_model", "import_file", "file_info", "modify_file", "split_file", "export_obj",
-        "list_files", "delete_file", "check_print", "whoami"}
+        "list_files", "delete_file", "check_print", "whoami", "lookup_part", "print_guide"}
 
 
 def test_create_model(out_dir):

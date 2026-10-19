@@ -278,7 +278,7 @@ page). It requires `PUBLIC_URL` on https (or localhost); `OAUTH=0` turns it off.
 |---|---|
 | `create_model` | new model from a CSG spec (shapes, boolean operations, transforms, variables) |
 | `create_enclosure` | box + lid with corner screws, standoffs, cutouts and lid holes |
-| `create_from_openscad` | OpenSCAD code with the bundled BOSL2 library (threads, gears, rounding, sweeps), sandboxed; see below |
+| `create_from_openscad` | OpenSCAD code with the bundled libraries (BOSL2, NopSCADlib, Round-Anything, Gridfinity, MCAD), sandboxed; see below |
 | `create_from_script` | arbitrary trimesh Python (requires `ALLOW_SCRIPT=1`, runs code on the server!) |
 | `update_model` | change variables/parameters or any value via JSON pointer → new version |
 | `get_model` | the recipe, dimensions, history and open comments (with `near_nodes`) |
@@ -287,6 +287,8 @@ page). It requires `PUBLIC_URL` on https (or localhost); `OAUTH=0` turns it off.
 | `list_models`, `revert_model`, `duplicate_model`, `delete_model` | `duplicate_model` also copies someone else's public model |
 | `set_visibility` | make a model `public` (listed in the gallery) or `private` again |
 | `whoami` | the account the connection is signed in as |
+| `lookup_part` | size and mounting holes of common boards and parts (Raspberry Pi, Arduino, ESP32, 18650 ...) |
+| `print_guide` | rules of thumb for FDM: walls, clearances, screw/insert/nut hole sizes, overhangs |
 | `import_file` | imports STL/OBJ/GLB/PLY/OFF via `url` or `data_base64` (zip with obj+mtl is unpacked) |
 | `file_info` | dimensions, bounds, volume, number of loose parts |
 | `check_print` | re-run the print check on a library model or a standalone file with the current settings |
@@ -357,15 +359,32 @@ Example with templates, a plate with countersunk M3 holes and engraved text:
 
 ### OpenSCAD models
 For shapes the CSG spec cannot express, Claude can write OpenSCAD with
-`create_from_openscad(name, code, vars=None, parts=None)`. The Docker image ships `openscad` and a
-pinned [BOSL2](https://github.com/BelfrySCAD/BOSL2), so threaded rods and nuts
-(`BOSL2/threading.scad`), gears (`BOSL2/gears.scad`), screws, rounded/chamfered cuboids and
-cylinders, `offset_sweep`, `path_sweep`, `skin` and knurling are all available:
+`create_from_openscad(name, code, vars=None, parts=None)`. The Docker image ships `openscad` and
+these libraries, each pinned to a commit in the `Dockerfile`:
+
+| library | for |
+|---|---|
+| [BOSL2](https://github.com/BelfrySCAD/BOSL2) | threaded rods and nuts (`BOSL2/threading.scad`), gears (`BOSL2/gears.scad`), screws, rounded/chamfered cuboids and cylinders, `offset_sweep`, `path_sweep`, `skin`, knurling |
+| [NopSCADlib](https://github.com/nophead/NopSCADlib) | exact electronics and hardware: boards with their connectors (`pcb(RPI4)`, and `pcb_cutouts(RPI4)` cuts every connector opening in an enclosure), screws, nuts, inserts, fans, displays, batteries |
+| [Round-Anything](https://github.com/Irev-Dev/Round-Anything) | `polyRound()`: 2D outlines with a radius per corner |
+| [gridfinity-rebuilt-openscad](https://github.com/kennetek/gridfinity-rebuilt-openscad) | Gridfinity bins and baseplates |
+| [MCAD](https://github.com/openscad/MCAD) | rounded boxes, nuts and bolts, involute gears |
+
 ```scad
 include <BOSL2/std.scad>
 include <BOSL2/threading.scad>
 d = 10; l = 30;
 threaded_rod(d=d, l=l, pitch=1.5, anchor=BOTTOM, $fn=48);
+```
+```scad
+// a Raspberry Pi 4 tray with every connector opening cut out
+include <NopSCADlib/core.scad>
+include <NopSCADlib/vitamins/pcbs.scad>
+difference() {
+  translate([-48, -33, -3]) cube([96, 66, 25]);
+  translate([-44, -29, -1]) cube([88, 58, 30]);
+  pcb_cutouts(RPI4);
+}
 ```
 Top-level variables can be changed without touching the code: `update_model(id, {"l": 40})`
 (passed to OpenSCAD as `-D l=40`); `{"code": "..."}` replaces the code. For several parts pass
@@ -376,16 +395,29 @@ comment hints understand.
 OpenSCAD runs sandboxed, so unlike `ALLOW_SCRIPT` it is safe for every user and on by default
 whenever the binary is installed (`ALLOW_OPENSCAD=0` turns it off):
 - the code is tokenized before it runs and rejected if it uses `import()`, `surface()`,
-  `dxf_dim()`/`dxf_cross()` (they read files) or `include`/`use` anything but `<BOSL2/...>`
-  (absolute paths and `..` are rejected; strings and comments are skipped, not matched);
+  `dxf_dim()`/`dxf_cross()` (they read files) or `include`/`use` anything but
+  `<library/file.scad>` of a bundled library (every directory in `OPENSCAD_LIBS` is one; absolute
+  paths and `..` are rejected; strings and comments are skipped, not matched);
+- library modules and functions that call those readers, directly or through others, are
+  rejected too (e.g. NopSCADlib's printed parts, which load their STL). This is worked out per
+  library from the libraries the code includes and the ones they include, so a name one library
+  wraps around `import()` does not block the same name in another;
 - it runs in a fresh empty temp dir (cwd and `HOME`) with `OPENSCADPATH` set to the read-only
   library dir only, as its own process group that is killed after `OPENSCAD_TIMEOUT` seconds
   (default 60, all parts together);
 - on Linux with rlimits: `OPENSCAD_MEM_MB` address space (default 2048), CPU seconds, 200 MB
   per written file (the STL and the log), 256 open files; only the tail of its log is read back.
 
-Locally: install OpenSCAD and put BOSL2 in `./openscad-libs/BOSL2` (or set `OPENSCAD_LIBS`).
-The OpenSCAD tests skip when `openscad` is not installed.
+Locally: install OpenSCAD and put the libraries in `./openscad-libs/<name>` (e.g.
+`./openscad-libs/BOSL2`, or set `OPENSCAD_LIBS`). The OpenSCAD tests skip when `openscad` or a
+library is not installed.
+
+### Reference material for the AI
+`lookup_part` and `print_guide` (also MCP resources: `autosmith://guides/printing` and
+`autosmith://parts/<key>`) give Claude real sizes instead of guesses: board outlines and mounting
+holes (with the NopSCADlib name for the exact board) and FDM rules of thumb for walls, clearances
+and hole sizes for screws, heat-set inserts and nut traps. The data lives in `reference/`
+(`parts.json`, `print-guide.md`); add parts there.
 
 ### Before and after: adding screws and text
 Start from a plain plate (v1) and let Claude add two countersunk M3 screw holes (v2) and engraved text (v3).

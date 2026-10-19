@@ -19,7 +19,7 @@ Environment variables:
   ALLOW_SCRIPT   1 = enable script models (runs arbitrary Python!; admins only)
   ALLOW_OPENSCAD 0 = disable OpenSCAD models (default on when the openscad binary is found).
                  Safe for all users: the code is checked so it cannot read files (no import(),
-                 surface(), include/use outside the bundled BOSL2) and runs sandboxed with a
+                 surface(), include/use outside the bundled libraries) and runs sandboxed with a
                  timeout and resource limits; see openscad.py
   OPENSCAD_TIMEOUT / OPENSCAD_MEM_MB  per-build limits (default 60 s / 2048 MB);
                  OPENSCAD_BIN / OPENSCAD_LIBS override the binary and the libraries dir
@@ -102,6 +102,7 @@ import csg
 import geometry as g
 import openscad
 import printcheck
+import reference
 import render
 import sso
 from auth import (CHALLENGE_TTL, SCOPE, SESSION_TTL, AuthState, Expiring, OAuthProvider, RateLimiter,
@@ -198,9 +199,16 @@ mcp = FastMCP(
         "they can correct it. "
         "For shapes the CSG spec and templates cannot express (threads, gears, knurling, "
         "filleted/rounded edges along arbitrary paths, sweeps, lofts, organic or twisted shapes) "
-        "use create_from_openscad with OpenSCAD code and the bundled BOSL2 library "
+        "use create_from_openscad with OpenSCAD code and the bundled libraries: BOSL2 "
         "(include <BOSL2/std.scad>; BOSL2/threading.scad for threaded rods, nuts and bolts, "
-        "BOSL2/gears.scad for gears, rounding/offset_sweep/path_sweep/skin for fillets and sweeps). "
+        "BOSL2/gears.scad for gears, rounding/offset_sweep/path_sweep/skin for fillets and sweeps), "
+        "NopSCADlib for exact electronics and hardware (pcb(RPI4), pcb_cutouts(RPI4) for the "
+        "connector openings of an enclosure, screws, nuts, fans, displays), Round-Anything "
+        "(polyRound fillets on 2D outlines), gridfinity-rebuilt-openscad (Gridfinity bins and "
+        "baseplates) and MCAD. "
+        "Before designing around a real part (a board, a battery, screws), call lookup_part for "
+        "its size and mounting holes and print_guide for clearances, hole sizes and wall "
+        "thicknesses that print well. "
         "Prefer create_model and the templates otherwise: they are easier to adjust and the web "
         "editor and comment hints understand them. "
         "When you need to redo a model the user is working on - also with another method, e.g. an "
@@ -466,12 +474,26 @@ async def create_from_openscad(name: str, code: str, description: str = "",
     """Creates a model from OpenSCAD code (mm, z up). Use it for shapes the CSG spec of
     create_model cannot express; prefer create_model / templates for everything else.
 
-    The BOSL2 library is bundled – include it with `include <BOSL2/std.scad>` (plus e.g.
-    `include <BOSL2/threading.scad>` for threaded_rod/threaded_nut, `include <BOSL2/gears.scad>`
-    for spur_gear/rack, `include <BOSL2/screws.scad>` for screw/nut). BOSL2 also has
-    cuboid(rounding=..)/cyl(rounding=..), offset_sweep, path_sweep, skin, knurling and more.
-    Not allowed (sandbox): import(), surface(), include/use of anything except <BOSL2/...>.
-    Builds time out after a minute, so keep $fn moderate (e.g. 64).
+    Bundled libraries (include/use <library/file.scad>):
+    - BOSL2: `include <BOSL2/std.scad>` (plus e.g. `include <BOSL2/threading.scad>` for
+      threaded_rod/threaded_nut, `include <BOSL2/gears.scad>` for spur_gear/rack,
+      `include <BOSL2/screws.scad>` for screw/nut). Also cuboid(rounding=..)/cyl(rounding=..),
+      offset_sweep, path_sweep, skin, knurling and more.
+    - NopSCADlib: exact "vitamins" – boards, screws, nuts, inserts, fans, displays, batteries.
+      `include <NopSCADlib/core.scad>` then the vitamin file, e.g.
+      `include <NopSCADlib/vitamins/pcbs.scad>`: pcb_size(RPI4), pcb_hole_positions(RPI4)
+      children(), pcb_cutouts(RPI4) (subtract from an enclosure to get every connector
+      opening; boards are centred on the origin); vitamins/screws.scad: screw(M3_cap_screw, 10).
+      `include <NopSCADlib/lib.scad>` loads everything but is slow. Use the board only to
+      place and cut – do not union pcb(...) itself into a printable part.
+    - Round-Anything: `include <Round-Anything/polyround.scad>`, polygon(polyRound([[x, y, r],
+      ...], fn)) for 2D outlines with rounded corners, then linear_extrude.
+    - gridfinity-rebuilt-openscad: `include <gridfinity-rebuilt-openscad/src/core/standard.scad>`
+      and `use` the files in src/core (gridfinityBase([x, y]), bins, baseplates).
+    - MCAD: `use <MCAD/boxes.scad>` roundedBox(), MCAD/nuts_and_bolts.scad, MCAD/involute_gears.scad.
+    Not allowed (sandbox): import(), surface(), include/use of anything outside these
+    libraries, and the library modules that load STL files (e.g. NopSCADlib's *_assembly and
+    *_stl printed parts). Builds time out after a minute, so keep $fn moderate (e.g. 64).
 
     Put dimensions in top-level variables (`width = 40;`) – they can then be changed with
     update_model(model_id, {"width": 60}) without rewriting the code. vars sets initial
@@ -624,6 +646,45 @@ def whoami(ctx: Context) -> dict:
     if waiting := _waiting(Lib(u)):
         out["comments_waiting"] = waiting
     return out
+
+
+@mcp.tool()
+def lookup_part(query: str = "") -> dict:
+    """Size, mounting holes and notes for common boards and parts (Raspberry Pi 3/4/5/Zero/Pico,
+    Arduino Uno/Nano, ESP32 DevKit, Seeed XIAO, 18650 cell ...), e.g. query="esp32" or "pi 4".
+    Use it before designing an enclosure, holder or mount for a real part instead of guessing
+    sizes. Empty query lists everything. `nopscadlib` names the matching NopSCADlib constant
+    for create_from_openscad (pcb(...), pcb_cutouts(...))."""
+    hits = reference.lookup(query)
+    out = {"note": reference.note(), "parts": hits}
+    if not hits:
+        out["available"] = [p["name"] for p in reference.parts().values()]
+        out["hint"] = ("not in the list: ask the user for the dimensions (or a datasheet link) "
+                       "instead of guessing")
+    return out
+
+
+@mcp.tool()
+def print_guide() -> str:
+    """Rules of thumb for FDM printing: wall thicknesses, clearances for fits and lids, hole sizes
+    for screws, heat-set inserts and nut traps, overhangs and bridges, snap fits, enclosures.
+    Read it before choosing tolerances or hole sizes."""
+    return reference.guide()
+
+
+@mcp.resource("autosmith://guides/printing", name="print-guide", mime_type="text/markdown",
+              description="Designing for FDM printing: walls, clearances, holes, overhangs")
+def print_guide_resource() -> str:
+    return reference.guide()
+
+
+@mcp.resource("autosmith://parts/{key}", name="part", mime_type="application/json",
+              description="Size and mounting holes of a common board or part (keys: see lookup_part)")
+def part_resource(key: str) -> str:
+    p = reference.parts().get(key)
+    if p is None:
+        raise ValueError(f"unknown part '{key}' (known: {', '.join(reference.parts())})")
+    return json.dumps({"key": key, **p, "note": reference.note()}, ensure_ascii=False)
 
 
 # ---------------------------------------------------------------- standalone files (Tinkercad etc.)

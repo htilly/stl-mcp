@@ -3,7 +3,7 @@
 OpenSCAD cannot run programs or write files on its own; what it can do is *read* files, through
 import(), surface(), dxf_dim()/dxf_cross() and include/use. So the code is checked before it runs:
 those functions are rejected and include/use may only name files in the bundled libraries
-(<BOSL2/...>). The checker tokenizes the code the way OpenSCAD's lexer does, so strings and
+(<BOSL2/...>, <NopSCADlib/...>, ...: every directory in OPENSCAD_LIBS is one library). The checker tokenizes the code the way OpenSCAD's lexer does, so strings and
 comments cannot hide anything and nothing hidden in them is rejected by mistake.
 
 On top of that each build runs:
@@ -60,9 +60,13 @@ LOG_TAIL = 2000            # characters of OpenSCAD's messages returned on error
 # functions/modules that read files from disk
 FORBIDDEN = {"import", "surface", "dxf_dim", "dxf_cross"}
 # plus every library module/function that (directly or through others) calls one of them, e.g.
-# BOSL2's builtins.scad `_surface(file)` – found by scanning LIBS, see _forbidden()
-# include <...> / use <...>: only files inside a bundled library
-LIBRARY_PATH = re.compile(r"(BOSL2)/[A-Za-z0-9_][A-Za-z0-9_./-]*\.scad")
+# BOSL2's builtins.scad `_surface(file)` – found by scanning each library the code includes (and
+# the libraries that one includes), see _forbidden() and _library_forbidden(). Per library, so a
+# name one library wraps around import() does not block the same name in another.
+# include <...> / use <...>: only files inside a bundled library, <library dir>/<file>.scad
+LIBRARY_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_-]*")
+LIBRARY_PATH = re.compile(rf"({LIBRARY_NAME.pattern})/[A-Za-z0-9_][A-Za-z0-9_./-]*\.scad")
+_INCLUDE = re.compile(r"\b(?:include|use)[ \t\r\n>]*<([^\t\r\n>]*)>")
 NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
@@ -133,14 +137,59 @@ def _forbidden(libs: Path) -> frozenset:
         bad |= more
 
 
+def libraries() -> list[str]:
+    """The bundled libraries: the directories in LIBS."""
+    try:
+        return sorted(d.name for d in LIBS.iterdir() if d.is_dir() and LIBRARY_NAME.fullmatch(d.name))
+    except OSError:
+        return []
+
+
+@functools.lru_cache(maxsize=4)
+def _dependencies(libs: Path) -> dict:
+    """{library: libraries its files include}, resolving each include/use the way OpenSCAD does:
+    next to the including file first, then on OPENSCADPATH (= libs)."""
+    deps: dict[str, set] = {}
+    root = os.path.abspath(libs)
+    for lib in (d for d in sorted(libs.iterdir()) if d.is_dir()) if libs.is_dir() else ():
+        found = deps.setdefault(lib.name, set())
+        for d, _, fs in os.walk(lib, followlinks=True):
+            for f in (Path(d) / f for f in fs if f.endswith(".scad")):
+                try:
+                    src = _SKIP.sub(" ", f.read_text(encoding="utf-8", errors="replace"))
+                except OSError:
+                    continue
+                for path in _INCLUDE.findall(src):
+                    for target in (f.parent / path, libs / path):
+                        if target.is_file():
+                            rel = Path(os.path.relpath(os.path.normpath(os.path.abspath(target)), root))
+                            if rel.parts and rel.parts[0] not in (lib.name, ".."):
+                                found.add(rel.parts[0])
+                            break
+    return deps
+
+
+def _library_forbidden(libs: Path, used) -> frozenset:
+    """FORBIDDEN plus the file-reader wrappers of the used libraries and everything they include."""
+    deps, todo, seen = _dependencies(libs), list(used), set()
+    while todo:
+        lib = todo.pop()
+        if lib not in seen:
+            seen.add(lib)
+            todo += deps.get(lib, ())
+    bad = set(FORBIDDEN)
+    for lib in seen:
+        bad |= _forbidden(libs / lib)
+    return frozenset(bad)
+
+
 def check(code: str) -> list[str]:
     """Rejects code that could read files. Returns the include/use paths it found."""
     if len(code) > MAX_CODE:
         raise OpenSCADError(f"the code is too long (max {MAX_CODE} characters)")
     if "\0" in code:
         raise OpenSCADError("the code contains a NUL character")
-    forbidden = _forbidden(LIBS)
-    paths, i, n = [], 0, len(code)
+    paths, words, i, n = [], [], 0, len(code)
     while i < n:
         c = code[i]
         if code.startswith("//", i):
@@ -164,23 +213,28 @@ def check(code: str) -> list[str]:
         elif c.isalpha() or c in "_$":
             m = re.compile(r"[A-Za-z0-9_$]+").match(code, i)
             word, i = m.group(), m.end()
-            if word in forbidden:
-                raise OpenSCADError(f"{word}() is not allowed (it reads files from the server)")
+            words.append(word)
             if word in ("include", "use"):
                 # OpenSCAD's lexer: include[ \t\r\n>]*<path>
                 m = re.compile(r"[ \t\r\n>]*<([^\t\r\n>]*)>").match(code, i)
                 if not m:
-                    raise OpenSCADError(f"'{word}' must be followed by <BOSL2/...>")
+                    raise OpenSCADError(f"'{word}' must be followed by <library/file.scad>")
                 path = m.group(1)
-                if not LIBRARY_PATH.fullmatch(path) or ".." in path.split("/"):
+                if not LIBRARY_PATH.fullmatch(path) or ".." in path.split("/") \
+                        or path.split("/")[0] not in libraries():
                     raise OpenSCADError(f"{word} <{path}> is not allowed: only the bundled "
-                                        "libraries can be used, e.g. include <BOSL2/std.scad>")
+                                        "libraries can be used, e.g. include <BOSL2/std.scad> "
+                                        f"(bundled: {', '.join(libraries()) or 'none'})")
                 if not (LIBS / path).is_file():
                     raise OpenSCADError(f"{word} <{path}>: no such library file")
                 paths.append(path)
                 i = m.end()
         else:
             i += 1
+    forbidden = _library_forbidden(LIBS, {p.split("/")[0] for p in paths})
+    for word in words:
+        if word in forbidden:
+            raise OpenSCADError(f"{word}() is not allowed (it reads files from the server)")
     return paths
 
 
