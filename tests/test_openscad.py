@@ -81,6 +81,35 @@ def test_check_rejects_library_wrappers_of_file_readers(tmp_path, monkeypatch):
     assert check("use <BOSL2/builtins.scad>\nfine(); echo(also_fine(2));") == ["BOSL2/builtins.scad"]
 
 
+def _lib(root, name, files):
+    (root / name).mkdir(parents=True)
+    for f, src in files.items():
+        (root / name / f).write_text(src)
+
+
+def test_file_reader_wrappers_are_blocked_per_library(tmp_path, monkeypatch):
+    """A name that one library wraps around a file reader does not block the same name in
+    another library, unless the code includes the first one too, also through a library that
+    includes it (by library path or relative path)."""
+    _lib(tmp_path, "reader", {"lib.scad": "module part(f) import(f);\n"})
+    _lib(tmp_path, "plain", {"lib.scad": "module part(s) cube(s);\n"})
+    _lib(tmp_path, "wrapper", {"lib.scad": "use <reader/lib.scad>\nmodule other() cube(1);\n"})
+    _lib(tmp_path, "relative", {"lib.scad": "include <../reader/lib.scad>\n"})
+    monkeypatch.setattr(openscad, "LIBS", tmp_path)
+    assert openscad.libraries() == ["plain", "reader", "relative", "wrapper"]
+    assert check("use <plain/lib.scad>\npart(2);") == ["plain/lib.scad"]
+    for code in ("use <reader/lib.scad>\npart(\"/etc/passwd\");",
+                 "part(\"/etc/passwd\"); use <plain/lib.scad> use <reader/lib.scad>",
+                 "include <wrapper/lib.scad>\npart(\"/etc/passwd\");",
+                 "include <relative/lib.scad>\npart(\"/etc/passwd\");"):
+        with pytest.raises(OpenSCADError, match="part\\(\\) is not allowed"):
+            check(code)
+    with pytest.raises(OpenSCADError, match="only the bundled libraries.*bundled: plain, reader"):
+        check("include <elsewhere/lib.scad>")
+    with pytest.raises(OpenSCADError, match="no such library file"):
+        check("include <plain/missing.scad>")
+
+
 @needs_bosl2
 def test_bundled_bosl2_surface_wrapper_is_blocked():
     with pytest.raises(OpenSCADError, match="_surface"):
@@ -189,6 +218,33 @@ def test_bosl2_threaded_rod(scad):
     s = run(server.create_from_openscad("Rod", code))
     ext = s["parts"]["model"]["extents_mm"]
     assert 9 < ext[0] <= 10.1 and abs(ext[2] - 20) < 0.1
+
+
+needs_nopscadlib = pytest.mark.skipif(not (openscad.LIBS / "NopSCADlib" / "core.scad").is_file(),
+                                      reason="NopSCADlib is not installed")
+
+
+@needs_nopscadlib
+def test_nopscadlib_names_are_not_blocked_by_other_libraries():
+    """NopSCADlib's own printed parts load STL files (blocked); its vitamins do not, and its
+    wrappers do not block BOSL2's names."""
+    assert check("include <NopSCADlib/core.scad>\ninclude <NopSCADlib/vitamins/pcbs.scad>\n"
+                 "difference() { cube(10); pcb_cutouts(RPI4); }")
+    with pytest.raises(OpenSCADError, match="pcb_assembly"):
+        check("include <NopSCADlib/lib.scad>\npcb_assembly(RPI4, 5, 3);")
+    assert openscad._library_forbidden(openscad.LIBS, {"BOSL2"}) == openscad._forbidden(openscad.LIBS / "BOSL2")
+
+
+@needs_openscad
+@needs_nopscadlib
+def test_nopscadlib_enclosure_cutouts(scad):
+    code = ("include <NopSCADlib/core.scad>\ninclude <NopSCADlib/vitamins/pcbs.scad>\n"
+            "difference() { translate([-48, -33, -3]) cube([96, 66, 25]);\n"
+            "  translate([-44, -29, -1]) cube([88, 58, 30]); pcb_cutouts(RPI4); }")
+    s = run(server.create_from_openscad("Pi box", code))
+    assert s["parts"]["model"]["extents_mm"] == [96.0, 66.0, 25.0]
+    # the walls alone are 96*66*25 - 88*58*23 mm³; the connector openings take some of that
+    assert s["parts"]["model"]["volume_cm3"] < (96 * 66 * 25 - 88 * 58 * 23) / 1000 - 0.5
 
 
 @needs_openscad
