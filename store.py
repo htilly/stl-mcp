@@ -33,6 +33,7 @@ import buildworker
 import csg
 import openscad
 import printcheck
+import sandbox
 
 MAX_VERSIONS = 50  # older versions' STL files are pruned (the recipe is kept)
 
@@ -40,6 +41,9 @@ MAX_VERSIONS = 50  # older versions' STL files are pruned (the recipe is kept)
 # ---------------------------------------------------------------- builders per kind
 
 def _build_script(p, allow: bool):
+    """Without the sandbox: arbitrary Python in a plain subprocess of the server (ALLOW_SCRIPT)."""
+    if sandbox.available():
+        return sandbox.build("script", p)
     if not allow:
         raise PermissionError("script models are disabled (set ALLOW_SCRIPT=1 on the server)")
     code = p["code"]
@@ -118,13 +122,14 @@ def ptr_remove(doc, ptr: str):
 
 def apply_changes(kind: str, params: dict, changes: dict | None, remove: list[str] | None) -> dict:
     """changes: {"/json/pointer": value} or {"key": value}.
-    A key without '/': for csg and openscad -> vars[key] ("code"/"parts" for openscad replace
-    those), otherwise -> params[key]."""
+    A key without '/': for csg, openscad and build123d -> vars[key] ("code"/"parts" for openscad
+    and "code"/"tolerance" for build123d replace those), otherwise -> params[key]."""
     p = copy.deepcopy(params)
     for k, v in (changes or {}).items():
         if k.startswith("/"):
             ptr_set(p, k, v)
-        elif kind == "csg" or (kind == "openscad" and k not in ("code", "parts", "vars")):
+        elif kind == "csg" or (kind == "openscad" and k not in ("code", "parts", "vars")) \
+                or (kind == "build123d" and k not in ("code", "vars", "tolerance", "angular_tolerance")):
             p.setdefault("vars", {})[k] = v
         else:
             p[k] = v
@@ -232,6 +237,8 @@ class Store:
             return _build_script(params, self.allow_script)
         if kind == "openscad":
             return _build_openscad(params, self.allow_openscad)
+        if kind == "build123d":                # in the sandbox container, see sandboxd.py
+            return sandbox.build(kind, params)
         raise ValueError(f"unknown kind '{kind}'")
 
     def _built(self, kind: str, params: dict) -> tuple[dict, float]:
@@ -259,6 +266,9 @@ class Store:
         v = {"version": ver, "kind": kind, "params": params, "note": note or "",
              "created": time.time(), "build_seconds": round(seconds + time.time() - t0, 2),
              "parts": pinfo}
+        for fname, data in getattr(parts, "files", {}).items():   # e.g. build123d's STEP export
+            (vdir / fname).write_bytes(data)
+            v.setdefault("files", {})[Path(fname).suffix[1:]] = f"v{ver}/{fname}"
         m["versions"].append(v)
         m["current"] = ver
         m["updated"] = v["created"]
@@ -556,7 +566,8 @@ class Store:
 
     def file(self, mid: str, rel: str) -> Path:
         p = (self._path(mid) / rel).resolve()
-        if self._path(mid).resolve() not in p.parents or p.suffix != ".stl" or not p.is_file():
+        if self._path(mid).resolve() not in p.parents or p.suffix not in (".stl", ".step") \
+                or not p.is_file():
             raise KeyError("the file does not exist")
         return p
 

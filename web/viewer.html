@@ -82,6 +82,7 @@
       <h2>Parts <span id="vlabel" class="pill"></span></h2>
       <div id="parts"></div>
       <a class="btn sm" id="objzip" href="#" download title="Every component (each shape of the recipe, each part) as its own object in one OBJ + MTL zip, with colours">OBJ (all components)</a>
+      <a class="btn sm" id="step" href="#" download hidden title="The exact CAD model (all parts) as STEP, for Fusion, FreeCAD, Onshape and other CAD programs">STEP</a>
     </div>
     <div class="sec" id="commentsec">
       <h2>Comments <span class="pill" id="ccount"></span></h2>
@@ -243,6 +244,8 @@ function renderSide() {
   $("mid").textContent = model.id;
   renderAccess();
   $("objzip").href = `/api/models/${encodeURIComponent(model.id)}/export.zip?version=${ver.version}`;
+  $("step").hidden = !ver.step_url;
+  if (ver.step_url) $("step").href = ver.step_url;
   $("vlabel").textContent = `v${ver.version}${ver.version === model.current ? "" : " (older)"}`;
 
   $("parts").innerHTML = Object.entries(ver.parts).map(([name, p], i) => `
@@ -325,9 +328,11 @@ document.querySelectorAll("[data-vis]").forEach((b) => b.onclick = async () => {
   toast(visibility === "public" ? "Public: now in the gallery" : "Private: only you can see it");
 });
 
-// Editable parameters: vars for CSG, top-level values for the rest.
+// Editable parameters: vars for CSG, the variables set so far for code models, top-level
+// values for the rest.
 function editableParams(ver) {
-  const src = ver.kind === "csg" ? (ver.params.vars || {}) : ver.params;
+  const src = ver.kind === "csg" || ver.kind === "openscad" || ver.kind === "build123d"
+    ? (ver.params.vars || {}) : ver.params;
   return Object.entries(src).filter(([, v]) =>
     typeof v === "number" || typeof v === "boolean" || (typeof v === "string" && v.startsWith("=")));
 }

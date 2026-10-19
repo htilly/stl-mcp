@@ -16,7 +16,9 @@ Environment variables:
                  needs PUBLIC_URL on https or localhost)
   UI_PUBLIC      1 = web UI + files readable without a token (changes require a token)
   FILES_PUBLIC   1 = only /files/* without a token (download links are clickable)
-  ALLOW_SCRIPT   1 = enable script models (runs arbitrary Python!; admins only)
+  ALLOW_SCRIPT   1 = enable script models without the sandbox (runs arbitrary Python in the
+                 server's own container!; admins only). Not needed with SANDBOX_SOCKET.
+  SANDBOX_SOCKET the Python sandbox (sandboxd.py) for build123d and script models; unset = off
   ALLOW_OPENSCAD 0 = disable OpenSCAD models (default on when the openscad binary is found).
                  Safe for all users: the code is checked so it cannot read files (no import(),
                  surface(), include/use outside the bundled libraries) and runs sandboxed with a
@@ -104,6 +106,7 @@ import openscad
 import printcheck
 import reference
 import render
+import sandbox
 import sso
 from auth import (CHALLENGE_TTL, SCOPE, SESSION_TTL, AuthState, Expiring, OAuthProvider, RateLimiter,
                   verify_turnstile)
@@ -209,6 +212,9 @@ mcp = FastMCP(
         "Before designing around a real part (a board, a battery, screws), call lookup_part for "
         "its size and mounting holes and print_guide for clearances, hole sizes and wall "
         "thicknesses that print well. "
+        "For real CAD - fillets and chamfers on chosen edges, shells with an even wall, holes "
+        "placed on faces, and a STEP file for other CAD programs - use create_from_build123d "
+        "(build123d Python, sandboxed) when this server has it. "
         "Prefer create_model and the templates otherwise: they are easier to adjust and the web "
         "editor and comment hints understand them. "
         "When you need to redo a model the user is working on - also with another method, e.g. an "
@@ -255,6 +261,8 @@ def _summary(m: dict, full: bool = False, lib: "Lib | None" = None) -> dict:
                       "watertight": p["watertight"], "warnings": p.get("warnings", [])}
                   for n, p in cur["parts"].items()},
     }
+    if step := cur.get("files", {}).get("step"):
+        out["step_url"] = f"{PUBLIC_URL}/files/{m['id']}/{step}"
     flat = [f"{n}: {w['message']}" for n, p in cur["parts"].items() for w in p.get("warnings", [])]
     if flat:
         out["print_warnings"] = flat
@@ -383,7 +391,14 @@ def _open(m: dict) -> int:
 
 # ---------------------------------------------------------------- MCP tools
 
-KINDS = ("csg", "enclosure", "openscad", "script")
+KINDS = ("csg", "enclosure", "openscad", "build123d", "script")
+
+
+def _script_allowed(lib: "Lib"):
+    """Script models run in the sandbox for everyone; without it (ALLOW_SCRIPT=1, code runs on
+    the server itself) only admins may use them."""
+    if not sandbox.available() and lib.user["role"] != "admin":
+        raise PermissionError("script models are for admins only on this server (no sandbox)")
 
 REPLACE_DOC = """
 model_id: rebuild this existing model instead of making a new one - the new recipe becomes its
@@ -456,15 +471,53 @@ async def create_from_script(name: str, code: str, description: str = "", model_
                              ctx: Context = None) -> dict:
     """Advanced: Python that sets `result` (trimesh.Trimesh), `parts` (list -> union) or
     `parts` (dict name->mesh). Available: trimesh, numpy as np, g (blk/cyl/union/diff).
-    Requires ALLOW_SCRIPT=1. Prefer create_model – it is safe and easier to adjust, and its
-    radial/heightmap/sweep/loft shapes cover organic and parametric forms.
+    Runs in the sandbox (or, on servers without one, only for admins with ALLOW_SCRIPT=1).
+    Prefer create_model – it is easier to adjust, and its radial/heightmap/sweep/loft shapes
+    cover organic and parametric forms; for real CAD (fillets, shells) use create_from_build123d.
     model_id: rebuild this existing model instead of making a new one (its next version, same
     viewer_url) - use it when you redo a model the user is working on, also from another method.
     """
     lib = _lib(ctx)
-    if lib.user["role"] != "admin":
-        raise PermissionError("script models are for admins only")
+    _script_allowed(lib)
     return await _create_or_replace(lib, model_id, name, "script", {"code": code}, description)
+
+
+@mcp.tool()
+async def create_from_build123d(name: str, code: str, description: str = "",
+                                vars: dict | None = None, tolerance: float = 0.02,
+                                model_id: str = "", ctx: Context = None) -> dict:
+    """Creates a model from build123d Python code: real CAD (OpenCascade B-rep, mm, z up).
+    Use it when a part needs what meshes and OpenSCAD do badly: fillets and chamfers on chosen
+    edges, shells with an even wall, holes and counterbores placed on faces, lofts and sweeps
+    of sketches. The result also gets a STEP file for other CAD programs. Prefer create_model /
+    templates for simple shapes.
+
+    `from build123d import *` is already done. Set `result` to the part (a Part/Solid/Compound
+    or a BuildPart builder), or `parts = {"body": ..., "lid": ...}` for several printable parts:
+
+        width = 60; depth = 40; height = 25; wall = 2
+        with BuildPart() as box:
+            Box(width, depth, height)
+            fillet(box.edges().filter_by(Axis.Z), radius=5)
+            offset(amount=-wall, openings=box.faces().sort_by(Axis.Z)[-1])   # open-top shell
+            with Locations(box.faces().sort_by(Axis.Z)[0]):                  # on the bottom face
+                with GridLocations(width / 2, depth / 2, 2, 2):
+                    CounterBoreHole(radius=1.7, counter_bore_radius=3, counter_bore_depth=1)
+        result = box
+
+    Put dimensions in top-level variables (`width = 60`): update_model(model_id, {"width": 80})
+    then changes them without rewriting the code; vars sets initial overrides. tolerance is the
+    mesh's chord tolerance in mm (finer = smoother curves, more triangles). The code runs in a
+    sandbox without network or files; builds time out after a minute.
+    model_id: rebuild this existing model instead of making a new one (its next version, same
+    viewer_url) - use it when you redo a model the user is working on.
+    """
+    params = {"code": code}
+    if vars:
+        params["vars"] = vars
+    if tolerance != 0.02:
+        params["tolerance"] = tolerance
+    return await _create_or_replace(_lib(ctx), model_id, name, "build123d", params, description)
 
 
 @mcp.tool()
@@ -524,12 +577,12 @@ async def update_model(model_id: str, changes: dict | None = None, remove: list[
     remove:  list of JSON pointers to remove, e.g. ["/root/children/3"].
     params:  replace the whole recipe (spec for CSG, {"code": ...} for script,
              {"code": ..., "vars": {...}, "parts": [...]} for OpenSCAD).
-             OpenSCAD: changes={"code": "..."} replaces only the code; {"wall": 3} overrides the
-             top-level variable wall (like openscad -D) without touching the code.
+             OpenSCAD and build123d: changes={"code": "..."} replaces only the code; {"wall": 3}
+             overrides the top-level variable wall (like openscad -D) without touching the code.
     note:    short description of the change (shown in the history).
     resolves: comment ids (e.g. ["c2"]) that the change addresses – marked resolved with a reply.
     kind:    with params, rebuilds the model another way as its next version: "csg", "enclosure",
-             "openscad" or "script" (e.g. kind="openscad", params={"code": ...} to redo an
+             "openscad", "build123d" or "script" (e.g. kind="openscad", params={"code": ...} to redo an
              enclosure in OpenSCAD). Prefer this over creating a new model.
     Read the recipe with get_model first if you are unsure of the structure.
     """
@@ -537,8 +590,8 @@ async def update_model(model_id: str, changes: dict | None = None, remove: list[
     lib.ensure_room()
     if kind is not None and kind not in KINDS:
         raise ValueError(f"unknown kind '{kind}' - use one of {', '.join(KINDS)}")
-    if kind == "script" and lib.user["role"] != "admin":
-        raise PermissionError("script models are for admins only")
+    if kind == "script":
+        _script_allowed(lib)
     rebuild = params is not None or bool(changes) or bool(remove)
     m = await (lib.build if rebuild else _run)(
         lib.models.update, model_id, params=params, changes=changes, remove=remove, note=note,
@@ -792,8 +845,9 @@ def _fetch(url: str) -> tuple[bytes, str]:
 @mcp.tool()
 def import_file(name: str, url: str = "", data_base64: str = "", format: str = "", ctx: Context = None) -> dict:
     """Imports a model (e.g. exported from Tinkercad) and saves it as <name>.stl.
-    Provide url (http/https) OR data_base64. format: stl, obj, glb, ply, off; guessed from the url if
-    empty. Zip with obj+mtl (Tinkercad's OBJ export) is unpacked. Dimensions are assumed to be mm.
+    Provide url (http/https) OR data_base64. format: stl, obj, glb, ply, off, step/stp (STEP
+    needs the sandbox); guessed from the url if empty. Zip with obj+mtl (Tinkercad's OBJ export)
+    is unpacked. Dimensions are assumed to be mm.
     The user can also upload directly: curl -T file.stl -H "Authorization: Bearer ..." <server>/upload/file.stl"""
     lib = _lib(ctx)
     lib.ensure_room()
@@ -806,7 +860,14 @@ def import_file(name: str, url: str = "", data_base64: str = "", format: str = "
         data = base64.b64decode(data_base64, validate=True)
         if len(data) > MAX_UPLOAD:
             raise ValueError(f"the file is larger than {MAX_UPLOAD // 1_000_000} MB")
-    return _save(lib, g.load_mesh(data, format or "stl"), _safe(name))
+    return _save(lib, _load_import(data, format or "stl"), _safe(name))
+
+
+def _load_import(data: bytes, fmt: str):
+    """A mesh from an uploaded or fetched file; STEP is read in the sandbox."""
+    if fmt.lower().lstrip(".") in ("step", "stp"):
+        return sandbox.import_step(data)
+    return g.load_mesh(data, fmt)
 
 
 @mcp.tool()
@@ -1857,6 +1918,8 @@ async def api_model(request):
     for v in m["versions"]:
         for p in v["parts"].values():
             p["url"] = f"/files/{m['id']}/{p['file']}"
+        if step := v.get("files", {}).get("step"):
+            v["step_url"] = f"/files/{m['id']}/{step}"
     m["revision"] = store.revision_for(lib.user)
     m["can_edit"] = lib.models.can_edit(m)
     m["mine"] = m.get("owner") == lib.user["id"]
@@ -1976,7 +2039,8 @@ async def files(request):
         return Response(obj, media_type="model/obj", headers={
             "Content-Disposition": f'attachment; filename="{request.path_params["id"]}_{p.stem}.obj"',
             "Cache-Control": f"{scope}, max-age=31536000, immutable"})
-    return FileResponse(p, media_type="model/stl", filename=f"{request.path_params['id']}_{p.name}",
+    return FileResponse(p, media_type="model/step" if p.suffix == ".step" else "model/stl",
+                        filename=f"{request.path_params['id']}_{p.name}",
                         headers={"Cache-Control": f"{scope}, max-age=31536000, immutable"})
 
 
@@ -2125,7 +2189,7 @@ async def flat_files(request):
 
 
 async def upload(request):
-    """PUT/POST /upload/<file.stl|obj|glb|ply|off|zip> with the file as body -> <file>.stl"""
+    """PUT/POST /upload/<file.stl|obj|glb|ply|off|zip|step> with the file as body -> <file>.stl"""
     fname = Path(request.path_params["name"])
     body = bytearray()
     async for chunk in request.stream():
@@ -2135,7 +2199,7 @@ async def upload(request):
     try:
         lib = _req_lib(request)
         lib.ensure_room()
-        mesh = g.load_mesh(bytes(body), fname.suffix.lstrip(".") or "stl")
+        mesh = await _run(_load_import, bytes(body), fname.suffix.lstrip(".") or "stl")
         return JSONResponse(_save(lib, mesh, _safe(fname.stem)))
     except Exception as e:  # noqa: BLE001
         return _err(e)

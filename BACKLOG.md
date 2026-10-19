@@ -84,8 +84,8 @@ guarded by one shared `MCP_TOKEN`. This phase adds real users.
 
 ## Phase 1: safe to expose
 
-- [ ] **Keep `ALLOW_SCRIPT=0`** in production. `_build_script` runs arbitrary Python in a subprocess
-  without a real sandbox. Note this in `deploy/README.md`. (S)
+- [x] **Keep `ALLOW_SCRIPT=0`** in production: with the Python sandbox, script models run there
+  instead and no longer need it (`deploy/README.md`).
 - [ ] **Resource limits in the app** (M)
   - Max number of models and a disk quota, per user (from phase 0b) and in total for `/data`.
   - Lower `MAX_UPLOAD_MB` to about 20 for the test.
@@ -157,21 +157,24 @@ Goal: let Claude/ChatGPT make more and better models. In three PRs; the first is
   MG996R). Check every value against a datasheet before adding it. (S)
 
 ### build123d and a real sandbox (PR 2) (L)
-- [ ] **Sandbox for Python builds**: a separate `sandbox` service in `docker-compose.yml` with
-  its own image, no internet (`network_mode: none`, only an internal socket/port to the server),
-  read-only rootfs, tmpfs `/tmp`, non-root, `cap_drop: ALL`, `no-new-privileges`, a seccomp
-  profile, mem/cpu/pids limits, and `runtime: runsc` (gVisor) where the host has it. Per job a
-  fresh process with the rlimit/timeout/process-group pattern from `buildworker.py`; meshes come
-  back as .npy like there.
-- [ ] **`build123d` kind** (OpenCascade B-rep): real fillets/chamfers on any edge, sketches,
-  shell, loft/sweep. New MCP tool `create_from_build123d` (the code sets `result` or
-  `parts={...}`), a new branch in `Store.build`, STEP export per version next to the STL
-  (download in the UI).
-- [ ] **Move the `script` kind into the same sandbox**, so `ALLOW_SCRIPT` can be on for everyone
-  (then drop the phase 1 item "Keep `ALLOW_SCRIPT=0`").
-- [ ] **STEP import** (`import_file` with `.step/.stp`) through the sandbox.
-- [ ] Tests that try to read files, reach the network, fork-bomb, eat memory and print the
-  environment from inside the sandbox: all must fail or come back empty.
+- [x] **Sandbox for Python builds** (`sandboxd.py`, `sandbox_job.py`, `sandbox.py`): service
+  `sandbox` in `docker-compose.yml` on the same image, `network_mode: none`, read-only rootfs,
+  tmpfs `/tmp`, `cap_drop: ALL` + SETUID/SETGID/KILL, `no-new-privileges`, mem/cpu/pids limits,
+  optional `runtime: runsc`; the server talks to it over a Unix socket. Per job a fresh process
+  as the slot's own uid with rlimits (incl. NPROC), a timeout and a capped reply of plain arrays.
+- [x] **`build123d` kind**: `create_from_build123d`, top-level variables like OpenSCAD's, STEP
+  per version (STEP button in the 3D view, `step_url`).
+- [x] **`script` kind in the sandbox**: available to everyone when the sandbox is set up.
+- [x] **STEP import** (`import_file`/`/upload` with `.step/.stp`) through the sandbox.
+- [x] Tests (`tests/test_sandbox.py`), plus a manual run in a container with the compose
+  settings: no network or DNS, read-only root, no secrets, cannot reach the daemon's socket or
+  signal it, no setuid, fork bomb stopped at 63 processes.
+- [ ] **Set up `stl-mcp-sandbox` on tillyse** (see `deploy/README.md`, "The Python sandbox"). (S)
+- [ ] **A seccomp profile** for the sandbox narrower than Docker's default (or gVisor on
+  tillyse). (M)
+- [ ] **Code models in the web UI**: the editor only opens CSG recipes, and the 3D view only
+  shows the variables of an OpenSCAD/build123d model that were overridden so far. Read the
+  top-level `name = value` lines from the code so every dimension can be changed by hand. (M)
 
 ### SDF shapes and import (PR 3) (M-L)
 - [ ] **SDF kind as a data recipe** (not code, so safe like the CSG spec): `sphere/box/capsule/

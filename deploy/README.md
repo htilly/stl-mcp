@@ -38,6 +38,28 @@ target and break the image-id provenance check.
 The repo's own `docker-compose.yml` (with `build: .` and the optional Caddy profile) is for
 running stl-mcp on other machines; tillyse does not read it.
 
+## The Python sandbox (one time, for build123d)
+
+build123d models, sandboxed script models and STEP import need the sandbox service. Until it is
+set up they answer "needs the sandbox" and everything else works as before. On tillyse:
+
+1. Add a service `stl-mcp-sandbox` to `/config/docker-compose.yml`, on the same image, copying
+   the `sandbox` service from this repo's `docker-compose.yml`: `image: ghcr.io/htilly/stl-mcp:main`,
+   `entrypoint: ["python", "sandboxd.py"]`, `network_mode: none`, `read_only: true`,
+   `tmpfs: ["/tmp:size=1g,mode=1777"]`, `cap_drop: [ALL]`, `cap_add: [SETUID, SETGID, KILL]`,
+   `security_opt: ["no-new-privileges:true"]`, `mem_limit: 4g`, `cpus: 2`, `pids_limit: 512`,
+   `environment: {PYTHONDONTWRITEBYTECODE: "1"}` and a named volume on `/run/sandbox`. No env
+   file and no other volumes: it must not see any secret. Optionally `runtime: runsc` if gVisor
+   is installed.
+2. Mount the same named volume on `/run/sandbox` in `stl-mcp` and add
+   `SANDBOX_SOCKET=/run/sandbox/sandbox.sock` to `/config/secrets/stl-mcp.env`.
+3. Start it once (`docker compose ... up -d stl-mcp-sandbox`; its log says `SANDBOX_READY`), then
+   recreate `stl-mcp`. From then on every deploy recreates `stl-mcp-sandbox` before `stl-mcp`
+   (deploy.yml does that when the service exists). A rollback only rolls back `stl-mcp`: if a
+   change ever needs both at the same version, roll back `stl-mcp-sandbox` by hand too.
+
+`ALLOW_SCRIPT` stays `0`: with the sandbox, script models no longer need it.
+
 ## Going live with users (one time)
 
 From the "users" release on (PRs #11-#15), the server needs Postgres and refuses to start without
