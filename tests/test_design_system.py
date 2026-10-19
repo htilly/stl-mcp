@@ -108,3 +108,90 @@ def test_static_assets_revalidate(client):
     assert r.status_code == 200
     assert r.headers["cache-control"] == "no-cache"
     assert r.headers.get("etag")
+
+
+THEMED_PAGES = sorted(WEB.glob("*.html"))
+
+
+@pytest.mark.parametrize("page", THEMED_PAGES, ids=lambda p: p.name)
+def test_every_page_loads_the_theme_before_it_paints(page):
+    """theme.js is a classic script in <head>, right after the stylesheet: no flash of the wrong theme."""
+    text = page.read_text()
+    head = text[:text.index("</head>")]
+    assert '<link rel="stylesheet" href="/static/style.css">\n<script src="/static/theme.js"></script>' in head
+
+
+def test_theme_script_offers_light_dark_and_auto():
+    js = (WEB / "theme.js").read_text()
+    for choice in ('"light"', '"auto"', '"dark"'):
+        assert f"[{choice}," in js
+    # auto means no data-theme, so the prefers-color-scheme block in style.css applies
+    assert 'if (t === "auto") delete root.dataset.theme' in js
+    assert 'new CustomEvent("themechange"' in js
+    assert 'localStorage.setItem(KEY, t)' in js
+
+
+def test_3d_view_follows_the_theme_switch():
+    assert 'addEventListener("themechange"' in (WEB / "stage.js").read_text()
+
+
+@pytest.mark.parametrize("name", ["index", "gallery", "viewer", "editor", "admin", "users", "design"])
+def test_app_pages_have_the_user_menu(name):
+    text = (WEB / f"{name}.html").read_text()
+    assert "<div data-usermenu></div>" in text and '<script type="module" src="/static/nav.js"></script>' in text
+
+
+@pytest.mark.parametrize("name", ["login", "consent", "privacy", "demo"])
+def test_gate_pages_have_a_theme_switch(name):
+    assert '<div class="gate-theme" data-theme-switch></div>' in (WEB / f"{name}.html").read_text()
+
+
+def test_user_menu_links_into_the_settings_panes():
+    """The menu links to /#account, /#security and /#connect; the library opens that pane."""
+    nav = (WEB / "nav.js").read_text()
+    index = (WEB / "index.html").read_text()
+    for pane in ("account", "security", "connect"):
+        assert f'"/#{pane}"' in nav
+        assert f'data-pane="{pane}"' in index
+    assert 'const PANES = ["account", "security", "connect"];' in index
+
+
+def test_nav_icons_exist():
+    used = set(re.findall(r'icon\("([a-z-]+)"', (WEB / "nav.js").read_text()))
+    used |= set(re.findall(r'item\("[^"]*", "([a-z-]+)"', (WEB / "nav.js").read_text()))
+    used |= set(re.findall(r'\["(?:light|auto|dark)", "([a-z-]+)"', (WEB / "theme.js").read_text()))
+    assert used and {f"i-{n}" for n in used} <= SYMBOLS
+
+
+def test_touch_screens_get_finger_sized_targets_and_no_input_zoom():
+    css = (WEB / "style.css").read_text()
+    touch = re.search(r"@media \(pointer: coarse\) \{(.*?)\n\}", css, re.S).group(1)
+    assert "button, .btn { height: 40px; }" in touch
+    assert ".menu a, .menu button { height: 44px;" in touch
+    # iOS zooms the page into any focused input under 16 px
+    assert re.search(r"input\[type=search\].*?\{ font-size: 16px; \}", touch)
+
+
+def test_phone_layout_keeps_toolbars_off_the_model_and_settings_full_screen():
+    css = (WEB / "style.css").read_text()
+    phone = css[css.index("@media (max-width: 860px) {"):]
+    assert ".toolbar {\n    flex-wrap: nowrap; overflow-x: auto;" in phone
+    assert "dialog.settings-dlg {" in phone and "height: 100dvh;" in phone
+    editor = (WEB / "editor.html").read_text()
+    assert ".ed-tools { flex-wrap: nowrap; overflow-x: auto;" in editor and "#stage { order: -1; }" in editor
+
+
+def test_settings_tabs_have_short_labels_for_phones():
+    index = (WEB / "index.html").read_text()
+    for short in ("Profile", "Security", "AI apps"):
+        assert f'<span class="short">{short}</span>' in index
+
+
+def test_library_and_login_link_to_the_demo():
+    index = (WEB / "index.html").read_text()
+    """A link to /demo (play icon and text), not the video or its poster, in the library and on login."""
+    for page in ("index.html", "login.html"):
+        text = (WEB / page).read_text()
+        assert '<a class="demo-link" href="/demo">' in text
+        assert "demo-poster" not in text and "<video" not in text
+    assert (WEB / "index.html").read_text().count('<a class="demo-link"') == 2  # footer + getting started

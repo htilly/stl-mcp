@@ -13,6 +13,7 @@
 <meta property="og:title" content="autosmith: STL, made by AI">
 <meta property="og:image" content="/static/brand/og-image.png">
 <link rel="stylesheet" href="/static/style.css">
+<script src="/static/theme.js"></script>
 <style>
   /* page-only layout for the reference; the components themselves come from style.css */
   .refwrap { display: grid; grid-template-columns: 188px minmax(0, 1fr); gap: var(--s6); max-width: 1240px; margin: 0 auto; padding: 0 var(--s5); }
@@ -79,20 +80,18 @@
 </head>
 <body>
 <header class="top">
-  <a class="wordmark" href="/"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-mark"/></svg><span class="name">auto<b>smith</b></span></a>
-  <span class="crumb admin-crumb">/ <b>Admin</b></span>
+  <a class="wordmark" href="/" title="Back to the library"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-mark"/></svg><span class="name">auto<b>smith</b></span></a>
+  <span class="crumb admin-crumb"><b>Admin</b></span>
+  <div class="grow"></div>
+  <div data-usermenu></div>
+</header>
+<div class="subnav">
   <nav class="tabs" aria-label="Admin pages">
     <a href="/admin"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-settings"/></svg>Print check</a>
-    <a href="/admin/users"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-key"/></svg>Users</a>
+    <a href="/admin/users"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-user"/></svg>Users</a>
     <a href="/admin/design" aria-current="page"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-swatch"/></svg>Design system</a>
   </nav>
-  <div class="grow"></div>
-  <div class="seg" role="group" aria-label="Theme">
-    <button data-theme-set="light">Light</button>
-    <button data-theme-set="auto" class="on">Auto</button>
-    <button data-theme-set="dark">Dark</button>
-  </div>
-</header>
+</div>
 
 <div class="refwrap">
 <nav class="refnav" aria-label="Sections"><ol id="toc">
@@ -117,7 +116,8 @@
   <section id="colour">
     <h2>Colour</h2>
     <p>Neutral metal greys for the workbench, layout blue for the one thing that matters on a screen,
-      build-plate gold for comments. Switch the theme above to see the dark values.</p>
+      build-plate gold for comments. Switch the theme to see the dark values.</p>
+    <div data-theme-switch data-labelled style="margin-bottom:var(--s5)"></div>
     <div class="swatches" id="swatches"></div>
     <h3>Part colours</h3>
     <div class="swatches" id="parts"></div>
@@ -324,10 +324,10 @@ import { esc, icon, PART_COLORS } from "/static/common.js";
 const $ = (id) => document.getElementById(id);
 
 const TOKENS = [
-  ["--aluminium", "Page"], ["--sheet", "Panels"], ["--inset", "Inputs"], ["--graphite", "Text"],
+  ["--aluminium", "Page"], ["--sheet", "Panels"], ["--inset", "Hover, code"], ["--graphite", "Text"],
   ["--scribe", "Secondary text"], ["--rule", "Borders"], ["--rule-strong", "Strong borders"],
   ["--layout", "Accent"], ["--layout-wash", "Selection"], ["--pei", "Comments"],
-  ["--fault", "Faults"], ["--sound", "Live, current"], ["--stage", "Viewport"], ["--plate", "Preview plate"],
+  ["--primary", "Primary button"], ["--field", "Inputs"], ["--fault", "Faults"], ["--sound", "Live, current"], ["--stage", "Viewport"], ["--plate", "Preview plate"],
 ];
 const STYLES = [
   ["ts-page", "Page", "Print-check settings", "Page titles"],
@@ -342,7 +342,8 @@ const STYLES = [
 ];
 const ICONS = ["mark", "search", "key", "settings", "swatch", "type", "comment", "warning", "download", "copy", "duplicate",
   "back", "plus", "close", "check", "reply", "restore", "trash", "logout",
-  "fit", "spin", "edges", "wire", "spread", "dimension", "play"];
+  "fit", "spin", "edges", "wire", "spread", "dimension",
+  "sun", "moon", "monitor", "chevron", "user", "plug", "external", "play", "lock", "globe", "grid", "heart"];
 
 function drawSwatches() {
   const css = getComputedStyle(document.documentElement);
@@ -389,17 +390,11 @@ $("iconlist").innerHTML = ICONS.map((n) => `<figure>${icon(n)}<figcaption>i-${n}
 $("spacing").innerHTML = [4, 8, 12, 16, 24, 32, 48].map((n, i) =>
   `<figure><div style="width:${n}px;height:${n}px"></div>--s${i + 1}<br>${n}</figure>`).join("");
 
-document.querySelectorAll("[data-theme-set]").forEach((b) => b.onclick = () => {
-  const t = b.dataset.themeSet;
-  if (t === "auto") delete document.documentElement.dataset.theme;
-  else document.documentElement.dataset.theme = t;
-  document.querySelectorAll("[data-theme-set]").forEach((x) => x.classList.toggle("on", x === b));
-  drawSwatches(); drawStyles();
-});
-matchMedia("(prefers-color-scheme: dark)").addEventListener("change", drawSwatches);
+window.addEventListener("themechange", () => { drawSwatches(); drawStyles(); });
 drawSwatches();
 drawStyles();
 fontStatus();
 </script>
+<script type="module" src="/static/nav.js"></script>
 </body>
 </html>

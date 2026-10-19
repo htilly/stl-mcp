@@ -27,28 +27,47 @@ login like the rest of admin). Change a value in `style.css`, never in a page.
 
 ## Colour
 
-Named after the workshop materials they come from. Every colour has a light and a dark value; the
-dark set applies automatically (`prefers-color-scheme`) or with `<html data-theme="dark">`.
+Named after the workshop materials they come from. Every colour has a light and a dark value.
+
+### Theme
+
+Three modes: **Light**, **Dark** and **Auto** (follow the system, the default). The choice is per
+browser (`localStorage["theme"]`) and is set by [`web/theme.js`](../web/theme.js), a classic script
+every page loads in `<head>` right after `style.css`, so a page never flashes the wrong theme:
+
+- `auto` leaves `<html>` without `data-theme`, and the dark block applies through
+  `prefers-color-scheme`; `light` / `dark` set `<html data-theme="…">`. Every token that changes in
+  dark mode is redefined in both dark blocks (tested).
+- Any `[data-theme-switch]` element gets the three-way switch (sun / monitor / moon);
+  `data-labelled` adds the words. It is in the user menu, in Account settings → Profile, in the
+  corner of the login pages and on `/admin/design`.
+- Every change, including the system flipping while on auto, dispatches `themechange` on
+  `window` (`{theme, effective}`). The 3D view rebuilds its background and grid from it.
 
 | Token | Light | Dark | Use |
 |---|---|---|---|
-| `--aluminium` | `#f8fafc` | `#0b1220` | Page background |
-| `--sheet` | `#ffffff` | `#0f172a` | Panels, cards, header, dialogs |
-| `--inset` | `#f1f5f9` | `#172033` | Inputs, code, hovered rows |
-| `--graphite` | `#0f172a` | `#f1f5f9` | Text |
-| `--scribe` | `#64748b` | `#94a3b8` | Secondary text, title block labels |
-| `--rule` | `#e2e8f0` | `#1e293b` | Borders and title block rules |
-| `--rule-strong` | `#cbd5e1` | `#334155` | Hovered borders, inactive dots |
-| `--layout` | `#2563eb` | `#60a5fa` | Accent: primary action, selection, focus. Electric Blue (`#3b82f6`, `--brand`) darkened for text contrast |
-| `--layout-wash` | `#e0ebff` | `#172554` | Selected rows, active toggles, banners |
+| `--aluminium` | `#f7f8fa` | `#0a0b0e` | Page background |
+| `--sheet` | `#ffffff` | `#111318` | Panels, cards, header, dialogs |
+| `--inset` | `#f1f3f6` | `#191c23` | Code, hovered rows, the track of segmented controls |
+| `--field` | `#ffffff` | `#14171d` | Text inputs and selects |
+| `--graphite` | `#0b1220` | `#eceef2` | Text |
+| `--scribe` | `#5d6675` | `#959cab` | Secondary text, title block labels |
+| `--rule` | `#e5e7eb` | `#23262e` | Borders and title block rules |
+| `--rule-strong` | `#d1d5db` | `#343843` | Hovered borders, inactive dots |
+| `--layout` | `#2563eb` | `#6aa6ff` | Accent: primary action, selection, focus. Electric Blue (`#3b82f6`, `--brand`) darkened for text contrast |
+| `--layout-wash` | `#eaf1ff` | `#15233f` | Selected rows, active toggles, banners |
+| `--primary`, `--primary-hover` | `#2563eb`, `#1d4ed8` | `#3b82f6`, `#5b96f7` | Fill of `.primary` buttons (white text) |
+| `--fault-wash` | `#fdecea` | `#2c1513` | Hovered destructive buttons |
 | `--ember` | `#06b6d4` | `#22d3ee` | Brand Teal: logo gradient end, small accents. Never used for UI state |
 | `--pei` | `#e2ad45` | `#e8b552` | Comments and pins. The gold of a PEI build plate |
-| `--fault` | `#b8322a` | `#f0735f` | Print-check warnings, destructive actions, errors, the Live dot when offline or the server is unhealthy |
-| `--sound` | `#2a7d4f` | `#52c486` | Live connection with Claude connected, current revision |
+| `--fault` | `#c0362c` | `#f0735f` | Print-check warnings, destructive actions, errors, the Live dot when offline or the server is unhealthy |
+| `--sound` | `#198754` | `#4cc38a` | Live connection with Claude connected, current revision |
 | `--wait` | `#c27c0e` | `#f2a93b` | Live dot while the page is live but no AI client has connected over MCP |
-| `--stage` | `#eef2f7` | `#0d1424` | 3D viewport background (read by `viewer.html`) |
-| `--stage-grid`, `--stage-grid-major` | `#dde4ec`, `#c3ccd8` | `#18233a`, `#2a3a58` | Build plate grid in the viewport |
+| `--stage` | `#eef1f5` | `#0e1015` | 3D viewport background (read by `viewer.html`) |
+| `--stage-grid`, `--stage-grid-major` | `#dde2e9`, `#c3cad5` | `#1b1f27`, `#2b313d` | Build plate grid in the viewport |
 | `--plate` | `#f6f7f9` | same | Behind preview PNGs; matches `render.BG` |
+| `--glass` | white 78 % | `#111318` 72 % | Translucent app bar, viewport toolbars and HUD (with a backdrop blur) |
+| `--glow` | blue 16 % | blue 22 % | Soft brand light behind the login pages |
 
 Rules of use:
 
@@ -107,10 +126,12 @@ use a class directly only when the markup has no component of its own.
 ## Space, shape, depth
 
 - Spacing is a 4 px grid: `--s1` 4 · `--s2` 8 · `--s3` 12 · `--s4` 16 · `--s5` 24 · `--s6` 32 · `--s7` 48.
-- Two radii: `--r-control` 4 px for buttons and inputs, `--r-panel` 6 px for cards, dialogs and
-  popovers. Only dots and badges are round.
-- One shadow, `--lift`, and only for things that float above the page: dialogs, the comment
-  popover, toasts. Cards and panels are flat with a 1 px `--rule` border.
+- Three radii: `--r-control` 8 px for buttons and inputs, `--r-panel` 12 px for cards, menus and
+  popovers, `--r-dialog` 16 px for dialogs and the login panel. Pills, avatars and dots are round.
+- Depth comes in steps: `--shadow-xs` (buttons, inputs, cards at rest), `--shadow-sm` (floating
+  toolbars, the on segment), `--shadow-md` (hovered cards, sticky action bars) and `--lift` (menus,
+  dialogs, toasts, the comment popover). Shadows are darker and borders carry more of the edge in
+  dark mode.
 - Focus is a 2 px `--layout` ring offset from the element (`--focus`), shown for keyboard focus only.
 
 ## Icons
@@ -146,6 +167,11 @@ gives the 14 px size. An icon-only button needs `class="icon"` and an `aria-labe
 | `i-reply`, `i-restore`, `i-trash`, `i-logout` | Comment reply, restore a revision, delete, log out |
 | `i-fit`, `i-spin`, `i-edges`, `i-wire`, `i-spread` | Viewport: fit, auto-rotate, edges, mesh, spread parts |
 | `i-dimension` | Overall size readout in the viewport |
+| `i-sun`, `i-moon`, `i-monitor` | Theme switch: light, dark, auto |
+| `i-user`, `i-chevron` | Account: the user menu button, Profile in settings |
+| `i-plug` | AI connections (connecting Claude, ChatGPT, Claude Code) |
+| `i-external` | A link that leaves autosmith (GitHub) |
+| `i-play` | The demo video |
 
 New icons follow the same grid: draw inside a 2 px margin, strokes only, no fills (the mark is the
 one exception), and keep each to a few paths.
@@ -165,15 +191,21 @@ card), PNG app icons, `apple-touch-icon.png` and `site.webmanifest`. The browser
 
 | Class | What it is |
 |---|---|
-| `header.top` | 56 px bar: wordmark, breadcrumb (`.crumb`), search, live status, icon buttons |
+| `header.top` | 56 px translucent app bar: wordmark, primary `.nav` or a `.crumb`, live status, page actions, user menu |
+| `.nav` | Primary navigation (My models, Gallery); the current page has `aria-current="page"` |
+| `.crumb` | Breadcrumb on inner pages: `My models / <model> / Editor` |
+| `.umenu`, `.menu` | User menu (`<div data-usermenu>`, filled by `nav.js`): who you are, Account settings, Passkeys and sign-in, Connect an AI app, Theme, Admin, demo, Privacy, GitHub, Donate, Log out |
+| `.theme-switch` | Light / auto / dark switch (`[data-theme-switch]`, rendered by `theme.js`) |
+| `.page-head` | Title row inside a page: heading, count, search and the page's one primary action |
+| `.subnav` | Second bar under the app bar holding `.tabs` (admin pages) |
 | `.wordmark` | Mark + product name; links home on inner pages |
-| `button`, `.btn` | Default control, 32 px high. Modifiers: `.primary`, `.danger`, `.quiet`, `.icon`, `.sm` (26 px), `.big` (44 px), `.on` (pressed toggle) |
-| `.seg` | Segmented group: buttons that share borders (camera views, display toggles) |
+| `button`, `.btn` | Default control, 34 px high. Modifiers: `.primary`, `.danger`, `.quiet`, `.icon`, `.sm` (28 px), `.big` (44 px), `.on` (pressed toggle) |
+| `.seg` | Segmented group: buttons on a shared track; the pressed one (`.on`) is raised (camera views, display toggles, editor tool groups) |
 | `.tb` | Title block: `<dl class="tb"><div><dt>Label</dt><dd>Value</dd></div>…</dl>`. `.tb.full` adds an outer border |
 | `.card` | Library item: preview, name, title block (size, revision, updated) |
 | `.cbadge`, `.wbadge` | Count badges on a card: open comments (gold), print-check warnings (red) |
 | `.vbadge`, `.vbadge.public` | Visibility on a card (bottom right of the thumbnail): Private (outlined, lock) or Public (blue, globe); `.inline` in running text |
-| `.live` | Connection dot: grey while connecting, green when live |
+| `.live` | Connection pill: grey while connecting, green when an AI client is connected, amber while waiting for one, red when offline |
 | `.banner` | One-line call to action above the library |
 | `.sec` | Side panel section with an `h2` heading |
 | `.versions` | Revision table: revision, change note, age; selected and current rows are marked |
@@ -184,9 +216,24 @@ card), PNG app icons, `apple-touch-icon.png` and `site.webmanifest`. The browser
 | `.gate .or` | Divider with a word in it ("New here?") between two ways in |
 | `ol.start` | Getting-started checklist in the empty library; finished steps get `.done` |
 | `.secret` | A value shown only once (a new personal token), with a copy button |
-| `dialog` | Modal: the account (name, passkeys, connecting Claude, apps, tokens, deletion) |
-| `.tabs` | Links between admin pages; the current one has `aria-current="page"` |
+| `dialog`, `.dlg-head` | Modal with a title bar and a close button |
+| `.settings-dlg`, `.settings` | Account settings: a side list of panes, one shown at a time. **Profile** (name, usage, appearance, delete account), **Sign-in & security** (passkeys, linked sign-ins), **AI connections** (connect wizard, connected apps, personal tokens). Opened from the user menu with `/#account`, `/#security`, `/#connect` |
+| `.tabs` | Links between admin pages in the `.subnav`; the current one has `aria-current="page"` |
 | `.admin` | Settings page layout; `.admin .user` is one account on the Users page |
+
+## Phones and touch
+
+- **Touch** (`pointer: coarse`): buttons are 40 px high (`.sm` 34 px), menu rows 44 px, and inputs
+  use 16 px text so iOS does not zoom in when one is focused. Hover-only effects, such as the card
+  lift, sit behind `@media (hover: hover)` so a tap does not leave them stuck.
+- **Up to 860 px**: the 3D view comes first, then its side panel below it. Viewport toolbars (viewer
+  and editor) stay one row that scrolls sideways instead of wrapping over the model. Account
+  settings becomes a full-screen sheet with three tabs (*Profile*, *Security*, *AI apps*); Log out
+  is in the user menu. A user's facts on the admin Users page wrap into rows of three.
+- **Up to 520 px**: the wordmark shows only the mark, breadcrumbs keep just the current name,
+  header buttons with a `.label` become icon-only, and the editor's *Unsaved changes* becomes an
+  amber dot beside Save.
+- No page scrolls sideways at 375 px.
 
 ## Writing
 

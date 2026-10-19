@@ -13,23 +13,28 @@
 <meta property="og:title" content="autosmith: STL, made by AI">
 <meta property="og:image" content="/static/brand/og-image.png">
 <link rel="stylesheet" href="/static/style.css">
+<script src="/static/theme.js"></script>
 </head>
 <body>
 <header class="top">
-  <h1 class="wordmark"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-mark"/></svg><span class="name">auto<b>smith</b></span></h1>
-  <span class="count" id="count"></span>
-  <div class="grow lib-only"></div>
-  <label class="search"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-search"/></svg>
-    <input type="search" id="q" placeholder="Search models" autocomplete="off" aria-label="Search models"></label>
-  <a class="btn sm" href="/gallery" title="Public models from everyone" aria-label="Gallery"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-globe"/></svg><span class="lbl">Gallery</span></a>
-  <button class="btn sm" id="newmodel" title="Build a new model by hand in the editor">New model</button>
+  <a class="wordmark" href="/"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-mark"/></svg><span class="name">auto<b>smith</b></span></a>
+  <nav class="nav" aria-label="Main">
+    <a href="/" aria-current="page"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-grid"/></svg><span class="label">My models</span></a>
+    <a href="/gallery" title="Public models from everyone"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-globe"/></svg><span class="label">Gallery</span></a>
+  </nav>
+  <div class="grow"></div>
   <span class="live" id="live" title="Connecting…"><span class="dot"></span><span class="label">Live</span></span>
-  <a class="btn sm" id="donate" hidden target="_blank" rel="noopener noreferrer" title="Support autosmith with a donation (PayPal)"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-heart"/></svg>Donate</a>
-  <a class="btn icon quiet" id="adminlink" hidden href="/admin" title="Admin: print-check settings and design system" aria-label="Admin"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-settings"/></svg></a>
-  <button id="secbtn" class="icon quiet" hidden title="Account: passkeys, connecting Claude, tokens, logout" aria-label="Account"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-key"/></svg></button>
-  <button id="logouttop" class="icon quiet" hidden title="Log out" aria-label="Log out"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-logout"/></svg></button>
+  <div data-usermenu></div>
 </header>
 <main class="lib">
+  <div class="page-head">
+    <h1>My models</h1>
+    <span class="count" id="count"></span>
+    <div class="grow"></div>
+    <label class="search"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-search"/></svg>
+      <input type="search" id="q" placeholder="Search models" autocomplete="off" aria-label="Search models"></label>
+    <button class="primary" id="newmodel" title="Build a new model by hand in the editor"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-plus"/></svg>New model</button>
+  </div>
   <div class="banner" id="pkbanner" hidden>
     <svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-key"/></svg>
     <span>Log in with one tap next time: add a passkey (Face ID, Touch ID or your password manager).</span>
@@ -40,6 +45,7 @@
   <div class="empty" id="empty" hidden>
     <h2>Get started</h2>
     <p>Claude builds the models; this page shows them, live, with every revision.</p>
+    <a class="demo-link" href="/demo"><span class="play"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-play"/></svg></span><span class="cap"><b>See it in action</b><span>A one-minute demo: Claude designs an ESP32 box</span></span><svg class="i go" aria-hidden="true"><use href="/static/icons.svg#i-back"/></svg></a>
     <ol class="start">
       <li class="done" id="st-account"><b>Account created</b><span id="st-who"></span></li>
       <li id="st-passkey" hidden><b>Add a passkey</b>So you can log in with one tap, and approve Claude
@@ -53,60 +59,86 @@
   </div>
 </main>
 <footer class="foot">
-  <a href="/demo"><svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-play"/></svg> Watch the one-minute demo</a> &middot;
-  Like autosmith? <a href="https://github.com/htilly/stl-mcp" target="_blank" rel="noopener noreferrer">Star it on GitHub</a>
-  &middot; pull requests are always appreciated.
+  <a class="demo-link" href="/demo"><span class="play"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-play"/></svg></span><span class="cap"><b>Watch the one-minute demo</b><span>Claude designs an ESP32 box, step by step</span></span><svg class="i go" aria-hidden="true"><use href="/static/icons.svg#i-back"/></svg></a>
+  <span class="foot-row">
+  <span>Like autosmith? <a href="https://github.com/htilly/stl-mcp" target="_blank" rel="noopener noreferrer">Star it on GitHub</a>; pull requests are always appreciated.</span>
+  <a href="/privacy">Privacy</a>
+  </span>
 </footer>
-<dialog id="sec">
-  <div class="sec">
-    <h2>Account</h2>
-    <div class="row"><input type="text" id="myname" maxlength="80" aria-label="Your name" style="flex:1">
-      <button id="renamebtn">Save</button></div>
-    <p class="hint" id="whoami" style="margin-top:8px"></p>
+<dialog id="sec" class="settings-dlg" aria-labelledby="sectitle">
+  <div class="dlg-head">
+    <h2 id="sectitle">Account settings</h2>
+    <button id="secclose" class="icon quiet" title="Close" aria-label="Close"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-close"/></svg></button>
   </div>
-  <div class="sec" id="idsec" hidden>
-    <h2>Sign-in methods</h2>
-    <ul class="plain" id="idlist"></ul>
-    <div class="row" id="idlink"></div>
-  </div>
-  <div class="sec">
-    <h2>Passkeys</h2>
-    <ul class="plain" id="pklist"></ul>
-    <div class="row"><input type="text" id="pkname" placeholder="Name, e.g. iPhone" style="flex:1">
-      <button class="primary" id="pkadd2">Add passkey</button></div>
-    <p class="warn" id="pkerr" hidden></p>
-  </div>
-  <div class="sec" id="appsec">
-    <h2>Connect Claude</h2>
-    <div id="connected" hidden>
-      <h3 class="sub">Connected apps</h3>
-      <ul class="plain" id="applist"></ul>
-      <button class="sm" id="wizmore">Connect another app</button>
+  <div class="settings">
+    <nav class="settings-nav" role="tablist" aria-label="Settings">
+      <button role="tab" data-pane="account" class="on"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-user"/></svg><span class="long">Profile</span><span class="short">Profile</span></button>
+      <button role="tab" data-pane="security"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-key"/></svg><span class="long">Sign-in &amp; security</span><span class="short">Security</span></button>
+      <button role="tab" data-pane="connect"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-plug"/></svg><span class="long">AI connections</span><span class="short">AI apps</span></button>
+      <div class="grow"></div>
+      <button id="logout"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-logout"/></svg>Log out</button>
+    </nav>
+    <div class="settings-body">
+      <div role="tabpanel" data-pane="account">
+        <div class="sec">
+          <h2>Your name</h2>
+          <p class="hint">Shown on models you make public.</p>
+          <div class="row"><input type="text" id="myname" maxlength="80" aria-label="Your name" style="flex:1">
+            <button id="renamebtn">Save</button></div>
+          <p class="hint" id="whoami" style="margin:10px 0 0"></p>
+        </div>
+        <div class="sec">
+          <h2>Appearance</h2>
+          <div class="setting-row"><span class="hint">Light, dark, or follow your system.</span><div data-theme-switch data-labelled></div></div>
+        </div>
+        <div class="sec danger" id="dangersec">
+          <h2>Delete account</h2>
+          <p class="hint">Deletes your account, all your models and files, passkeys and tokens at once. This cannot be undone.</p>
+          <div class="row"><button class="danger" id="delacct"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-trash"/></svg>Delete account</button></div>
+        </div>
+      </div>
+      <div role="tabpanel" data-pane="security" hidden>
+        <div class="sec">
+          <h2>Passkeys</h2>
+          <p class="hint">Log in with Face ID, Touch ID or your password manager. Passkeys also approve the AI apps you connect.</p>
+          <ul class="plain" id="pklist"></ul>
+          <div class="row"><input type="text" id="pkname" placeholder="Name, e.g. iPhone" style="flex:1">
+            <button class="primary" id="pkadd2">Add passkey</button></div>
+          <p class="warn" id="pkerr" hidden></p>
+        </div>
+        <div class="sec" id="idsec" hidden>
+          <h2>Linked sign-ins</h2>
+          <p class="hint">Other ways to log in to the same account.</p>
+          <ul class="plain" id="idlist"></ul>
+          <div class="row" id="idlink"></div>
+        </div>
+      </div>
+      <div role="tabpanel" data-pane="connect" hidden>
+        <div class="sec" id="appsec">
+          <h2>Connect an AI app</h2>
+          <p class="hint">Let Claude, ChatGPT or Claude Code build models in this library.</p>
+          <div id="connected" hidden>
+            <h3 class="sub">Connected apps</h3>
+            <ul class="plain" id="applist"></ul>
+            <button class="sm" id="wizmore"><svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-plus"/></svg>Connect another app</button>
+          </div>
+          <div id="wiz" class="wiz"></div>
+        </div>
+        <div class="sec">
+          <h2>Personal tokens</h2>
+          <p class="hint">For apps that log in with a header instead of a browser, such as Claude Code.</p>
+          <ul class="plain" id="toklist"></ul>
+          <div id="newtok" class="secret" hidden>
+            <span class="hint">Copy it now; it is not shown again.</span>
+            <code class="mono" id="newtokval"></code>
+            <code class="mono" id="newtokcmd"></code>
+            <span class="row"><button class="sm" id="copytok">Copy token</button><button class="sm" id="copycmd">Copy command</button></span>
+          </div>
+          <div class="row"><input type="text" id="tokname" placeholder="Name, e.g. Claude Code on my Mac" style="flex:1">
+            <button id="tokadd">Create token</button></div>
+        </div>
+      </div>
     </div>
-    <div id="wiz" class="wiz"></div>
-  </div>
-  <div class="sec">
-    <h2>Personal tokens</h2>
-    <p class="hint">For apps that log in with a header instead of a browser, such as Claude Code.</p>
-    <ul class="plain" id="toklist"></ul>
-    <div id="newtok" class="secret" hidden>
-      <span class="hint">Copy it now; it is not shown again.</span>
-      <code class="mono" id="newtokval"></code>
-      <code class="mono" id="newtokcmd"></code>
-      <span class="row"><button class="sm" id="copytok">Copy token</button><button class="sm" id="copycmd">Copy command</button></span>
-    </div>
-    <div class="row"><input type="text" id="tokname" placeholder="Name, e.g. Claude Code on my Mac" style="flex:1">
-      <button id="tokadd">Create token</button></div>
-  </div>
-  <div class="sec" id="dangersec">
-    <h2>Delete account</h2>
-    <p class="hint">Deletes your account, all your models and files, passkeys and tokens at once.</p>
-    <div class="row" style="margin-top:8px"><button class="danger" id="delacct"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-trash"/></svg>Delete account</button></div>
-  </div>
-  <div class="sec row">
-    <button id="logout"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-logout"/></svg>Log out</button>
-    <a class="hint" href="/privacy">Privacy</a><div class="grow"></div>
-    <button id="secclose">Close</button>
   </div>
 </dialog>
 <script type="module">
@@ -162,9 +194,6 @@ const $ = (id) => document.getElementById(id);
 const sec = $("sec");
 const pkerr = $("pkerr");
 let auth = null;
-api("/auth/config").then((c) => {
-  if (c.donate_url) { $("donate").href = c.donate_url; $("donate").hidden = false; }
-}).catch(() => {});
 
 // ---- connect wizard: pick the app you use, then follow its steps
 let wizClient = null, wizOpen = false;
@@ -206,9 +235,6 @@ function renderWiz() {
 
 function renderAuth() {
   const u = auth.user;
-  $("secbtn").hidden = !auth.login_required;
-  $("logouttop").hidden = !auth.login_required;
-  $("adminlink").hidden = u.role !== "admin";
   let dismissed = false;
   try { dismissed = localStorage.getItem("pk-banner-dismissed") === "1"; } catch {}
   const needPasskey = auth.login_required && auth.passkeys.length === 0 && passkeysSupported();
@@ -270,16 +296,38 @@ async function addPasskey() {
     if (e.name === "InvalidStateError") e.message = "This device already has a passkey for the library.";
     pkerr.textContent = e.message;
     pkerr.hidden = false;
+    showPane("security");
     sec.open || sec.showModal();
   }
 }
 
-const openAccount = () => { loadAuth(); sec.showModal(); };
-$("secbtn").addEventListener("click", openAccount);
-$("connectbtn").addEventListener("click", () => {
-  openAccount();
-  $("appsec").scrollIntoView({ block: "start" });
+// the settings dialog has one pane per topic; the user menu opens it with /#account, /#security or /#connect
+const PANES = ["account", "security", "connect"];
+function showPane(name) {
+  sec.querySelectorAll(".settings-nav [data-pane]").forEach((b) => {
+    b.classList.toggle("on", b.dataset.pane === name);
+    b.setAttribute("aria-selected", String(b.dataset.pane === name));
+  });
+  sec.querySelectorAll("[role=tabpanel]").forEach((p) => { p.hidden = p.dataset.pane !== name; });
+}
+const openAccount = (pane = "account") => {
+  showPane(pane);
+  loadAuth();
+  sec.open || sec.showModal();
+};
+sec.querySelector(".settings-nav").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-pane]");
+  if (b) showPane(b.dataset.pane);
 });
+function openFromHash() {
+  const pane = location.hash.slice(1);
+  if (!PANES.includes(pane)) return;
+  history.replaceState(null, "", location.pathname + location.search);
+  openAccount(pane);
+}
+window.addEventListener("hashchange", openFromHash);
+openFromHash();
+$("connectbtn").addEventListener("click", () => openAccount("connect"));
 $("secclose").addEventListener("click", () => sec.close());
 $("wizmore").addEventListener("click", () => { wizOpen = true; renderAuth(); });
 $("wiz").addEventListener("click", async (e) => {
@@ -383,8 +431,8 @@ async function logout() {
   location.reload();
 }
 $("logout").addEventListener("click", logout);
-$("logouttop").addEventListener("click", logout);
 loadAuth();
 </script>
+<script type="module" src="/static/nav.js"></script>
 </body>
 </html>

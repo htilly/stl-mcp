@@ -13,17 +13,22 @@
 <meta property="og:title" content="autosmith: STL, made by AI">
 <meta property="og:image" content="/static/brand/og-image.png">
 <link rel="stylesheet" href="/static/style.css">
+<script src="/static/theme.js"></script>
 </head>
 <body>
 <header class="top">
   <a class="wordmark" href="/" title="Back to the library"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-mark"/></svg><span class="name">auto<b>smith</b></span></a>
-  <span class="crumb admin-crumb">/ <b>Admin</b></span>
+  <span class="crumb admin-crumb"><b>Admin</b></span>
+  <div class="grow"></div>
+  <div data-usermenu></div>
+</header>
+<div class="subnav">
   <nav class="tabs" aria-label="Admin pages">
     <a href="/admin"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-settings"/></svg>Print check</a>
-    <a href="/admin/users" aria-current="page"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-key"/></svg>Users</a>
+    <a href="/admin/users" aria-current="page"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-user"/></svg>Users</a>
     <a href="/admin/design"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-swatch"/></svg>Design system</a>
   </nav>
-</header>
+</div>
 <main class="admin">
   <h1>Users</h1>
   <p class="msg" id="summary"></p>
@@ -143,5 +148,6 @@ $("users").addEventListener("click", async (e) => {
 $("q").addEventListener("input", draw);
 load().catch((err) => say(err.message, true));
 </script>
+<script type="module" src="/static/nav.js"></script>
 </body>
 </html>
