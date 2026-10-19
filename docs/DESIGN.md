@@ -145,6 +145,7 @@ gives the 14 px size. An icon-only button needs `class="icon"` and an `aria-labe
 | `i-reply`, `i-restore`, `i-trash`, `i-logout` | Comment reply, restore a revision, delete, log out |
 | `i-fit`, `i-spin`, `i-edges`, `i-wire`, `i-spread` | Viewport: fit, auto-rotate, edges, mesh, spread parts |
 | `i-dimension` | Overall size readout in the viewport |
+| `i-play` | The demo video: play button on the login teaser, demo link in the library footer |
 
 New icons follow the same grid: draw inside a 2 px margin, strokes only, no fills (the mark is the
 one exception), and keep each to a few paths.
