@@ -426,8 +426,30 @@ div.card:hover .name { color: var(--layout); }
   display: flex; flex-wrap: wrap; justify-content: center; gap: 4px var(--s4);
   color: var(--scribe); font-size: var(--t-sm); padding: var(--s5) var(--s5) var(--s6);
 }
-.foot a { color: var(--scribe); font-weight: 500; }
-.foot a:hover { color: var(--graphite); }
+.foot { flex-direction: column; align-items: center; gap: var(--s4); }
+.foot-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px var(--s4); }
+.foot-row a { color: var(--scribe); font-weight: 500; }
+.foot-row a:hover { color: var(--graphite); }
+
+/* a link to the demo page: play icon, title and one line, an arrow */
+.demo-link {
+  display: inline-flex; align-items: center; gap: var(--s3); max-width: 100%; padding: 10px var(--s4) 10px 10px;
+  color: var(--graphite); background: var(--sheet); border: 1px solid var(--rule); border-radius: 99px;
+  box-shadow: var(--shadow-xs); text-align: left; transition: border-color .15s, box-shadow .15s;
+}
+.demo-link:hover { text-decoration: none; border-color: var(--rule-strong); box-shadow: var(--shadow-md); }
+.demo-link .play {
+  flex: none; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--brand-grad); color: #fff; transition: transform .15s;
+}
+.demo-link .play .i { width: 15px; height: 15px; fill: currentColor; stroke: none; margin-left: 2px; }
+.demo-link .cap { min-width: 0; display: flex; flex-direction: column; gap: 1px; font-size: var(--t-sm); color: var(--scribe); line-height: 1.35; }
+.demo-link .cap b { color: var(--graphite); font-size: var(--t-base); }
+.demo-link .go { width: 16px; height: 16px; color: var(--scribe); transform: rotate(180deg); margin-left: var(--s1); transition: transform .15s; }
+.demo-link:hover .play, .demo-link:focus-visible .play { transform: scale(1.08); }
+.demo-link:hover .go, .demo-link:focus-visible .go { transform: rotate(180deg) translateX(-3px); color: var(--graphite); }
+.empty .demo-link, .gate .demo-link { display: flex; margin: var(--s4) 0 var(--s2); border-radius: var(--r-panel); }
+.empty .demo-link .go, .gate .demo-link .go { margin-left: auto; }
 .empty {
   color: var(--scribe); margin: 6vh auto var(--s7); max-width: 600px; padding: var(--s6);
   background: var(--sheet); border: 1px solid var(--rule); border-radius: var(--r-dialog); box-shadow: var(--shadow-sm);
@@ -607,24 +629,6 @@ textarea.recipe { font-family: var(--mono); font-size: 11.5px; width: 100%; min-
   display: block; width: 100%; height: auto; margin: var(--s4) 0; background: #000;
   border: 1px solid var(--rule); border-radius: var(--r-panel);
 }
-.gate .teaser {
-  display: flex; flex-direction: column; margin-top: var(--s4); color: inherit; text-decoration: none;
-  border: 1px solid var(--rule); border-radius: var(--r-panel); overflow: hidden; background: var(--inset);
-  transition: border-color .15s, box-shadow .15s;
-}
-.gate .teaser .shot { position: relative; display: block; background: #000; }
-.gate .teaser img { display: block; width: 100%; height: auto; opacity: .85; transition: opacity .15s; }
-.gate .teaser .play {
-  position: absolute; inset: 0; margin: auto; width: 52px; height: 52px; border-radius: 50%;
-  display: grid; place-items: center; background: rgba(15, 23, 42, .72); color: #fff; transition: transform .15s;
-  -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
-}
-.gate .teaser .play .i { width: 22px; height: 22px; fill: currentColor; stroke: none; margin-left: 3px; }
-.gate .teaser .cap { display: flex; flex-direction: column; gap: 2px; padding: var(--s2) var(--s3); font-size: var(--t-sm); color: var(--scribe); }
-.gate .teaser .cap b { color: var(--graphite); }
-.gate .teaser:hover { text-decoration: none; border-color: var(--rule-strong); box-shadow: var(--shadow-md); }
-.gate .teaser:hover img, .gate .teaser:focus-visible img { opacity: 1; }
-.gate .teaser:hover .play, .gate .teaser:focus-visible .play { transform: scale(1.08); }
 .gate .actions { display: flex; gap: var(--s2); margin-top: var(--s5); }
 .gate .actions button { flex: 1; }
 .gate strong { color: var(--graphite); }

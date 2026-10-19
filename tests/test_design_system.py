@@ -185,3 +185,13 @@ def test_settings_tabs_have_short_labels_for_phones():
     index = (WEB / "index.html").read_text()
     for short in ("Profile", "Security", "AI apps"):
         assert f'<span class="short">{short}</span>' in index
+
+
+def test_library_and_login_link_to_the_demo():
+    index = (WEB / "index.html").read_text()
+    """A link to /demo (play icon and text), not the video or its poster, in the library and on login."""
+    for page in ("index.html", "login.html"):
+        text = (WEB / page).read_text()
+        assert '<a class="demo-link" href="/demo">' in text
+        assert "demo-poster" not in text and "<video" not in text
+    assert (WEB / "index.html").read_text().count('<a class="demo-link"') == 2  # footer + getting started
