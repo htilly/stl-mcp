@@ -291,15 +291,22 @@ class Store:
 
     def update(self, mid: str, *, params: dict | None = None, changes: dict | None = None,
                remove: list[str] | None = None, note: str = "", name: str | None = None,
-               description: str | None = None, resolves: list[str] | None = None) -> dict:
+               description: str | None = None, resolves: list[str] | None = None,
+               kind: str | None = None) -> dict:
+        """kind rebuilds the model with another builder (e.g. enclosure -> openscad) as a new
+        version of the same model; it needs params, since the old recipe does not fit the new kind."""
         rebuild = params is not None or changes or remove
 
         def recipe(m):
             cur = self.current(m)
             for cid in resolves or []:
                 self._comment(m, cid)                          # validate before the build
+            if kind and kind != cur["kind"] and params is None:
+                raise ValueError(f"changing kind from '{cur['kind']}' to '{kind}' needs params "
+                                 "(the whole new recipe)")
             base = params if params is not None else cur["params"]
-            return cur["kind"], apply_changes(cur["kind"], base, changes, remove)
+            k = kind or cur["kind"]
+            return k, apply_changes(k, base, changes, remove)
 
         def head(m):
             return m["current"], len(m["versions"]), m["versions"][-1]["version"]
