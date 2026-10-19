@@ -1831,6 +1831,18 @@ def _maker(owner: str | None) -> str:
     return hashlib.sha256(f"maker:{owner}".encode()).hexdigest()[:12] if owner else ""
 
 
+_IMPORT_ONLY = re.compile(r'\s*import\s*\(\s*"[\w.]+"\s*\)\s*;?\s*')
+
+
+def _source(cur: dict) -> str:
+    """What a model is made from, for the gallery's type badge: its kind, or "stl" for an
+    OpenSCAD recipe that only imports an attached mesh (a plain uploaded STL)."""
+    p = cur.get("params") or {}
+    if cur["kind"] == "openscad" and p.get("meshes") and _IMPORT_ONLY.fullmatch(p.get("code") or ""):
+        return "stl"
+    return cur["kind"]
+
+
 async def api_gallery(request):
     """Every public model, from every user: what the gallery page shows."""
     lib = _req_lib(request)
@@ -1841,7 +1853,7 @@ async def api_gallery(request):
                     "owner_name": m["owner_name"] or "Someone", "maker": _maker(m.get("owner")),
                     "mine": m.get("owner") == lib.user["id"], "copies": m["copies"],
                     "updated": m["updated"], "published": m.get("published") or m["updated"],
-                    "version": cur["version"], "kind": cur["kind"],
+                    "version": cur["version"], "kind": cur["kind"], "source": _source(cur),
                     "parts": {n: {"extents_mm": p["extents_mm"]} for n, p in cur["parts"].items()}})
     return JSONResponse({"models": out})
 
