@@ -410,7 +410,12 @@ whenever the binary is installed (`ALLOW_OPENSCAD=0` turns it off):
 - on Linux with rlimits: `OPENSCAD_MEM_MB` address space (default 2048), CPU seconds, 200 MB
   per written file (the STL and the log), 256 open files; only the tail of its log is read back.
 
-Locally: install OpenSCAD and put the libraries in `./openscad-libs/<name>` (e.g.
+The Docker image installs the OpenSCAD nightly and builds with its Manifold engine
+(`OPENSCAD_BACKEND`, default `manifold`; passed only to a binary that has `--backend`, so
+2021.01 keeps using CGAL). Manifold is many times faster on heavy models such as BOSL2's
+herringbone gears, which CGAL often cannot finish within the timeout.
+
+Locally: install OpenSCAD (a nightly, for Manifold) and put the libraries in `./openscad-libs/<name>` (e.g.
 `./openscad-libs/BOSL2`, or set `OPENSCAD_LIBS`). The OpenSCAD tests skip when `openscad` or a
 library is not installed.
 

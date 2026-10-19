@@ -26,6 +26,8 @@ Environment:
   OPENSCAD_LIBS     the libraries dir (default /opt/openscad-libs, else ./openscad-libs)
   OPENSCAD_TIMEOUT  seconds per build, all parts together (default 60)
   OPENSCAD_MEM_MB   address-space limit per process (default 2048)
+  OPENSCAD_BACKEND  geometry engine, passed as --backend when the binary has that option
+                    (default manifold: much faster than CGAL; empty = the binary's default)
   OPENSCAD_CONCURRENCY  builds running at the same time, server-wide (default 2); a build that
                     cannot start within OPENSCAD_TIMEOUT fails with "busy"
 """
@@ -51,6 +53,7 @@ LIBS = Path(os.environ.get("OPENSCAD_LIBS") or
             (_default_libs if _default_libs.is_dir() else Path(__file__).parent / "openscad-libs"))
 TIMEOUT = float(os.environ.get("OPENSCAD_TIMEOUT", "60"))
 MEM_MB = int(os.environ.get("OPENSCAD_MEM_MB", "2048"))
+BACKEND = os.environ.get("OPENSCAD_BACKEND", "manifold")
 CONCURRENCY = max(1, int(os.environ.get("OPENSCAD_CONCURRENCY", "2")))
 MAX_OUTPUT = 50_000_000    # bytes, per written file (STL or log); ~1M triangles of binary STL
 MAX_TOTAL_STL = 150_000_000  # bytes of STL over all parts, loaded into the server's memory
@@ -72,6 +75,21 @@ NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 def available() -> bool:
     return bool(BIN) and Path(BIN).exists()
+
+
+@functools.lru_cache(maxsize=4)
+def _has_backend_option(binary: str) -> bool:
+    """2021.01 has no --backend (only CGAL); the nightlies list it in --help."""
+    try:
+        r = subprocess.run([binary, "--help"], capture_output=True, timeout=30,
+                           env={"PATH": "/usr/bin:/bin", "QT_QPA_PLATFORM": "offscreen"})
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return b"--backend" in r.stdout + r.stderr
+
+
+def _backend_args() -> list[str]:
+    return [f"--backend={BACKEND}"] if BACKEND and _has_backend_option(BIN) else []
 
 
 class OpenSCADError(ValueError):
@@ -351,7 +369,7 @@ def _build(code: str, overrides: list[str], parts: list[str], deadline: float) -
             if left <= 0:
                 raise OpenSCADError(f"OpenSCAD took longer than {TIMEOUT:g} s")
             stl = tdir / f"{part}.stl"
-            argv = [BIN, "-o", str(stl), *overrides,
+            argv = [BIN, *_backend_args(), "-o", str(stl), *overrides,
                     *(["-D", f"PART={_literal(part)}"] if parts else []), str(src)]
             rc, log = _run(argv, tdir, left)
             if rc != 0 or not stl.is_file() or stl.stat().st_size == 0:

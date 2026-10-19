@@ -131,6 +131,18 @@ def test_builds_are_limited_server_wide(monkeypatch):
         openscad._slots.release()
 
 
+def test_backend_is_passed_only_to_binaries_that_have_it(monkeypatch):
+    """Manifold by default on a nightly; 2021.01 has no --backend and gets no such option."""
+    monkeypatch.setattr(openscad, "BACKEND", "manifold")
+    monkeypatch.setattr(openscad, "_has_backend_option", lambda b: True)
+    assert openscad._backend_args() == ["--backend=manifold"]
+    monkeypatch.setattr(openscad, "_has_backend_option", lambda b: False)
+    assert openscad._backend_args() == []
+    monkeypatch.setattr(openscad, "_has_backend_option", lambda b: True)
+    monkeypatch.setattr(openscad, "BACKEND", "")
+    assert openscad._backend_args() == []
+
+
 def test_resource_limits_apply_where_supported(monkeypatch):
     """The rlimits are not Linux-only any more; a limit the OS rejects is skipped only off Linux."""
     import resource

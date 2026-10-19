@@ -15,8 +15,19 @@ ADD https://github.com/nophead/NopSCADlib/archive/${NOPSCADLIB_COMMIT}.tar.gz /t
 ADD https://github.com/Irev-Dev/Round-Anything/archive/${ROUND_ANYTHING_COMMIT}.tar.gz /tmp/scad/Round-Anything.tar.gz
 ADD https://github.com/kennetek/gridfinity-rebuilt-openscad/archive/${GRIDFINITY_COMMIT}.tar.gz /tmp/scad/gridfinity-rebuilt-openscad.tar.gz
 ADD https://github.com/openscad/MCAD/archive/${MCAD_COMMIT}.tar.gz /tmp/scad/MCAD.tar.gz
-RUN apt-get update \
- && apt-get install -y --no-install-recommends openscad libgl1 libexpat1 \
+# OpenSCAD itself is the nightly from openscad.org's repository: Debian's 2021.01 only has the CGAL
+# engine, which spends minutes on what Manifold (--backend=manifold, see openscad.py) does in
+# seconds, e.g. BOSL2's herringbone gears. The repository only keeps the latest nightly.
+ADD https://download.opensuse.org/repositories/home:/t-paul/Debian_13/Release.key /etc/apt/keyrings/openscad.asc
+RUN chmod a+r /etc/apt/keyrings/openscad.asc \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates \
+ && . /etc/os-release \
+ && echo "deb [signed-by=/etc/apt/keyrings/openscad.asc] https://download.opensuse.org/repositories/home:/t-paul/Debian_${VERSION_ID}/ ./" \
+      > /etc/apt/sources.list.d/openscad.list \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends openscad-nightly libgl1 libexpat1 \
+ && openscad-nightly --version \
  && rm -rf /var/lib/apt/lists/* \
  && cd /tmp/scad \
  && for f in *.tar.gz; do \
@@ -32,7 +43,7 @@ RUN apt-get update \
            MCAD/*.py \
  && rm -rf /tmp/scad \
  && chmod -R a-w /opt/openscad-libs
-ENV OPENSCAD_LIBS=/opt/openscad-libs
+ENV OPENSCAD_LIBS=/opt/openscad-libs OPENSCAD_BIN=/usr/bin/openscad-nightly
 # build123d (OpenCascade, needs libgl1 and libexpat1 above) is only imported by the sandbox service, which runs
 # this same image with `python sandboxd.py` (see docker-compose.yml and sandboxd.py).
 COPY requirements.txt .
