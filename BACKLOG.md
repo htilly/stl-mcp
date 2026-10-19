@@ -151,9 +151,10 @@ Goal: let Claude/ChatGPT make more and better models. In three PRs; the first is
   `openscad.build` when the binary supports it (check `--help` once). Re-run the OpenSCAD tests
   and the libraries against it. Blocked in the cloud session: files.openscad.org was not
   reachable there. (S-M)
-- [ ] **More parts in `reference/parts.json`**: common displays (SSD1306 0.96" OLED, 1602 LCD),
-  USB-C/micro-USB breakout boards, buck converters, relay modules, fans (30/40/50 mm),
-  servos (SG90, MG996R), NEMA 17. Check every value against a datasheet or NopSCADlib. (S)
+- [x] **More parts in `reference/parts.json`** (PR #56): 1602 LCD, relay module, KY-040 encoder,
+  MP1584/MT3608/TP4056 modules, 30-120 mm fans, NEMA 17 (values from NopSCADlib).
+- [ ] **Parts not in NopSCADlib**: SSD1306 0.96" OLED, USB-C breakout boards, servos (SG90,
+  MG996R). Check every value against a datasheet before adding it. (S)
 
 ### build123d and a real sandbox (PR 2) (L)
 - [ ] **Sandbox for Python builds**: a separate `sandbox` service in `docker-compose.yml` with
