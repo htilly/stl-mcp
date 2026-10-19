@@ -156,6 +156,7 @@ gives the 14 px size. An icon-only button needs `class="icon"` and an `aria-labe
 | `i-lock` | Private model (visibility badge and toggle) |
 | `i-globe` | Public model, the gallery link |
 | `i-grid` | Back to your own library (from the gallery) |
+| `i-gauge` | Admin: live load (CPU, memory) |
 | `i-swatch` | Admin: design system |
 | `i-type` | Typography |
 | `i-comment` | Comments, comment mode |

@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Load · autosmith</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/static/favicon.ico" sizes="48x48">
+<link rel="apple-touch-icon" href="/static/brand/apple-touch-icon.png">
+<link rel="manifest" href="/static/brand/site.webmanifest">
+<meta name="theme-color" content="#0f172a">
+<meta property="og:site_name" content="autosmith.eu">
+<meta property="og:title" content="autosmith: STL, made by AI">
+<meta property="og:image" content="/static/brand/og-image.png">
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/theme.js"></script>
+</head>
+<body>
+<header class="top">
+  <a class="wordmark" href="/" title="Back to the library"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-mark"/></svg><span class="name">auto<b>smith</b></span></a>
+  <span class="crumb admin-crumb"><b>Admin</b></span>
+  <div class="grow"></div>
+  <div data-usermenu></div>
+</header>
+<div class="subnav">
+  <nav class="tabs" aria-label="Admin pages">
+    <a href="/admin"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-settings"/></svg>Print check</a>
+    <a href="/admin/users"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-user"/></svg>Users</a>
+    <a href="/admin/load" aria-current="page"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-gauge"/></svg>Load</a>
+    <a href="/admin/design"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-swatch"/></svg>Design system</a>
+  </nav>
+</div>
+<main class="admin load">
+  <h1>Load</h1>
+  <p class="msg">CPU and memory right now, per online user and per build job. Updated every 2 s.
+     100 % CPU is one core busy; a build that uses several cores shows more.</p>
+  <section class="group server">
+    <h2>Server</h2>
+    <dl class="tb full" id="server"></dl>
+    <p class="msg" style="margin: var(--s2) 0" id="limits"></p>
+  </section>
+  <div id="users"></div>
+  <p class="msg" id="msg"></p>
+</main>
+<script type="module">
+import { api, esc } from "/static/common.js";
+
+const $ = (id) => document.getElementById(id);
+const pct = (v) => (v == null ? "–" : `${v.toFixed(0)} %`);
+const mb = (v) => (v == null ? "–" : v >= 1000 ? `${(v / 1000).toFixed(2)} GB` : `${v.toFixed(0)} MB`);
+const secs = (s) => (s < 60 ? `${s.toFixed(0)} s` : `${Math.floor(s / 60)} min ${Math.round(s % 60)} s`);
+
+function bar(v, cpus) {
+  if (v == null) return pct(v);
+  const share = Math.min(1, v / (100 * Math.max(1, cpus)));
+  const cls = share > 0.85 ? " hot" : share > 0.5 ? " warm" : "";
+  return `<span class="bar${cls}"><i style="width:${(share * 100).toFixed(0)}%"></i></span><span class="num">${pct(v)}</span>`;
+}
+
+function online(u) {
+  const ways = [];
+  if (u.web_pages) ways.push(`${u.web_pages} page${u.web_pages === 1 ? "" : "s"} open`);
+  if (u.mcp_seconds_ago != null && u.mcp_seconds_ago < 600) ways.push(`Claude ${u.mcp_seconds_ago < 60 ? "just now" : `${Math.round(u.mcp_seconds_ago / 60)} min ago`}`);
+  return ways.join(" · ") || "building";
+}
+
+function jobs(u, cpus) {
+  if (!u.jobs.length) return `<p class="msg" style="margin: 0 0 var(--s3)">No builds running.</p>`;
+  return `<div class="jobs-wrap"><table class="jobs"><thead><tr><th>Job</th><th>Model</th><th>State</th><th class="num">Time</th>
+      <th>CPU</th><th class="num">Memory</th><th>Processes</th></tr></thead><tbody>${u.jobs.map((j) => `
+    <tr><td>${esc(j.label)}</td><td>${j.model ? `<a href="/m/${encodeURIComponent(j.model)}">${esc(j.model)}</a>` : "–"}</td>
+      <td>${esc(j.state)}</td><td class="num">${secs(j.seconds)}</td><td>${bar(j.cpu, cpus)}</td>
+      <td class="num">${j.processes.length ? mb(j.mem_mb) : "–"}</td>
+      <td class="num" title="${esc(j.processes.map((p) => `pid ${p.pid}: ${pct(p.cpu)}, ${mb(p.mem_mb)}`).join("\n"))}">${j.processes.length || "–"}</td></tr>`).join("")}
+    </tbody></table></div>`;
+}
+
+function draw(d) {
+  const s = d.system, cpus = s.cpus || 1;
+  const used = s.mem_available_mb != null ? s.mem_total_mb - s.mem_available_mb : null;
+  $("server").innerHTML = `
+    <div><dt>Cores</dt><dd>${cpus}</dd></div>
+    <div><dt>Load 1 · 5 · 15 min</dt><dd>${s.load ? s.load.join(" · ") : "–"}</dd></div>
+    <div><dt>Memory used</dt><dd>${used != null ? `${mb(used)} of ${mb(s.mem_total_mb)}` : s.mem_total_mb ? `${mb(s.mem_total_mb)} in all` : "–"}</dd></div>
+    <div><dt>Server process CPU</dt><dd>${bar(d.server.cpu, cpus)}</dd></div>
+    <div><dt>Server process memory</dt><dd>${mb(d.server.mem_mb)}</dd></div>`;
+  const l = d.limits;
+  $("limits").textContent = `Limits: ${l.workers} build workers server-wide, ${l.builds_at_once} builds at a time per user, ` +
+    `${l.build_mem_mb} MB and ${l.build_timeout} s per build.`;
+  $("users").innerHTML = d.users.map((u) => `
+    <section class="group user">
+      <h2>${esc(u.display_name || "(no name)")}${u.role === "admin" ? ' <span class="pill">admin</span>' : ""}</h2>
+      <p class="help">${esc(u.email || "no email")} · ${esc(online(u))}</p>
+      <dl class="tb full" style="margin-bottom: var(--s3)">
+        <div><dt>CPU</dt><dd>${bar(u.cpu, cpus)}</dd></div>
+        <div><dt>Memory (build workers)</dt><dd>${mb(u.mem_mb)}</dd></div>
+        <div><dt>Jobs</dt><dd>${u.jobs.filter((j) => j.state === "running").length} running · ${u.jobs.filter((j) => j.state === "waiting").length} waiting</dd></div>
+      </dl>
+      ${jobs(u, cpus)}
+    </section>`).join("") || `<p class="msg">Nobody is online.</p>`;
+}
+
+let timer = null;
+async function tick() {
+  try { draw(await api("/api/admin/load")); $("msg").textContent = ""; }
+  catch (err) { $("msg").textContent = err.message; $("msg").className = "msg err"; }
+  timer = setTimeout(tick, document.hidden ? 10000 : 2000);
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { clearTimeout(timer); tick(); } });
+tick();
+</script>
+<script type="module" src="/static/nav.js"></script>
+</body>
+</html>
