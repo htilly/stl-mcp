@@ -448,8 +448,8 @@ div.card:hover .name { color: var(--layout); }
 .demo-link .go { width: 16px; height: 16px; color: var(--scribe); transform: rotate(180deg); margin-left: var(--s1); transition: transform .15s; }
 .demo-link:hover .play, .demo-link:focus-visible .play { transform: scale(1.08); }
 .demo-link:hover .go, .demo-link:focus-visible .go { transform: rotate(180deg) translateX(-3px); color: var(--graphite); }
-.empty .demo-link, .gate .demo-link { display: flex; margin: var(--s4) 0 var(--s2); border-radius: var(--r-panel); }
-.empty .demo-link .go, .gate .demo-link .go { margin-left: auto; }
+.gate .demo-link { display: flex; margin: var(--s5) 0 0; border-radius: var(--r-panel); }
+.gate .demo-link .go { margin-left: auto; }
 .empty {
   color: var(--scribe); margin: 6vh auto var(--s7); max-width: 600px; padding: var(--s6);
   background: var(--sheet); border: 1px solid var(--rule); border-radius: var(--r-dialog); box-shadow: var(--shadow-sm);

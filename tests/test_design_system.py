@@ -187,11 +187,10 @@ def test_settings_tabs_have_short_labels_for_phones():
         assert f'<span class="short">{short}</span>' in index
 
 
-def test_library_and_login_link_to_the_demo():
-    index = (WEB / "index.html").read_text()
-    """A link to /demo (play icon and text), not the video or its poster, in the library and on login."""
-    for page in ("index.html", "login.html"):
-        text = (WEB / page).read_text()
-        assert '<a class="demo-link" href="/demo">' in text
-        assert "demo-poster" not in text and "<video" not in text
-    assert (WEB / "index.html").read_text().count('<a class="demo-link"') == 2  # footer + getting started
+def test_only_the_login_page_links_to_the_demo_at_the_bottom():
+    """A link to /demo (play icon and text) only on the login page, as the last thing in the panel."""
+    login = (WEB / "login.html").read_text()
+    assert login.count('<a class="demo-link" href="/demo">') == 1
+    assert login.index('class="demo-link"') > login.index('id="tok"')
+    assert "demo-poster" not in login and "<video" not in login
+    assert "demo-link" not in (WEB / "index.html").read_text()
