@@ -418,7 +418,8 @@ whenever the binary is installed (`ALLOW_OPENSCAD=0` turns it off):
 - it runs in a fresh empty temp dir (cwd and `HOME`) with `OPENSCADPATH` set to the read-only
   library dir only, as its own process group that is killed after `OPENSCAD_TIMEOUT` seconds
   (default 60, all parts together);
-- on Linux with rlimits: `OPENSCAD_MEM_MB` address space (default 2048), CPU seconds, 200 MB
+- on Linux with rlimits: `OPENSCAD_MEM_MB` address space (default 2048), `OPENSCAD_CPU_SECONDS`
+  CPU seconds over all threads (default 4 × the timeout, as Manifold uses several cores), 200 MB
   per written file (the STL and the log), 256 open files; only the tail of its log is read back.
 
 The Docker image installs the OpenSCAD nightly and builds with its Manifold engine

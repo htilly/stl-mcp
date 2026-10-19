@@ -26,6 +26,9 @@ Environment:
   OPENSCAD_LIBS     the libraries dir (default /opt/openscad-libs, else ./openscad-libs)
   OPENSCAD_TIMEOUT  seconds per build, all parts together (default 60)
   OPENSCAD_MEM_MB   address-space limit per process (default 2048)
+  OPENSCAD_CPU_SECONDS  CPU seconds per process on Linux, all threads together (default 4 x
+                    OPENSCAD_TIMEOUT: Manifold uses several cores, so a heavy build burns several
+                    CPU seconds a second; the wall-clock timeout still applies)
   OPENSCAD_BACKEND  geometry engine, passed as --backend when the binary has that option
                     (default manifold: much faster than CGAL; empty = the binary's default)
   OPENSCAD_CONCURRENCY  builds running at the same time, server-wide (default 2); a build that
@@ -55,6 +58,7 @@ LIBS = Path(os.environ.get("OPENSCAD_LIBS") or
             (_default_libs if _default_libs.is_dir() else Path(__file__).parent / "openscad-libs"))
 TIMEOUT = float(os.environ.get("OPENSCAD_TIMEOUT", "60"))
 MEM_MB = int(os.environ.get("OPENSCAD_MEM_MB", "2048"))
+CPU_SECONDS = int(os.environ.get("OPENSCAD_CPU_SECONDS", "0")) or int(4 * TIMEOUT)
 BACKEND = os.environ.get("OPENSCAD_BACKEND", "manifold")
 CONCURRENCY = max(1, int(os.environ.get("OPENSCAD_CONCURRENCY", "2")))
 MAX_OUTPUT = 50_000_000    # bytes, per written file (STL or log); ~1M triangles of binary STL
@@ -310,7 +314,7 @@ def _run(argv: list[str], cwd: Path, timeout: float) -> tuple[int, str]:
     with open(log, "wb") as out:
         p = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=out,
                              stderr=subprocess.STDOUT, start_new_session=True,
-                             preexec_fn=_limits(int(timeout) + 5) if os.name == "posix" else None)
+                             preexec_fn=_limits(CPU_SECONDS) if os.name == "posix" else None)
         jobs.add_pid(p.pid)
         try:
             rc = p.wait(timeout=timeout)
@@ -373,7 +377,8 @@ def _build(code: str, overrides: list[str], parts: list[str], deadline: float) -
             if left <= 0:
                 raise OpenSCADError(f"OpenSCAD took longer than {TIMEOUT:g} s")
             stl = tdir / f"{part}.stl"
-            argv = [BIN, *_backend_args(), "-o", str(stl), *overrides,
+            # binary STL: ASCII is ~6x bigger, so MAX_OUTPUT would cap a model at ~200k triangles
+            argv = [BIN, *_backend_args(), "--export-format", "binstl", "-o", str(stl), *overrides,
                     *(["-D", f"PART={_literal(part)}"] if parts else []), str(src)]
             rc, log = _run(argv, tdir, left)
             if rc != 0 or not stl.is_file() or stl.stat().st_size == 0:
