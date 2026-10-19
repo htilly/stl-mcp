@@ -138,15 +138,15 @@ def render_view(meshes, az, el, size=420, label="", ss=2):
             line(polys_px[j][k], fill=ecol, width=ss)
 
     # small axis indicator
-    o = np.array([28, W - 28]) * 1.0
+    o = np.array([34, size - 34]) * ss * 1.0      # inset so arrows pointing left/down stay in frame
     for vec, col, txt in (((1, 0, 0), (220, 60, 60), "x"), ((0, 1, 0), (60, 170, 60), "y"),
                           ((0, 0, 1), (60, 90, 230), "z")):
         d = np.array([np.dot(vec, right), -np.dot(vec, up)])
         if np.linalg.norm(d) < 0.15:
             continue
-        e = o + d * 22 * ss
+        e = o + d * 18 * ss
         draw.line([*o, *e], fill=col, width=2 * ss)
-        draw.text(tuple(e + d * 6), txt, fill=col, font=_font(11 * ss))
+        draw.text(tuple(e + d * 4 * ss - np.array([3, 6]) * ss), txt, fill=col, font=_font(11 * ss))
     if label:
         draw.text((8 * ss, 6 * ss), label, fill=(60, 60, 70), font=_font(13 * ss))
     return img.resize((size, size), Image.LANCZOS)
