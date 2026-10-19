@@ -16,7 +16,7 @@ that account's models and comments. The refresh token is kept in ~/.config/stl-w
 (mode 0600) and renewed automatically; sign in again if it is revoked or expires (90 days idle).
 
 Configuration (nothing is ever printed):
-  STL_MCP_URL    server base URL, default https://stl.tilly.se
+  STL_MCP_URL    server base URL, default https://autosmith.eu
   STL_MCP_TOKEN  optional, overrides `login`: the server's MCP_TOKEN (admin, sees everything).
                  If unset and not signed in, the macOS keychain item "stl-mcp-token" is tried.
                  Both are only used when STL_MCP_URL is set too, so a token for your own server
@@ -40,7 +40,7 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
-BASE = os.environ.get("STL_MCP_URL", "https://stl.tilly.se").rstrip("/")
+BASE = os.environ.get("STL_MCP_URL", "https://autosmith.eu").rstrip("/")
 URL_SET = bool(os.environ.get("STL_MCP_URL", "").strip())
 
 
