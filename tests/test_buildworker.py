@@ -4,6 +4,7 @@ import io
 import os
 import signal
 import sys
+import time
 
 import pytest
 
@@ -115,7 +116,11 @@ def test_the_worker_has_no_secrets_in_its_environment(fresh, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql://secret")
     p = buildworker._take()
     try:
-        environ = open(f"/proc/{p.pid}/environ", "rb").read()
+        # Popen returns once exec has begun; the kernel fills in environ a moment later
+        deadline = time.monotonic() + 5
+        while not (environ := open(f"/proc/{p.pid}/environ", "rb").read()) \
+                and p.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.01)
         assert b"DATABASE_URL" not in environ and b"BUILD_LIMITS" in environ
     finally:
         buildworker._cleanup(p)
