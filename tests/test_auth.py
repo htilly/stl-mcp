@@ -273,7 +273,7 @@ def test_consent_page_names_client_and_destination(client):
     r = client.get(consent)
     assert r.status_code == 200
     assert "&lt;b&gt;Evil&lt;/b&gt;" in r.text and "<b>Evil" not in r.text
-    assert "https://claude.ai" in r.text
+    assert "sent back to <strong>https://claude.ai</strong>" in r.text
     assert r.headers["x-frame-options"] == "DENY"
 
 
