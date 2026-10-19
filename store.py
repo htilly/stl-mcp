@@ -37,6 +37,7 @@ import printcheck
 import sandbox
 
 MAX_VERSIONS = 50  # older versions' STL files are pruned (the recipe is kept)
+MAX_COMMENTS = 200  # per model, open and resolved
 
 
 # ---------------------------------------------------------------- builders per kind
@@ -483,19 +484,25 @@ class Store:
         text = (text or "").strip()
         if not text:
             raise ValueError("the comment is empty")
+        m = self._read(mid)
+        ver = int(version or m["current"])
+        self.version(m, ver)
+        c = {"text": text[:2000], "author": author, "created": time.time(),
+             "version": ver, "part": part, "status": "open", "replies": []}
+        if point is not None:
+            c["point"] = [round(float(x), 2) for x in point][:3]
+            if normal is not None:
+                c["normal"] = [round(float(x), 3) for x in normal][:3]
+            # Outside self.lock: locating the nearest CSG nodes builds parts of the recipe, which
+            # can take a while for a heavy model. Versions never change, so the hints stay valid.
+            c.update(self._hints(m, ver, part, c["point"]))
         with self.lock:
             m = self._read(mid)
             comments = m.setdefault("comments", [])
-            ver = int(version or m["current"])
-            self.version(m, ver)
-            n = max([int(c["id"][1:]) for c in comments] or [0]) + 1
-            c = {"id": f"c{n}", "text": text[:2000], "author": author, "created": time.time(),
-                 "version": ver, "part": part, "status": "open", "replies": []}
-            if point is not None:
-                c["point"] = [round(float(x), 2) for x in point][:3]
-                if normal is not None:
-                    c["normal"] = [round(float(x), 3) for x in normal][:3]
-                c.update(self._hints(m, ver, part, c["point"]))
+            if len(comments) >= MAX_COMMENTS:
+                raise ValueError(f"the model has {MAX_COMMENTS} comments - delete some first")
+            n = max([int(x["id"][1:]) for x in comments] or [0]) + 1
+            c = {"id": f"c{n}", **c}
             comments.append(c)
             self._write(m)
             return c

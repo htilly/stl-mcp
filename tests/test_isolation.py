@@ -51,7 +51,7 @@ def test_owner_reaches_everything(world):
     a = ctx(world.ann)
     assert server.get_model("anns-box", ctx=a)["comments"][0]["text"] == "make it taller"
     assert [f["file"] for f in server.list_files(ctx=a)] == ["part.stl"]
-    assert server.file_info("part.stl", ctx=a)["watertight"]
+    assert run(server.file_info("part.stl", ctx=a))["watertight"]
 
 
 def test_other_user_gets_404_on_every_web_route(world):
@@ -84,15 +84,15 @@ def test_other_user_gets_not_found_on_every_mcp_tool(world):
         lambda: run(server.duplicate_model("anns-box", "stolen", ctx=b)),
         lambda: server.delete_model("anns-box", ctx=b),
         lambda: server.reply_to_comment("anns-box", "c1", "hi", ctx=b),
-        lambda: server.check_print(model_id="anns-box", ctx=b),
-        lambda: server.file_info("anns-box/v1/model.stl", ctx=b),
-        lambda: server.export_obj("x", [{"file": "anns-box/v1/model.stl"}], ctx=b),
+        lambda: run(server.check_print(model_id="anns-box", ctx=b)),
+        lambda: run(server.file_info("anns-box/v1/model.stl", ctx=b)),
+        lambda: run(server.export_obj("x", [{"file": "anns-box/v1/model.stl"}], ctx=b)),
     ]
     for call in missing:
         with pytest.raises(KeyError, match="does not exist"):
             call()
-    for call in (lambda: server.file_info("part.stl", ctx=b), lambda: server.delete_file("part.stl", ctx=b),
-                 lambda: server.modify_file("part.stl", scale=2, ctx=b), lambda: server.split_file("part.stl", ctx=b)):
+    for call in (lambda: run(server.file_info("part.stl", ctx=b)), lambda: server.delete_file("part.stl", ctx=b),
+                 lambda: run(server.modify_file("part.stl", scale=2, ctx=b)), lambda: run(server.split_file("part.stl", ctx=b))):
         with pytest.raises(FileNotFoundError):
             call()
     assert (server.Lib(world.ann).dir / "part.stl").is_file()
@@ -105,8 +105,8 @@ def test_same_names_do_not_collide(world):
     assert m["model_id"] == "anns-box-2"
     run(server.import_file("part", data_base64=__import__("base64").b64encode(
         trimesh.creation.box(extents=(1, 1, 1)).export(file_type="stl")).decode(), ctx=b))
-    assert server.file_info("part.stl", ctx=b)["extents_mm"] == [1, 1, 1]
-    assert server.file_info("part.stl", ctx=ctx(world.ann))["extents_mm"] == [5, 5, 5]
+    assert run(server.file_info("part.stl", ctx=b))["extents_mm"] == [1, 1, 1]
+    assert run(server.file_info("part.stl", ctx=ctx(world.ann)))["extents_mm"] == [5, 5, 5]
 
 
 def test_live_updates_follow_only_your_own_library(world):
