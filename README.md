@@ -420,7 +420,12 @@ whenever the binary is installed (`ALLOW_OPENSCAD=0` turns it off):
   (default 60, all parts together);
 - on Linux with rlimits: `OPENSCAD_MEM_MB` address space (default 2048), `OPENSCAD_CPU_SECONDS`
   CPU seconds over all threads (default 4 × the timeout, as Manifold uses several cores), 200 MB
-  per written file (the STL and the log), 256 open files; only the tail of its log is read back.
+  per written file (the STL and the log), 256 open files; only the tail of its log is read back;
+- at most `OPENSCAD_CONCURRENCY` builds run at a time, server-wide (default 2).
+
+An admin can lower the timeout and the concurrent builds on the admin Load page (`/admin/load`)
+without a restart; the values are saved in the database and the environment's values stay the
+maximum. The CPU seconds follow the timeout unless `OPENSCAD_CPU_SECONDS` is set.
 
 The Docker image installs the OpenSCAD nightly and builds with its Manifold engine
 (`OPENSCAD_BACKEND`, default `manifold`; passed only to a binary that has `--backend`, so

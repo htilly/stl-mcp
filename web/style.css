@@ -822,6 +822,8 @@ h3.sub { font-size: var(--t-base); margin: 0 0 var(--s2); }
 .admin .msg.err { color: var(--fault); }
 .admin .search input[type=search] { width: 100%; }
 .admin.load .num { font-variant-numeric: tabular-nums; }
+.admin.load .scad > .help { margin: 0 0 var(--s2); color: var(--scribe); font-size: var(--t-sm); max-width: 64ch; }
+.admin.load .scad .acts { display: flex; gap: var(--s3); align-items: center; flex-wrap: wrap; padding: var(--s3) 0; border-top: 1px solid var(--rule); }
 .admin.load .jobs-wrap { overflow-x: auto; }
 .admin.load .jobs { width: 100%; white-space: nowrap; border-collapse: collapse; font-size: var(--t-sm); margin-bottom: var(--s3); }
 .admin.load .jobs th { text-align: left; font-weight: 550; color: var(--scribe); padding: 4px var(--s2) 4px 0; border-bottom: 1px solid var(--rule); }
