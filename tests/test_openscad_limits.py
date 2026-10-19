@@ -67,7 +67,7 @@ def test_clamp_cuts_saved_values_down_to_lowered_caps(scad):
 def test_build_uses_the_timeout_in_effect_when_it_starts(scad, monkeypatch):
     seen = []
     monkeypatch.setattr(scad, "available", lambda: True)
-    monkeypatch.setattr(scad, "_build", lambda code, ov, parts, timeout: seen.append(timeout) or {})
+    monkeypatch.setattr(scad, "_build", lambda code, ov, parts, timeout, meshes=None: seen.append(timeout) or {})
     scad.build({"code": "cube(1);"})
     scad.configure(20, 3)
     scad.build({"code": "cube(1);"})

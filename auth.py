@@ -308,6 +308,38 @@ class AuthState:
                                  "countries": seen}
         return out
 
+    # ---- CPU usage (builds)
+
+    def record_cpu(self, uid: str, cpu_seconds: float, wall_seconds: float):
+        """Adds one build to the user's CPU usage today (UTC). Unknown users are skipped."""
+        self.db.execute(
+            "INSERT INTO cpu_usage (user_id, day, builds, cpu_seconds, wall_seconds) "
+            "SELECT id, (now() AT TIME ZONE 'UTC')::date, 1, %s, %s FROM users WHERE id = %s "
+            "ON CONFLICT (user_id, day) DO UPDATE SET builds = cpu_usage.builds + 1, "
+            "  cpu_seconds = cpu_usage.cpu_seconds + EXCLUDED.cpu_seconds, "
+            "  wall_seconds = cpu_usage.wall_seconds + EXCLUDED.wall_seconds",
+            (cpu_seconds, wall_seconds, uid))
+
+    def cpu_stats(self, days: int = 30) -> dict[str, dict]:
+        """Per user: builds and CPU seconds in total and in the last `days` days (today included)."""
+        rows = self.db.all(
+            "SELECT user_id, sum(builds) AS builds, sum(cpu_seconds) AS cpu, "
+            "coalesce(sum(builds) FILTER (WHERE day > (now() AT TIME ZONE 'UTC')::date - %s), 0) "
+            "  AS builds_recent, "
+            "coalesce(sum(cpu_seconds) FILTER (WHERE day > (now() AT TIME ZONE 'UTC')::date - %s), 0) "
+            "  AS cpu_recent "
+            "FROM cpu_usage GROUP BY user_id", (days, days))
+        return {r["user_id"]: {"builds": int(r["builds"]), "cpu_seconds": round(r["cpu"], 1),
+                               "builds_recent": int(r["builds_recent"]),
+                               "cpu_seconds_recent": round(r["cpu_recent"], 1)} for r in rows}
+
+    def cpu_days(self, uid: str, days: int = 30) -> list[dict]:
+        """The user's CPU usage per day, newest first, for the last `days` days that had builds."""
+        return [{**r, "day": r["day"].isoformat(), "cpu_seconds": round(r["cpu_seconds"], 1),
+                 "wall_seconds": round(r["wall_seconds"], 1)}
+                for r in self.db.all("SELECT day, builds, cpu_seconds, wall_seconds FROM cpu_usage "
+                                     "WHERE user_id = %s ORDER BY day DESC LIMIT %s", (uid, days))]
+
     def recent_logins(self, uid: str, limit: int = 10) -> list[dict]:
         return self.db.all("SELECT at, last_seen, country, user_agent FROM login_events "
                            "WHERE user_id = %s ORDER BY at DESC LIMIT %s", (uid, limit))

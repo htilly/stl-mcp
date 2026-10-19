@@ -5,6 +5,10 @@ sandboxed worker processes (buildworker, OpenSCAD, scripts). The thread and the 
 here, and a snapshot reads their CPU time and memory from /proc (Linux) or `ps` (elsewhere).
 CPU % is measured between two snapshots (the admin page polls), so 100 % is one core busy and a
 multi-threaded build can show more. A thread has no memory of its own: only the processes count.
+
+What a job used in total is counted too: the thread's own CPU time, plus each worker process's
+CPU time from its exit status (wait4), minus what it had used before it joined the job (a warm
+buildworker's imports). jobs.Popen must start the processes for that; on_done gets the totals.
 """
 from __future__ import annotations
 
@@ -22,6 +26,10 @@ _ids = itertools.count(1)
 _local = threading.local()
 # ("p", pid) / ("t", tid) -> (cpu seconds, when, last rate)
 _prev: dict[tuple, tuple[float, float, float | None]] = {}
+# pid -> (job, its CPU seconds when it joined the job), until the process is reaped
+_owner: dict[int, tuple["Job", float]] = {}
+# called with (job, cpu seconds, wall seconds) when a job has run (the server stores it)
+on_done = None
 _TICK = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
 _PAGE = os.sysconf("SC_PAGE_SIZE") if hasattr(os, "sysconf") else 4096
 LINUX = sys.platform == "linux" and os.path.isdir("/proc/self/task")
@@ -36,6 +44,7 @@ class Job:
         self.started: float | None = None
         self.tid: int | None = None
         self.pids: set[int] = set()
+        self.cpu = 0.0          # CPU seconds of its thread and of its processes that have exited
 
 
 def start(user: dict, label: str, model: str | None = None) -> Job:
@@ -52,26 +61,39 @@ def finish(job: Job):
         _prev.pop(("t", job.tid), None)
         for pid in job.pids:
             _prev.pop(("p", pid), None)
+        for pid in [pid for pid, (j, _) in _owner.items() if j is job]:
+            del _owner[pid]
 
 
 def run_in(job: Job, fn, *a, **kw):
-    """Runs fn in the calling (worker) thread as this job: processes it starts are counted."""
+    """Runs fn in the calling (worker) thread as this job: processes it starts are counted, and
+    on_done gets what it used in total (here, in the worker thread: it may block)."""
     job.tid, job.started = threading.get_native_id(), time.time()
     _baseline(("t", job.tid))
     _local.job = job
+    t0 = time.thread_time()
     try:
         return fn(*a, **kw)
     finally:
         _local.job = None
+        job.cpu += time.thread_time() - t0
+        if on_done is not None:
+            try:
+                on_done(job, job.cpu, time.time() - job.started)
+            except Exception as e:    # statistics must never fail a build
+                print(f"jobs: could not record CPU usage: {e!r}", file=sys.stderr)
 
 
 def add_pid(pid: int):
     """A worker process started for the job running in this thread (if any)."""
     job = getattr(_local, "job", None)
     if job is not None:
+        base = _cpu(("p", pid))
         with _lock:
             job.pids.add(pid)
-        _baseline(("p", pid))
+            _owner[pid] = (job, base or 0.0)
+            if base is not None:
+                _prev[("p", pid)] = (base, time.monotonic(), None)
 
 
 def remove_pid(pid: int):
@@ -80,6 +102,23 @@ def remove_pid(pid: int):
         with _lock:
             job.pids.discard(pid)
             _prev.pop(("p", pid), None)
+
+
+class Popen(subprocess.Popen):
+    """subprocess.Popen that reaps with wait4, so a job's process adds its CPU time to the job."""
+
+    def _try_wait(self, wait_flags):   # the one place Popen reaps on POSIX (wait, poll, communicate)
+        try:
+            pid, sts, ru = os.wait4(self.pid, wait_flags)
+        except ChildProcessError:
+            return self.pid, 0         # what subprocess does: the status is lost
+        if pid == self.pid:
+            with _lock:
+                owner = _owner.pop(pid, None)
+            if owner is not None:
+                job, base = owner
+                job.cpu += max(0.0, ru.ru_utime + ru.ru_stime - base)
+        return pid, sts
 
 
 # ---------------------------------------------------------------- measuring
