@@ -162,6 +162,22 @@ export async function copyText(btn, text) {
 export const icon = (name, cls = "") =>
   `<svg class="i${cls ? " " + cls : ""}" aria-hidden="true"><use href="/static/icons.svg#i-${name}"/></svg>`;
 
+// What a model is made from (the gallery's "source": a recipe kind, or "stl"), as a badge.
+const SOURCES = {
+  stl: ["STL", "A plain mesh: an uploaded STL, no recipe to adjust"],
+  openscad: ["OpenSCAD", "OpenSCAD code: copy it to adjust the code and its variables"],
+  csg: ["Recipe", "A parametric CSG recipe: copy it to adjust its variables and shapes"],
+  enclosure: ["Enclosure", "A parametric enclosure: copy it to adjust walls, size and holes"],
+  primitive: ["Shape", "A single parametric shape"],
+  build123d: ["build123d", "Python CAD code (build123d): copy it to adjust the code"],
+  script: ["Python", "A Python script"],
+};
+export const sourceLabel = (source) => (SOURCES[source] || [source || "Model"])[0];
+export const sourceBadge = (source, cls = "") => {
+  const [label, title] = SOURCES[source] || [source || "Model", ""];
+  return `<span class="sbadge ${esc(source || "")}${cls ? " " + cls : ""}" title="${esc(title)}">${esc(label)}</span>`;
+};
+
 // Whether a model is private (only its owner) or public (in the gallery), as a badge.
 export const visBadge = (visibility, cls = "") => visibility === "public"
   ? `<span class="vbadge public${cls ? " " + cls : ""}" title="Public: in the gallery, anyone logged in can view and copy it">${icon("globe")}Public</span>`

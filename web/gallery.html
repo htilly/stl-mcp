@@ -44,7 +44,7 @@
   <p class="hint" id="err" hidden></p>
 </main>
 <script type="module">
-import { api, ago, fmt, esc, icon } from "/static/common.js";
+import { api, ago, fmt, esc, icon, sourceBadge, sourceLabel } from "/static/common.js";
 
 const $ = (id) => document.getElementById(id);
 let models = [];
@@ -57,7 +57,7 @@ function render() {
   const term = $("q").value.trim().toLowerCase();
   const shown = by ? models.filter((m) => m.maker === by) : models;
   const list = shown.filter((m) => !term
-    || `${m.name} ${m.id} ${m.description} ${m.owner_name}`.toLowerCase().includes(term));
+    || `${m.name} ${m.id} ${m.description} ${m.owner_name} ${sourceLabel(m.source)}`.toLowerCase().includes(term));
   const maker = shown[0];
   $("count").textContent = shown.length === 1 ? "1 model" : `${shown.length} models`;
   $("heading").textContent = by ? `Models by ${maker ? makerName(maker) : "this maker"}` : "Public models";
@@ -74,6 +74,7 @@ function render() {
     return `<div class="card">
       <a class="cover" href="/m/${encodeURIComponent(m.id)}">
         <div class="thumb"><img loading="lazy" alt="" src="/api/models/${encodeURIComponent(m.id)}/preview.png?v=${m.version}.2">
+          ${sourceBadge(m.source)}
           ${m.mine ? `<span class="vbadge public" title="You made this model public">${icon("globe")}Yours</span>` : ""}</div>
         <div class="name" title="${esc(m.name)}">${esc(m.name)}</div></a>
       <div class="by"><a class="maker" href="${byHref(m.maker)}" data-nav title="Everything ${esc(makerName(m))} made public">${avatar(m)}<span>${esc(makerName(m))}</span></a>

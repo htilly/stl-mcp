@@ -61,6 +61,7 @@ def test_owner_publishes_and_it_appears_in_the_gallery(world):
         g = c.get("/api/gallery").json()["models"]
         assert [(x["id"], x["owner_name"], x["mine"], x["copies"]) for x in g] == [("anns-box", "Ann", mine, 0)]
         assert "owner" not in g[0]  # user ids never reach other users
+        assert g[0]["source"] == "csg"
     assert world.bobc.get("/gallery", headers={"accept": "text/html"}).status_code == 200
 
 
@@ -182,3 +183,13 @@ def test_gallery_names_the_maker_and_filters_by_them(world):
     assert world.annc.get("/api/models/bobs-cup").json()["maker"] == g["bobs-cup"]["maker"]
     page = world.annc.get(f"/gallery?by={g['bobs-cup']['maker']}", headers={"accept": "text/html"})
     assert page.status_code == 200 and 'data-nav' in page.text
+
+
+def test_gallery_source_tells_a_plain_stl_from_openscad():
+    mesh = {"base": "0" * 64}
+    src = lambda kind, **p: server._source({"kind": kind, "params": p})
+    assert src("openscad", code='import("base.stl");', meshes=mesh) == "stl"
+    assert src("openscad", code=' import ( "base.stl" ) \n', meshes=mesh) == "stl"
+    assert src("openscad", code='difference() { import("base.stl"); cube(3); }', meshes=mesh) == "openscad"
+    assert src("openscad", code="cube(3);") == "openscad"
+    assert src("enclosure") == "enclosure"
