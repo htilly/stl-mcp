@@ -252,6 +252,7 @@ function renderSide() {
         <div class="dims">${fmt(p.extents_mm)}, ${p.volume_cm3} cm³</div>
         ${warnHtml(p, name)}</div>
       <a class="btn sm" href="${p.url}" download title="Download ${esc(name)} as STL">${icon("download", "sm")}STL</a>
+      <a class="btn sm" href="${p.url}?format=obj" download title="Download ${esc(name)} as OBJ">${icon("download", "sm")}OBJ</a>
     </div>`).join("");
   document.querySelectorAll(".fixbtn").forEach((b) => b.onclick = () => {
     const part = b.dataset.part, w = ver.parts[part].warnings?.[+b.dataset.i];

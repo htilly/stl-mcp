@@ -1838,6 +1838,14 @@ async def files(request):
         return PlainTextResponse("not found", status_code=404)
     # Version files never change, but only public ones may sit in shared caches (CDNs).
     scope = "public" if FILES_PUBLIC else "private"
+    if request.query_params.get("format") == "obj":
+        import trimesh
+        obj, _ = g.to_obj([(p.stem, trimesh.load(p), "")], "")
+        obj = obj.split("\n", 1)[1]  # no mtllib: a single part needs no .mtl
+        obj = "\n".join(l for l in obj.split("\n") if not l.startswith("usemtl"))
+        return Response(obj, media_type="model/obj", headers={
+            "Content-Disposition": f'attachment; filename="{request.path_params["id"]}_{p.stem}.obj"',
+            "Cache-Control": f"{scope}, max-age=31536000, immutable"})
     return FileResponse(p, media_type="model/stl", filename=f"{request.path_params['id']}_{p.name}",
                         headers={"Cache-Control": f"{scope}, max-age=31536000, immutable"})
 
