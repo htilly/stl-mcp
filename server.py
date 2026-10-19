@@ -1961,7 +1961,9 @@ async def api_admin_load(_):
                           "mem_mb": round(sum(j["mem_mb"] for j in mine), 1),
                           "jobs": mine})
         users.sort(key=lambda u: (-(u["cpu"] or 0), -len(u["jobs"]), u["display_name"].lower()))
+        hist = jobs.cpu_history()
         return {"system": snap["system"], "server": snap["server"], "users": users,
+                "host_cpu": hist[-1][1] if hist else None,
                 "limits": {"workers": buildworker.WORKERS, "builds_at_once": BUILDS_AT_ONCE,
                            "build_mem_mb": buildworker.MEM_MB, "build_timeout": buildworker.TIMEOUT}}
     return JSONResponse(await _run(collect))
