@@ -32,10 +32,11 @@
 </div>
 <main class="admin load">
   <h1>Load</h1>
-  <p class="msg">CPU and memory right now, per online user and per build job. Updated every 2 s.
-     100 % CPU is one core busy; a build that uses several cores shows more.</p>
+  <p class="msg">CPU and memory right now: the host, and per online user and build job. Updated every 2 s.
+     Host CPU counts every process on the machine with 100 % = all cores busy; everything else is
+     autosmith only, with 100 % = one core busy (a build that uses several cores shows more).</p>
   <section class="group server">
-    <h2>Server</h2>
+    <h2>Host</h2>
     <dl class="tb full" id="server"></dl>
     <p class="msg" style="margin: var(--s2) 0" id="limits"></p>
   </section>
@@ -81,10 +82,11 @@ function draw(d) {
   const used = s.mem_available_mb != null ? s.mem_total_mb - s.mem_available_mb : null;
   $("server").innerHTML = `
     <div><dt>Cores</dt><dd>${cpus}</dd></div>
+    <div><dt>Host CPU</dt><dd title="Every process on the host, 100 % = all cores busy">${d.host_cpu == null ? "–" : `${Math.round(d.host_cpu)} %`}</dd></div>
     <div><dt>Load 1 · 5 · 15 min</dt><dd>${s.load ? s.load.join(" · ") : "–"}</dd></div>
     <div><dt>Memory used</dt><dd>${used != null ? `${mb(used)} of ${mb(s.mem_total_mb)}` : s.mem_total_mb ? `${mb(s.mem_total_mb)} in all` : "–"}</dd></div>
-    <div><dt>Server process CPU</dt><dd>${bar(d.server.cpu, cpus)}</dd></div>
-    <div><dt>Server process memory</dt><dd>${mb(d.server.mem_mb)}</dd></div>`;
+    <div><dt>autosmith CPU</dt><dd title="The autosmith server process (not its build workers), 100 % = one core">${bar(d.server.cpu, cpus)}</dd></div>
+    <div><dt>autosmith memory</dt><dd>${mb(d.server.mem_mb)}</dd></div>`;
   const l = d.limits;
   $("limits").textContent = `Limits: ${l.workers} build workers server-wide, ${l.builds_at_once} builds at a time per user, ` +
     `${l.build_mem_mb} MB and ${l.build_timeout} s per build.`;

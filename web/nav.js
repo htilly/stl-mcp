@@ -99,9 +99,9 @@ function pulseHtml(d) {
   const disk = pctOf(d.disk_total_gb - d.disk_free_gb, d.disk_total_gb);
   const item = (cls, label, value, title) =>
     `<span class="pv ${cls}" title="${esc(title)}"><span class="k">${label}</span><b>${value}</b></span>`;
-  return `<span class="pv cpu${level(cpu)}" title="Whole machine, ${d.cpus} cores${d.load ? ` · load ${d.load.join(" / ")}` : ""}">
+  return `<span class="pv cpu${level(cpu)}" title="The whole host: every process on it, not just autosmith. 100 % = all ${d.cpus} cores busy${d.load ? ` · load ${d.load.join(" / ")}` : ""}">
       <svg class="spark" viewBox="0 0 64 20" preserveAspectRatio="none" aria-hidden="true">${spark(d.cpu, d.seconds)}</svg>
-      <span class="k">CPU</span><b>${cpu == null ? "–" : `${Math.round(cpu)}%`}</b></span>` +
+      <span class="k">Host CPU</span><b>${cpu == null ? "–" : `${Math.round(cpu)}%`}</b></span>` +
     (mem != null ? item(`mem${level(mem)}`, "Mem", `${mem}%`, `${Math.round((d.mem_total_mb - d.mem_available_mb) / 1024 * 10) / 10} of ${Math.round(d.mem_total_mb / 1024)} GB in use`) : "") +
     item(`builds${d.builds_waiting ? " warm" : ""}`, "Builds", d.builds_waiting ? `${d.builds_running}+${d.builds_waiting}` : d.builds_running,
       `${d.builds_running} running, ${d.builds_waiting} waiting`) +
