@@ -254,16 +254,21 @@ class Store:
             return sandbox.build(kind, params)
         raise ValueError(f"unknown kind '{kind}'")
 
-    def _built(self, kind: str, params: dict) -> tuple[dict, float]:
-        """Builds outside self.lock, so a slow build does not hold up everyone else's changes."""
+    def _built(self, kind: str, params: dict, scripts: bool = True) -> tuple[dict, float]:
+        """Builds outside self.lock, so a slow build does not hold up everyone else's changes.
+        scripts=False refuses script models: they run Python on the server, so only admins may
+        build them - checked here, where the code runs, whichever way the recipe got there
+        (a copy of a public script model, an update or revert that keeps the kind)."""
+        if kind == "script" and not scripts:
+            raise PermissionError("script models are for admins only")
         t0 = time.time()
         return self.build(kind, params), time.time() - t0
 
     def _new_version(self, m: dict, kind: str, params: dict, note: str,
-                     built: tuple[dict, float] | None = None) -> dict:
+                     built: tuple[dict, float] | None = None, scripts: bool = True) -> dict:
         t0 = time.time()
         if built is None:
-            built = self._built(kind, params)        # raises on error -> nothing is saved
+            built = self._built(kind, params, scripts)  # raises on error -> nothing is saved
         parts, seconds = built
         if not parts:
             raise ValueError("the build produced no parts")
@@ -294,8 +299,8 @@ class Store:
 
     # -- publikt
     def create(self, name: str, kind: str, params: dict, description: str = "",
-               note: str = "", owner: str | None = None) -> dict:
-        built = self._built(kind, params)
+               note: str = "", owner: str | None = None, scripts: bool = True) -> dict:
+        built = self._built(kind, params, scripts)
         with self.lock:
             base = slug(name)
             mid, i = base, 2
@@ -315,7 +320,7 @@ class Store:
     def update(self, mid: str, *, params: dict | None = None, changes: dict | None = None,
                remove: list[str] | None = None, note: str = "", name: str | None = None,
                description: str | None = None, resolves: list[str] | None = None,
-               kind: str | None = None) -> dict:
+               kind: str | None = None, scripts: bool = True) -> dict:
         """kind rebuilds the model with another builder (e.g. enclosure -> openscad) as a new
         version of the same model; it needs params, since the old recipe does not fit the new kind."""
         rebuild = params is not None or changes or remove
@@ -337,7 +342,7 @@ class Store:
         if rebuild:                                            # build outside the lock ...
             m = self._read(mid)
             before, (kind, newp) = head(m), recipe(m)
-            built = self._built(kind, newp)
+            built = self._built(kind, newp, scripts)
         with self.lock:
             m = self._read(mid)
             for cid in resolves or []:
@@ -350,7 +355,7 @@ class Store:
                     bits = [f"{k}={json.dumps(v, ensure_ascii=False)[:30]}" for k, v in (changes or {}).items()]
                     bits += [f"-{r}" for r in remove or []]
                     note = ", ".join(bits) or "new recipe"
-                self._new_version(m, kind, newp, note, built)
+                self._new_version(m, kind, newp, note, built, scripts)
             for cid in resolves or []:
                 c = self._comment(m, cid)
                 c["status"] = "resolved"
@@ -383,9 +388,9 @@ class Store:
                 n += 1
         return n
 
-    def revert(self, mid: str, version: int) -> dict:
+    def revert(self, mid: str, version: int, scripts: bool = True) -> dict:
         src = self.version(self._read(mid), version)          # versions never change
-        built = self._built(src["kind"], src["params"])
+        built = self._built(src["kind"], src["params"], scripts)
         with self.lock:
             m = self._read(mid)
             src = self.version(m, version)
@@ -405,14 +410,14 @@ class Store:
             self._write(m)
             return m
 
-    def duplicate(self, mid: str, name: str, owner: str | None = None) -> dict:
+    def duplicate(self, mid: str, name: str, owner: str | None = None, scripts: bool = True) -> dict:
         """Copies the current recipe into a new, private model owned by owner (default: the same
         owner). A copy of someone else's model records where it came from (copied_from)."""
         m = self._read(mid)
         cur = self.current(m)
         owner = owner if owner is not None else m.get("owner")
         new = self.create(name, cur["kind"], copy.deepcopy(cur["params"]), m.get("description", ""),
-                          f"copy of {mid} v{cur['version']}", owner=owner)
+                          f"copy of {mid} v{cur['version']}", owner=owner, scripts=scripts)
         if owner != m.get("owner"):
             with self.lock:
                 new = self._read(new["id"])
@@ -615,7 +620,8 @@ class StoreView:
         return self.admin or m.get("owner") == self.user["id"]
 
     def create(self, name: str, kind: str, params: dict, description: str = "", note: str = "") -> dict:
-        return self.store.create(name, kind, params, description, note, owner=self.user["id"])
+        return self.store.create(name, kind, params, description, note, owner=self.user["id"],
+                                 scripts=self.admin)
 
     def get(self, mid: str) -> dict:
         m = self.store.get(self._check(mid, read=True))
@@ -630,16 +636,17 @@ class StoreView:
         return self.store.list(self.user["id"], everyone=self.admin)
 
     def update(self, mid: str, **kw) -> dict:
-        return self.store.update(self._check(mid), **kw)
+        return self.store.update(self._check(mid), **kw, scripts=self.admin)
 
     def revert(self, mid: str, version: int) -> dict:
-        return self.store.revert(self._check(mid), version)
+        return self.store.revert(self._check(mid), version, scripts=self.admin)
 
     def set_current(self, mid: str, version: int) -> dict:
         return self.store.set_current(self._check(mid), version)
 
     def duplicate(self, mid: str, name: str) -> dict:
-        return self.store.duplicate(self._check(mid, read=True), name, owner=self.user["id"])
+        return self.store.duplicate(self._check(mid, read=True), name, owner=self.user["id"],
+                                    scripts=self.admin)
 
     def add_comment(self, mid: str, text: str, *a, **kw) -> dict:
         return self.store.add_comment(self._check(mid), text, *a, **kw)

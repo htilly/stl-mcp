@@ -321,7 +321,7 @@ def test_openscad_on_an_imported_mesh_for_a_member(fake_build):
     import trimesh
     joe = server.oauth.state.create_user("Joe")       # no admin needed
     stl = base64.b64encode(trimesh.creation.box((10, 20, 30)).export(file_type="stl")).decode()
-    server.import_file("scan", data_base64=stl, ctx=ctx(joe))
+    run(server.import_file("scan", data_base64=stl, ctx=ctx(joe)))
     s = run(server.create_from_openscad("Drilled", 'difference() { import("base.stl"); cylinder(d=3, h=99); }',
                                         meshes={"base": "scan.stl"}, ctx=ctx(joe)))
     assert s["parts"]["model"]["extents_mm"] == [10.0, 20.0, 30.0]
@@ -332,8 +332,8 @@ def test_openscad_on_an_imported_mesh_for_a_member(fake_build):
     s = run(server.update_model(s["model_id"], {"d": 4}, ctx=ctx(joe)))
     assert s["version"] == 2 and fake_build[-1]["base"] == fake_build[0]["base"]
     # replace the mesh with another file, keeping the code
-    server.import_file("bigger", data_base64=base64.b64encode(
-        trimesh.creation.box((40, 20, 30)).export(file_type="stl")).decode(), ctx=ctx(joe))
+    run(server.import_file("bigger", data_base64=base64.b64encode(
+        trimesh.creation.box((40, 20, 30)).export(file_type="stl")).decode(), ctx=ctx(joe)))
     s = run(server.update_model(s["model_id"], meshes={"base": "bigger.stl"}, ctx=ctx(joe)))
     assert s["parts"]["model"]["extents_mm"] == [40.0, 20.0, 30.0]
 
@@ -343,7 +343,7 @@ def test_meshes_only_from_files_the_user_can_read(fake_build):
     import trimesh
     joe, ann = server.oauth.state.create_user("Joe"), server.oauth.state.create_user("Ann")
     stl = base64.b64encode(trimesh.creation.box().export(file_type="stl")).decode()
-    server.import_file("secret", data_base64=stl, ctx=ctx(ann))
+    run(server.import_file("secret", data_base64=stl, ctx=ctx(ann)))
     with pytest.raises(FileNotFoundError):
         run(server.create_from_openscad("x", 'import("base.stl");', meshes={"base": "secret.stl"}, ctx=ctx(joe)))
     m = run(server.create_model("annbox", {"root": {"shape": "box", "size": [1, 1, 1]}}, ctx=ctx(ann)))

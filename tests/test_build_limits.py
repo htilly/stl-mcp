@@ -138,11 +138,11 @@ def test_a_change_that_lands_during_a_build_is_not_lost(out_dir):
     store.create("box", "csg", BOX)
     real, calls = store._built, []
 
-    def built(kind, params):
+    def built(kind, params, scripts=True):
         calls.append(params["vars"])
         if len(calls) == 1:                          # someone else saves meanwhile
             store.update("box", changes={"h": 7})
-        return real(kind, params)
+        return real(kind, params, scripts)
     store._built = built
     store.update("box", changes={"w": 30})
     cur = store.current(store.get("box"))

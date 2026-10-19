@@ -1,11 +1,14 @@
 """Fixes from the security review: what tokens may reach, rate limits, local mode, anonymous
 reads, headers, error messages and resource limits."""
 import asyncio
+import inspect
 import io
+import threading
 import time
 import zipfile
 from types import SimpleNamespace
 
+import httpx
 import pytest
 import trimesh
 from starlette.testclient import TestClient
@@ -326,3 +329,112 @@ def test_refused_token_and_token_creation_are_logged(client, caplog):
     assert any('"token_refused"' in e for e in events)
     assert any('"token_created"' in e for e in events)
     assert all(raw not in e for e in events)
+
+
+# ---- script models: admins only, checked where the code runs (review 2026-10: O-002)
+
+SCRIPT = {"code": "result = g.blk(2, 3, 4, 0, 0, 0)"}
+
+
+@pytest.fixture
+def scripts_on(out_dir, monkeypatch):
+    monkeypatch.setattr(server.store, "allow_script", True)
+    admin = server._admin()
+    joe = server.oauth.state.create_user("Joe")
+    m = server.store.create("Pub script", "script", SCRIPT, owner=admin["id"])
+    server.store.set_visibility(m["id"], "public")
+    return admin, joe, m["id"]
+
+
+def test_member_cannot_copy_a_public_script_model(scripts_on):
+    admin, joe, mid = scripts_on
+    with pytest.raises(PermissionError, match="admins only"):
+        asyncio.run(server.duplicate_model(mid, "mine", ctx=_ctx(joe)))
+    assert not [m for m in server.store.list(joe["id"], everyone=False)]
+
+
+def test_member_cannot_rebuild_or_revert_a_script_model_they_own(scripts_on):
+    admin, joe, _ = scripts_on
+    # e.g. copied before this check existed, or created while they were an admin
+    mid = server.store.create("Old copy", "script", SCRIPT, owner=joe["id"])["id"]
+    with pytest.raises(PermissionError, match="admins only"):
+        asyncio.run(server.update_model(mid, params={"code": "result = g.blk(1, 1, 1, 0, 0, 0)"},
+                                        ctx=_ctx(joe)))
+    with pytest.raises(PermissionError, match="admins only"):
+        asyncio.run(server.revert_model(mid, 1, ctx=_ctx(joe)))
+    # renaming does not run the code and stays allowed
+    assert asyncio.run(server.update_model(mid, name="Renamed", ctx=_ctx(joe)))["name"] == "Renamed"
+
+
+def test_admin_still_builds_script_models(scripts_on):
+    admin, _, mid = scripts_on
+    s = asyncio.run(server.duplicate_model(mid, "copy", ctx=_ctx(admin)))
+    assert s["kind"] == "script"
+    s = asyncio.run(server.update_model(s["model_id"], params={"code": "result = g.blk(1, 1, 1, 0, 0, 0)"},
+                                        ctx=_ctx(admin)))
+    assert s["parts"]["model"]["extents_mm"] == [1.0, 1.0, 1.0]
+
+
+# ---- import_file: whole-download deadline, off the event loop (review 2026-10: O-001)
+
+class _Trickle(httpx.SyncByteStream):
+    """A response body that arrives one small chunk at a time."""
+
+    def __iter__(self):
+        for _ in range(50):
+            time.sleep(0.05)
+            yield b"x"
+
+
+def test_fetch_gives_up_after_the_total_deadline(monkeypatch):
+    monkeypatch.setattr(server, "ALLOW_PRIVATE_URLS", True)
+    monkeypatch.setattr(server, "FETCH_SECONDS", 0.3)
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, stream=_Trickle()))
+    real = httpx.Client
+    monkeypatch.setattr(server.httpx, "Client", lambda **kw: real(transport=transport, **kw))
+    t0 = time.monotonic()
+    with pytest.raises(TimeoutError, match="longer than 0.3 s"):
+        server._fetch("http://files.test/slow.stl")
+    assert time.monotonic() - t0 < 1.5
+
+
+def test_import_file_downloads_in_a_worker_thread(out_dir, monkeypatch):
+    seen = []
+    stl = trimesh.creation.box().export(file_type="stl")
+
+    def fake_fetch(url):
+        seen.append(threading.current_thread() is threading.main_thread())
+        return stl, "stl"
+
+    monkeypatch.setattr(server, "_fetch", fake_fetch)
+    assert inspect.iscoroutinefunction(server.import_file)
+    info = asyncio.run(server.import_file("remote", url="https://example.com/m.stl"))
+    assert info["file"] == "remote.stl" and seen == [False]
+
+
+# ---- wrong bearer tokens are throttled and logged; weak MCP_TOKEN (review 2026-10: O-003)
+
+def test_wrong_bearer_tokens_are_throttled_per_ip(client, monkeypatch, caplog):
+    monkeypatch.setattr(server, "bad_tokens", server.RateLimiter(3, 60))
+    with caplog.at_level("WARNING", logger="autosmith.security"):
+        for i in range(3):
+            assert client.get("/api/models", headers=bearer(f"guess-{i}")).status_code == 401
+    assert client.get("/api/models", headers=bearer("guess-4")).status_code == 429
+    assert client.get("/api/models", headers=bearer("secret")).status_code == 429  # locked out for now
+    events = [r.getMessage() for r in caplog.records if r.name == "autosmith.security"]
+    assert sum('"bearer_refused"' in e for e in events) == 3
+    assert all("guess-" not in e for e in events)
+
+
+def test_right_bearer_tokens_are_not_counted(client, monkeypatch):
+    monkeypatch.setattr(server, "bad_tokens", server.RateLimiter(2, 60))
+    for _ in range(5):
+        assert client.get("/api/models", headers=bearer("secret")).status_code == 200
+
+
+@pytest.mark.parametrize("token, verdict", [
+    ("", ""), ("change-me", "refuse"), ("Secret", "refuse"), ("short-but-real", "warn"),
+    ("0123456789abcdef0123456789abcdef", ""),
+])
+def test_token_problem(token, verdict):
+    assert server.token_problem(token)[0] == verdict
