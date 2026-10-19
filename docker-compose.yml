@@ -27,9 +27,38 @@ services:
       FILES_PUBLIC: ${FILES_PUBLIC:-0}
       UI_PUBLIC: ${UI_PUBLIC:-0}
       OAUTH: ${OAUTH:-1}
-    volumes: ["${DATA_DIR:-./data}:/data"]
+      SANDBOX_SOCKET: /run/sandbox/sandbox.sock
+    volumes:
+      - "${DATA_DIR:-./data}:/data"
+      - sandbox-run:/run/sandbox
     depends_on:
       postgres: {condition: service_healthy}
+      sandbox: {condition: service_started}
+
+  # The Python sandbox for build123d and script models (sandboxd.py): the same image, but
+  # without network, data, secrets or a writable root file system. The server reaches it only
+  # through the socket in the shared sandbox-run volume. Set SANDBOX_RUNTIME=runsc to run it
+  # under gVisor where that is installed.
+  sandbox:
+    build: .
+    restart: unless-stopped
+    entrypoint: ["python", "sandboxd.py"]
+    runtime: ${SANDBOX_RUNTIME:-runc}
+    network_mode: none
+    read_only: true
+    tmpfs: ["/tmp:size=1g,mode=1777"]
+    cap_drop: [ALL]
+    # start each job as its slot's own user, kill whatever a job leaves behind
+    cap_add: [SETUID, SETGID, KILL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: ${SANDBOX_MEM_LIMIT:-4g}
+    cpus: ${SANDBOX_CPUS:-2}
+    pids_limit: 512
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      SANDBOX_SLOTS: ${SANDBOX_SLOTS:-2}
+      SANDBOX_TIMEOUT: ${SANDBOX_TIMEOUT:-60}
+    volumes: [sandbox-run:/run/sandbox]
 
   # Users, logins and tokens. Back it up with pg_dump (see README "Storage").
   postgres:
@@ -72,5 +101,6 @@ services:
     depends_on: [stl-mcp]
 
 volumes:
+  sandbox-run:
   caddy_data:
   caddy_config:

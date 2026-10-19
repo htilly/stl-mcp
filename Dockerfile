@@ -16,7 +16,7 @@ ADD https://github.com/Irev-Dev/Round-Anything/archive/${ROUND_ANYTHING_COMMIT}.
 ADD https://github.com/kennetek/gridfinity-rebuilt-openscad/archive/${GRIDFINITY_COMMIT}.tar.gz /tmp/scad/gridfinity-rebuilt-openscad.tar.gz
 ADD https://github.com/openscad/MCAD/archive/${MCAD_COMMIT}.tar.gz /tmp/scad/MCAD.tar.gz
 RUN apt-get update \
- && apt-get install -y --no-install-recommends openscad \
+ && apt-get install -y --no-install-recommends openscad libgl1 libexpat1 \
  && rm -rf /var/lib/apt/lists/* \
  && cd /tmp/scad \
  && for f in *.tar.gz; do \
@@ -33,6 +33,8 @@ RUN apt-get update \
  && rm -rf /tmp/scad \
  && chmod -R a-w /opt/openscad-libs
 ENV OPENSCAD_LIBS=/opt/openscad-libs
+# build123d (OpenCascade, needs libgl1 and libexpat1 above) is only imported by the sandbox service, which runs
+# this same image with `python sandboxd.py` (see docker-compose.yml and sandboxd.py).
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY *.py ./

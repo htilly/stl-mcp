@@ -387,6 +387,16 @@ main.lib { padding: var(--s5) var(--s5) var(--s4); max-width: 1440px; margin: 0 
 .vbadge .i { width: 13px; height: 13px; stroke-width: 2; }
 .vbadge.public { background: #2563eb; color: #fff; border-color: transparent; }
 .vbadge.inline { position: static; vertical-align: 1px; }
+/* what a model is made from (gallery): top left of the thumbnail */
+.sbadge {
+  position: absolute; top: var(--s2); left: var(--s2);
+  display: inline-flex; align-items: center; height: 22px; padding: 0 8px;
+  border-radius: 99px; font-size: var(--t-xs); font-weight: 700; letter-spacing: .01em;
+  background: rgb(255 255 255 / .9); color: #475161; border: 1px solid rgb(16 24 40 / .1);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+.sbadge.stl { background: #475161; color: #fff; border-color: transparent; }
+.sbadge.openscad { background: #f9d71c; color: #3b3200; border-color: transparent; }
 /* a card with more than one link (gallery): .cover is the card's link, the maker link sits on top */
 div.card { position: relative; }
 div.card:hover .name { color: var(--layout); }

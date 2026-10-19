@@ -196,7 +196,7 @@ def test_tools_are_registered():
         "reply_to_comment", "render_model", "list_models", "revert_model", "duplicate_model",
         "delete_model", "import_file", "file_info", "modify_file", "split_file", "export_obj",
         "list_files", "delete_file", "check_print", "whoami", "lookup_part", "print_guide",
-        "import_outline", "create_relief"}
+        "import_outline", "create_relief", "create_from_build123d"}
 
 
 def test_create_model(out_dir):

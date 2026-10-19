@@ -284,7 +284,8 @@ page). It requires `PUBLIC_URL` on https (or localhost); `OAUTH=0` turns it off.
 | `create_model` | new model from a CSG spec (shapes, boolean operations, transforms, variables) |
 | `create_enclosure` | box + lid with corner screws, standoffs, cutouts and lid holes |
 | `create_from_openscad` | OpenSCAD code with the bundled libraries (BOSL2, NopSCADlib, Round-Anything, Gridfinity, MCAD), sandboxed; see below |
-| `create_from_script` | arbitrary trimesh Python (requires `ALLOW_SCRIPT=1`, runs code on the server!) |
+| `create_from_build123d` | real CAD in [build123d](https://github.com/gumyr/build123d) Python (fillets, shells, holes on faces) with a STEP file per version; runs in the [Python sandbox](#python-sandbox-build123d-and-script-models) |
+| `create_from_script` | trimesh Python; in the sandbox, or without it only for admins with `ALLOW_SCRIPT=1` (runs code on the server!) |
 | `update_model` | change variables/parameters or any value via JSON pointer → new version |
 | `get_model` | the recipe, dimensions, history and open comments (with `near_nodes`) |
 | `reply_to_comment` | reply to a comment, optionally marking it resolved |
@@ -292,9 +293,9 @@ page). It requires `PUBLIC_URL` on https (or localhost); `OAUTH=0` turns it off.
 | `list_models`, `revert_model`, `duplicate_model`, `delete_model` | `duplicate_model` also copies someone else's public model |
 | `set_visibility` | make a model `public` (listed in the gallery) or `private` again |
 | `whoami` | the account the connection is signed in as |
-| `lookup_part` | size and mounting holes of common boards and parts (Raspberry Pi, Arduino, ESP32, 18650 ...) |
+| `lookup_part` | size and mounting holes of common boards and parts (ESP32 boards from Espressif, Seeed, LOLIN, Adafruit, LILYGO and M5Stack, Raspberry Pi, Arduino, fans, NEMA 17, modules ...) |
 | `print_guide` | rules of thumb for FDM: walls, clearances, screw/insert/nut hole sizes, overhangs |
-| `import_file` | imports STL/OBJ/GLB/PLY/OFF via `url` or `data_base64` (zip with obj+mtl is unpacked) |
+| `import_file` | imports STL/OBJ/GLB/PLY/OFF and STEP (in the sandbox) via `url` or `data_base64` (zip with obj+mtl is unpacked) |
 | `import_outline` | an SVG or DXF file as a named outline for `{"shape": "svg", "outline": name}` profiles |
 | `create_relief` | a lithophane or an embossed relief plate from a picture (PNG/JPEG) |
 | `file_info` | dimensions, bounds, volume, number of loose parts |
@@ -450,6 +451,52 @@ standing up) or an embossed `relief` plate (base + brightness × height). The pi
 the recipe as a small grayscale PNG (longest side `pixels`, default 300), one grid point per
 pixel, and every number can be changed later with `update_model`.
 
+### Python sandbox: build123d and script models
+`create_from_build123d(name, code, vars=None, tolerance=0.02)` lets Claude write
+[build123d](https://github.com/gumyr/build123d), a Python CAD library on OpenCascade: fillets
+and chamfers on chosen edges, shells with an even wall, holes and counterbores placed on faces,
+lofts and sweeps. `from build123d import *` is already done; the code sets `result` (or
+`parts = {"body": ..., "lid": ...}`):
+```python
+width = 60; depth = 40; height = 25; wall = 2
+with BuildPart() as box:
+    Box(width, depth, height)
+    fillet(box.edges().filter_by(Axis.Z), radius=5)
+    offset(amount=-wall, openings=box.faces().sort_by(Axis.Z)[-1])   # open-top shell
+    with Locations(box.faces().sort_by(Axis.Z)[0]):                  # on the bottom face
+        with GridLocations(width / 2, depth / 2, 2, 2):
+            CounterBoreHole(radius=1.7, counter_bore_radius=3, counter_bore_depth=1)
+result = box
+```
+Top-level variables work like OpenSCAD's: `update_model(id, {"width": 80})` replaces the value
+of `width = 60` without touching the code. Every version also gets the exact CAD model as
+`model.step` (the **STEP** button in the 3D view, `step_url` for Claude), and `import_file`
+reads STEP files too.
+
+Python is never run in the server's container. It goes to the **sandbox service**
+(`sandboxd.py`, service `sandbox` in `docker-compose.yml`): the same image, started with
+`python sandboxd.py`, that the server reaches only through a Unix socket in a shared volume
+(`SANDBOX_SOCKET`). The container has no network, no data volume, no secrets, a read-only root
+file system with a small `/tmp`, all capabilities dropped except `SETUID`/`SETGID`/`KILL`,
+`no-new-privileges`, and memory, CPU and pid limits; `SANDBOX_RUNTIME=runsc` runs it under
+gVisor. Inside, every job is a fresh process that runs as the uid of its slot (so concurrent
+jobs cannot see each other's files and `RLIMIT_NPROC` stops fork bombs), with rlimits, a
+wall-clock timeout (`SANDBOX_TIMEOUT`, default 60 s) and a capped reply; whatever a job leaves
+running is killed before its slot is used again. The reply is plain arrays and the STEP bytes,
+which the server checks before using them.
+
+With the sandbox, `create_from_script` is available to every user and `ALLOW_SCRIPT` is not
+needed. Without it (`SANDBOX_SOCKET` unset), build123d and STEP import are off and script models
+are back to admins-only behind `ALLOW_SCRIPT=1`. The sandbox tests (`tests/test_sandbox.py`)
+start a daemon on a temporary socket; run as root they also exercise the per-slot users.
+
+On a server with its own compose file, copy the `sandbox` service from `docker-compose.yml`
+(same image, `entrypoint: ["python", "sandboxd.py"]` and all its security settings, no env
+file and no other volumes, so it sees no secret), mount the same named volume on
+`/run/sandbox` in the server's service and set `SANDBOX_SOCKET=/run/sandbox/sandbox.sock` there.
+The deploy workflow recreates a service called `stl-mcp-sandbox` before `stl-mcp` when the
+compose file has one.
+
 ### Reference material for the AI
 `lookup_part` and `print_guide` (also MCP resources: `autosmith://guides/printing` and
 `autosmith://parts/<key>`) give Claude real sizes instead of guesses: board outlines and mounting
@@ -569,8 +616,11 @@ Always set `MCP_TOKEN` and put the server behind HTTPS. The web interface requir
 (passkey or token, kept as a signed session cookie for 90 days) unless `UI_PUBLIC=1`, which makes it readable by everyone while changes still require a token.
 `FILES_PUBLIC=1` only makes the STL links clickable without a token (model ids are guessable); for
 anonymous visitors, `UI_PUBLIC` and `FILES_PUBLIC` cover the bootstrap admin's own models and
-models their owners made public, never other users' private ones. Keep `ALLOW_SCRIPT` off if the server is reachable from outside; script models
-run with an empty environment, so they cannot read `MCP_TOKEN` or `DATABASE_URL`. `/upload/*`
+models their owners made public, never other users' private ones. Python (build123d and script
+models, STEP import) runs only in the [sandbox container](#python-sandbox-build123d-and-script-models).
+Keep `ALLOW_SCRIPT` off if the server is reachable from outside: it runs script models without
+the sandbox, in the server's own container (with an empty environment, so they cannot read
+`MCP_TOKEN` or `DATABASE_URL`, but nothing more). `/upload/*`
 always requires a token when `MCP_TOKEN` is set. The CSG spec is safe to let Claude write: builds
 are capped (expression size, numbers up to 1e12, at most 5 million triangles), and imports refuse
 zip files that unpack to more than `MAX_UNZIPPED_MB` (200) or meshes over `MAX_IMPORT_FACES`.
