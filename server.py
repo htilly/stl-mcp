@@ -1174,6 +1174,7 @@ mcp_seen: dict[str, float] = {}
 # Open web pages per user (their /api/events streams), for "who is online" on the admin Load page.
 web_open: dict[str, int] = {}
 ONLINE_MCP_SECONDS = 600  # MCP traffic this recent counts as online
+pulse_seen: dict[str, float] = {}  # admins whose header polls /api/admin/pulse (every 5 s)
 
 
 def _claude_connected(user: dict) -> bool:
@@ -1856,15 +1857,38 @@ async def page_admin_load(_):
     return FileResponse(WEB / "load.html")
 
 
+def _online(building=()) -> set[str]:
+    """Users online now: an open web page (or admin page), MCP traffic in the last
+    ONLINE_MCP_SECONDS, or a build."""
+    now = time.time()
+    return ({u for u, n in web_open.items() if n > 0}
+            | {u for u, t in pulse_seen.items() if now - t < 20}
+            | {u for u, t in mcp_seen.items() if now - t < ONLINE_MCP_SECONDS} | set(building))
+
+
+async def api_admin_pulse(request):
+    """The admin bar in the header: machine CPU over the last minutes, memory, disk, builds and
+    who is online. Cheap: nothing here reads the database."""
+    pulse_seen[_user(request)["id"]] = time.time()  # an admin page open counts as online
+    def collect():
+        sysinfo, c = jobs.system(), jobs.counts()
+        disk = shutil.disk_usage(DATA)
+        return {"cpu": jobs.cpu_history(), "seconds": jobs.PULSE_SECONDS, "cpus": sysinfo["cpus"],
+                "load": sysinfo["load"], "mem_total_mb": sysinfo["mem_total_mb"],
+                "mem_available_mb": sysinfo["mem_available_mb"],
+                "disk_free_gb": round(disk.free / 1e9, 1), "disk_total_gb": round(disk.total / 1e9, 1),
+                "builds_running": c["running"], "builds_waiting": c["waiting"],
+                "online": len(_online(c["users"]))}
+    return JSONResponse(await _run(collect))
+
+
 async def api_admin_load(_):
     """Live CPU and memory: the machine, the server process, and per online user their running
     and waiting jobs (see jobs.py). Online = an open web page, recent MCP traffic or a job."""
     def collect():
         snap = jobs.snapshot()
         now = time.time()
-        ids = ({u for u, n in web_open.items() if n > 0}
-               | {u for u, t in mcp_seen.items() if now - t < ONLINE_MCP_SECONDS}
-               | {j["user"] for j in snap["jobs"]})
+        ids = _online({j["user"] for j in snap["jobs"]})
         users = []
         for uid in ids:
             u = oauth.state.user(uid) or {"display_name": "", "email": None, "role": "member"}
@@ -1873,6 +1897,7 @@ async def api_admin_load(_):
             users.append({"id": uid, "display_name": u.get("display_name") or "",
                           "email": u.get("email"), "role": u.get("role"),
                           "web_pages": web_open.get(uid, 0),
+                          "admin_page": now - pulse_seen.get(uid, 0) < 20,
                           "mcp_seconds_ago": round(now - mcp_seen[uid]) if uid in mcp_seen else None,
                           "cpu": round(sum(cpus), 1) if cpus else (0.0 if not mine else None),
                           "mem_mb": round(sum(j["mem_mb"] for j in mine), 1),
@@ -2486,6 +2511,7 @@ def _move_legacy_files(lib: Lib) -> int:
 @contextlib.asynccontextmanager
 async def lifespan(app):
     await _run(startup)
+    jobs.cpu_history()  # starts sampling the machine's CPU, so the admin bar has a history
     async with mcp_app.router.lifespan_context(app):
         yield
 
@@ -2509,6 +2535,7 @@ app = Starlette(
         Route("/admin/users", page_admin_users),
         Route("/admin/load", page_admin_load),
         Route("/api/admin/load", api_admin_load),
+        Route("/api/admin/pulse", api_admin_pulse),
         Route("/api/admin/users", api_admin_users),
         Route("/api/admin/users/{id}/logins", api_admin_user_logins),
         Route("/api/admin/users/{id}", api_admin_user, methods=["POST", "DELETE"]),
