@@ -74,7 +74,57 @@ export async function mountUserMenu(el) {
       location.href = "/";
     }
   });
+  if (auth?.user?.role === "admin") mountPulse(el.closest("header.top"));
   return auth;
+}
+
+// ---- the admin bar: server load at a glance in the app bar, on every page an admin sees
+
+const pctOf = (part, whole) => (whole ? Math.round((100 * part) / whole) : null);
+const level = (v) => (v == null ? "" : v >= 85 ? " hot" : v >= 60 ? " warm" : "");
+
+function spark(points, seconds) {
+  // the last 5 minutes on a fixed time axis, 0-100 %; gaps (no samples yet) stay empty
+  const W = 64, H = 20, span = 60 * seconds, now = Date.now() / 1000;
+  const xy = points.filter(([t]) => now - t <= span)
+    .map(([t, v]) => `${(W - ((now - t) / span) * W).toFixed(1)},${(H - 1 - (Math.min(v, 100) / 100) * (H - 2)).toFixed(1)}`);
+  if (!xy.length) return "";
+  const first = xy[0].split(",")[0], last = xy[xy.length - 1].split(",")[0];
+  return `<path class="area" d="M${first},${H} L${xy.join(" L")} L${last},${H} Z"/><polyline points="${xy.join(" ")}"/>`;
+}
+
+function pulseHtml(d) {
+  const cpu = d.cpu.length ? d.cpu[d.cpu.length - 1][1] : null;
+  const mem = d.mem_available_mb != null ? pctOf(d.mem_total_mb - d.mem_available_mb, d.mem_total_mb) : null;
+  const disk = pctOf(d.disk_total_gb - d.disk_free_gb, d.disk_total_gb);
+  const item = (cls, label, value, title) =>
+    `<span class="pv ${cls}" title="${esc(title)}"><span class="k">${label}</span><b>${value}</b></span>`;
+  return `<span class="pv cpu${level(cpu)}" title="Whole machine, ${d.cpus} cores${d.load ? ` · load ${d.load.join(" / ")}` : ""}">
+      <svg class="spark" viewBox="0 0 64 20" preserveAspectRatio="none" aria-hidden="true">${spark(d.cpu, d.seconds)}</svg>
+      <span class="k">CPU</span><b>${cpu == null ? "–" : `${Math.round(cpu)}%`}</b></span>` +
+    (mem != null ? item(`mem${level(mem)}`, "Mem", `${mem}%`, `${Math.round((d.mem_total_mb - d.mem_available_mb) / 1024 * 10) / 10} of ${Math.round(d.mem_total_mb / 1024)} GB in use`) : "") +
+    item(`builds${d.builds_waiting ? " warm" : ""}`, "Builds", d.builds_waiting ? `${d.builds_running}+${d.builds_waiting}` : d.builds_running,
+      `${d.builds_running} running, ${d.builds_waiting} waiting`) +
+    item("online", "Online", d.online, "Users with a page open, Claude active in the last 10 min, or a build running") +
+    item(`disk${level(disk)}`, "Disk", `${d.disk_free_gb} GB`, `${d.disk_free_gb} GB free of ${d.disk_total_gb} GB (model storage)`);
+}
+
+function mountPulse(header) {
+  if (!header || header.querySelector(".pulse")) return;
+  const el = document.createElement("a");
+  el.className = "pulse";
+  el.href = "/admin/load";
+  el.setAttribute("aria-label", "Server load: open the Load page");
+  (header.querySelector(":scope > .grow") || header.lastElementChild).before(el);
+  let timer = null;
+  const tick = async () => {
+    clearTimeout(timer);
+    try { el.innerHTML = pulseHtml(await api("/api/admin/pulse")); el.hidden = false; }
+    catch { el.hidden = true; }
+    if (!document.hidden) timer = setTimeout(tick, 5000);
+  };
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) tick(); });
+  tick();
 }
 
 document.querySelectorAll("[data-usermenu]").forEach((el) => mountUserMenu(el));
