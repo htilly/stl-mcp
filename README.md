@@ -231,8 +231,8 @@ or set `DOMAIN` and run `docker compose --profile caddy up -d` for automatic HTT
 
 **Deploy:** merging to `main` builds the image on GitHub and deploys it to autosmith.eu.
 
-Open `http://localhost:8765/` and log in with the token, or go to `/?token=<token>`, which
-sets a session cookie for the admin account (`ADMIN_EMAILS`, the first entry). Then add a passkey (the banner in the library, or 🔑 in the header):
+Open `http://localhost:8765/?admin` and log in with the token, which sets a session cookie for
+the admin account (`ADMIN_EMAILS`, the first entry). Then add a passkey (the banner in the library, or 🔑 in the header):
 from then on, logging in is one tap with Face ID, Touch ID or your password manager. Passkeys
 are bound to the host name in `PUBLIC_URL`.
 
@@ -640,9 +640,11 @@ OpenSCAD code is safe too (it is checked and sandboxed, see [OpenSCAD models](#o
 Every login belongs to a user. `MCP_TOKEN` logs in as the bootstrap admin; without it set, every
 request runs as that admin (local single-user mode), so the server then listens on `127.0.0.1`
 only, accepts only requests addressed to `localhost` or `PUBLIC_URL` (no DNS rebinding), and
-refuses to start with `SIGNUP`, `UI_PUBLIC`, `FILES_PUBLIC` or `ALLOW_SCRIPT`. `?token=<MCP_TOKEN>`
-is only a login link for pages: it works on a page load (and is swapped for a session cookie at
-once), never for API writes or `/mcp`.
+refuses to start with `SIGNUP`, `UI_PUBLIC`, `FILES_PUBLIC` or `ALLOW_SCRIPT`. `MCP_TOKEN`
+is never accepted in a URL (where it would end up in proxy logs and browser history): pages log in
+with the login page's token form (`POST /auth/token`), everything else uses the `Authorization`
+header. Wrong tokens are limited per client IP (`BAD_TOKENS_PER_MINUTE`). Request bodies are
+limited too: `MAX_BODY_MB` (default 8) for JSON, `MAX_UPLOAD_MB` for uploads and MCP messages.
 
 Personal tokens and connected apps (OAuth) reach `/mcp` and the model library only. Account
 settings, passkeys, tokens, account deletion and the admin pages need a browser session (or the

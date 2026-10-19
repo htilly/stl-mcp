@@ -78,11 +78,34 @@ def test_mcp_token_bearer_keeps_full_access(client):
     assert client.get("/api/admin/users", headers=bearer("secret")).status_code == 200
 
 
-# ---- ?token= is only a login link for pages (O-011)
+# ---- MCP_TOKEN is never accepted in the URL (O-011; review 2026-10: O-004)
 
-def test_query_token_logs_in_a_page_load(client):
-    r = client.get("/?token=secret")
-    assert r.status_code == 303 and server.SESSION_COOKIE in r.cookies
+def test_query_token_no_longer_logs_in(client):
+    r = client.get("/?token=secret", headers={"Accept": "text/html"})
+    assert r.status_code == 401 and server.SESSION_COOKIE not in r.cookies
+    assert client.get("/api/models?token=secret").status_code == 401
+
+
+def test_token_form_logs_in_and_keeps_the_token_out_of_urls(client, caplog):
+    with caplog.at_level("WARNING", logger="autosmith.security"):
+        r = client.post("/auth/token", data={"token": "secret", "next": "/gallery?x=1"})
+    assert r.status_code == 303 and r.headers["location"] == "/gallery?x=1"
+    assert server.SESSION_COOKIE in r.cookies and "secret" not in r.headers["location"]
+    assert any('"token_login"' in m.getMessage() for m in caplog.records)
+
+
+def test_token_form_refuses_wrong_tokens_and_open_redirects(client, monkeypatch):
+    monkeypatch.setattr(server, "bad_tokens", server.RateLimiter(2, 60))
+    r = client.post("/auth/token", data={"token": "guess", "next": "//evil.example/x"})
+    assert r.status_code == 303 and r.headers["location"].startswith("/?sso_error=")
+    assert server.SESSION_COOKIE not in r.cookies
+    client.post("/auth/token", data={"token": "guess2"})
+    assert client.post("/auth/token", data={"token": "secret"}).status_code == 429
+
+
+def test_token_form_refuses_cross_origin_posts(client):
+    r = client.post("/auth/token", data={"token": "secret"}, headers={"Origin": "https://evil.example"})
+    assert r.status_code == 403
 
 
 def test_query_token_is_not_accepted_for_api_writes_or_mcp(client):
@@ -501,3 +524,49 @@ def test_comments_per_model_are_capped(out_dir, monkeypatch):
     server.store.add_comment("box", "two")
     with pytest.raises(ValueError, match="2 comments"):
         server.store.add_comment("box", "three")
+
+
+# ---- request bodies are limited, also before a login (review 2026-10: A-007)
+
+def test_oversized_body_is_refused_by_content_length(client, monkeypatch):
+    monkeypatch.setattr(server, "MAX_BODY", 1000)
+    r = client.post("/auth/passkey/login/verify", content=b"{" + b" " * 2000 + b"}",
+                    headers={"Content-Type": "application/json"})
+    assert r.status_code == 413
+
+
+def test_oversized_streamed_body_is_refused(client, monkeypatch):
+    monkeypatch.setattr(server, "MAX_BODY", 1000)
+    chunks = (b"x" * 400 for _ in range(5))   # no Content-Length: chunked
+    r = client.post("/api/models/x", content=chunks, headers={"Content-Type": "application/json",
+                                                             **bearer("secret")})
+    assert r.status_code == 413 and "larger than" in r.json()["error"]
+
+
+def test_uploads_and_mcp_get_their_own_limits(monkeypatch):
+    monkeypatch.setattr(server, "MAX_BODY", 10)
+    assert server.body_limit("/api/models") == 10
+    assert server.body_limit("/upload/a.stl") == server.MAX_UPLOAD
+    assert server.body_limit("/mcp") > server.MAX_UPLOAD  # base64 imports
+
+
+# ---- stored recipes, names and notes are size-capped (review 2026-10: O-005)
+
+def test_recipe_size_is_capped(out_dir, monkeypatch):
+    monkeypatch.setattr(store_mod, "MAX_RECIPE_BYTES", 500)
+    big = {"root": {"shape": "box", "size": [5, 5, 5]}, "vars": {f"v{i}": i for i in range(200)}}
+    with pytest.raises(ValueError, match="recipe"):
+        server.store.create("big", "csg", big)
+    server.store.create("box", "csg", BOX)
+    with pytest.raises(ValueError, match="recipe"):
+        server.store.update("box", params=big)
+
+
+def test_names_descriptions_and_notes_are_capped(out_dir):
+    with pytest.raises(ValueError, match="name"):
+        server.store.create("x" * 201, "csg", BOX)
+    server.store.create("box", "csg", BOX)
+    with pytest.raises(ValueError, match="description"):
+        server.store.update("box", description="d" * 5001)
+    with pytest.raises(ValueError, match="note"):
+        server.store.update("box", changes={}, note="n" * 501)

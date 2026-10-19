@@ -7,7 +7,7 @@ Environment variables:
   STL_DIR        data directory                   (default ./out)
   PUBLIC_URL     base URL used in links           (default http://localhost:8765)
   DATABASE_URL   Postgres connection string (users, logins, tokens)
-  MCP_TOKEN      break-glass admin credential (bearer, or ?token= as a login link for pages);
+  MCP_TOKEN      break-glass admin credential (bearer, or the login page's token form);
                  without it every request runs as the admin user (local single-user mode: only
                  localhost, no SIGNUP/UI_PUBLIC/FILES_PUBLIC/ALLOW_SCRIPT)
   ADMIN_EMAILS   comma-separated emails made admin on their first verified sign-in (once; the
@@ -140,6 +140,10 @@ WEB = Path(__file__).parent / "web"
 OUT = DATA  # standalone files
 TINKERCAD_MAX = int(float(os.environ.get("TINKERCAD_MAX_MB", "25")) * 1_000_000)
 MAX_UPLOAD = int(float(os.environ.get("MAX_UPLOAD_MB", "100")) * 1_000_000)
+# Request bodies: JSON for the web API and the auth endpoints, MCP messages (import_file can carry a
+# base64 file up to MAX_UPLOAD), and raw uploads. Checked on Content-Length and while streaming.
+MAX_BODY = int(float(os.environ.get("MAX_BODY_MB", "8")) * 1_000_000)
+MAX_MCP_BODY = MAX_UPLOAD * 4 // 3 + 1_000_000
 FETCH_SECONDS = float(os.environ.get("FETCH_SECONDS", "60"))  # import_file(url=...): whole download
 ALLOW_PRIVATE_URLS = os.environ.get("ALLOW_PRIVATE_URLS") == "1"
 OAUTH = os.environ.get("OAUTH", "1") != "0"
@@ -1244,13 +1248,14 @@ def delete_file(file: str, ctx: Context = None) -> str:
 # ---------------------------------------------------------------- auth
 #
 # Ways in, each resolving to a user: Authorization: Bearer <MCP_TOKEN | personal token | OAuth
-# access token>, ?token=<MCP_TOKEN> (sets a session cookie), or the session cookie set after a
-# passkey login. MCP_TOKEN is the bootstrap admin. See auth.py for the OAuth flow.
+# access token>, or the session cookie set after a passkey, SSO or token-form login
+# (POST /auth/token - never in the URL, where it would end up in proxy logs and history). MCP_TOKEN is the bootstrap admin. See auth.py for the OAuth flow.
 
 oauth = OAuthProvider(AuthState(db))
 challenges = Expiring(CHALLENGE_TTL)  # WebAuthn challenges per login/registration attempt
 SESSION_COOKIE = "stl_session"
 PASSKEY_LOGIN_PATHS = ("/auth/passkey/login/options", "/auth/passkey/login/verify")
+TOKEN_LOGIN_PATH = "/auth/token"  # the login page's MCP_TOKEN form (POST, never a query string)
 SIGNUP_PATHS = ("/auth/config", "/auth/signup/options", "/auth/signup/verify", "/privacy")
 signups = RateLimiter(SIGNUPS_PER_HOUR, 3600)
 AUTH_REQUESTS_PER_MINUTE = int(os.environ.get("AUTH_REQUESTS_PER_MINUTE", "30"))
@@ -1293,6 +1298,8 @@ def _public_limit(path: str, method: str) -> str:
         return "sso"
     if path in ("/authorize", "/register"):
         return "oauth"
+    if path == TOKEN_LOGIN_PATH:
+        return "token"
     return ""
 
 
@@ -1345,9 +1352,6 @@ def _credential(request) -> tuple[dict | None, str]:
             return user, "personal"
         if OAUTH_ROUTES and (user := oauth.access_token_user(bearer)):
             return user, "oauth"
-    # ?token= is only a login link: a page load that is turned into a session right away
-    if read and not path.startswith("/mcp") and _eq(request.query_params.get("token", ""), TOKEN):
-        return _admin(), "token"
     user = oauth.state.session_user(request.cookies.get(SESSION_COOKIE, ""))
     return (user, "session") if user else (None, "")
 
@@ -1432,7 +1436,8 @@ def _admin_path(path: str) -> bool:
 def _public_path(path: str, read: bool) -> bool:
     if _admin_path(path):
         return False  # admin is never public, not even with UI_PUBLIC
-    return (path in ("/health", "/demo") or path.startswith("/static/") or path in PASSKEY_LOGIN_PATHS
+    return (path in ("/health", "/demo", TOKEN_LOGIN_PATH) or path.startswith("/static/")
+            or path in PASSKEY_LOGIN_PATHS
             or path in SIGNUP_PATHS or path.startswith("/auth/sso/")
             or (bool(OAUTH_ROUTES) and (path in OAUTH_PATHS or path.startswith("/.well-known/oauth-")))
             or (FILES_PUBLIC and read and path.startswith(("/files/", "/f/")))
@@ -1490,11 +1495,6 @@ class Auth(BaseHTTPMiddleware):
             return JSONResponse({"error": "admins only"}, status_code=403)
         if user and path.startswith("/mcp"):
             mcp_seen[user["id"]] = time.time()
-        if via == "token" and read and request.query_params.get("token") and not path.startswith("/mcp"):
-            # login via ?token= : set a session cookie and remove the token from the URL
-            rest = urlencode([(k, v) for k, v in request.query_params.multi_items() if k != "token"])
-            return _set_session(RedirectResponse(path + (f"?{rest}" if rest else ""), status_code=303),
-                                user, request)
         return await call_next(request)
 
 
@@ -1762,6 +1762,27 @@ def _safe_next(n: str) -> str:
 
 def _with_error(path: str, msg: str) -> str:
     return f"{path}{'&' if '?' in path else '?'}{urlencode({'sso_error': msg})}"
+
+
+async def token_login(request):
+    """POST /auth/token from the login page's form: MCP_TOKEN in the body -> a session cookie and
+    back to the page that was asked for. Wrong tokens count against the same per-IP limit as wrong
+    bearer tokens."""
+    origin = request.headers.get("origin")
+    if origin and origin != _rp()[1]:
+        return JSONResponse({"error": "cross-origin request refused"}, status_code=403)
+    ip = _client_ip(request)
+    if not bad_tokens.allowed(ip):
+        return JSONResponse({"error": "too many wrong tokens - try again later"}, status_code=429)
+    form = await request.form()
+    nxt = _safe_next(str(form.get("next") or "/"))
+    if not _eq(str(form.get("token", "")), TOKEN):
+        bad_tokens.hit(ip)
+        security_log("token_login_failed")
+        return RedirectResponse(_with_error(nxt, "That is not the server token."), status_code=303)
+    user = _admin()
+    security_log("token_login", user=user["id"])
+    return _set_session(RedirectResponse(nxt, status_code=303), user, request)
 
 
 def _sso_redirect_uri(name: str) -> str:
@@ -2199,11 +2220,22 @@ def _message(e: Exception) -> str:
     return f"internal error (ref {ref})"
 
 
+def _unwrap(e: BaseException) -> BaseException:
+    """The one error inside an ExceptionGroup (BaseHTTPMiddleware's task group wraps errors
+    raised while the body is read), or e itself."""
+    while isinstance(e, BaseExceptionGroup) and len(e.exceptions) == 1:
+        e = e.exceptions[0]
+    return e
+
+
 def _err(e: Exception, code=400):
+    e = _unwrap(e)
     if isinstance(e, KeyError):
         code = 404
     elif isinstance(e, RateLimitError):
         code = 429
+    elif isinstance(e, TooLarge):
+        code = 413
     return JSONResponse({"error": _message(e)}, status_code=code)
 
 
@@ -2689,6 +2721,64 @@ async def lifespan(app):
 
 
 mcp_app = mcp.streamable_http_app()
+class TooLarge(ValueError):
+    """The request body went over its limit while it was being read (see BodyLimit). A
+    ValueError, so handlers that turn errors into JSON answer it with a readable 413."""
+
+
+def body_limit(path: str) -> int:
+    if path.startswith("/upload/"):
+        return MAX_UPLOAD
+    if path.startswith("/mcp"):
+        return MAX_MCP_BODY
+    return MAX_BODY
+
+
+class BodyLimit:
+    """Refuses request bodies over body_limit(path) with 413: by Content-Length up front, and by
+    counting while the body streams in (chunked requests have no Content-Length). Without it,
+    request.json() and the MCP transport read any amount into memory, also before a login."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        limit = body_limit(scope["path"])
+        length = dict(scope.get("headers") or []).get(b"content-length", b"")
+        if length.isdigit() and int(length) > limit:
+            return await self._refuse(send, limit)
+        seen, started = 0, False
+
+        async def counted():
+            nonlocal seen
+            message = await receive()
+            if message["type"] == "http.request":
+                seen += len(message.get("body", b""))
+                if seen > limit:
+                    raise TooLarge(f"request body larger than {limit / 1e6:g} MB")
+            return message
+
+        async def tracked(message):
+            nonlocal started
+            started = started or message["type"] == "http.response.start"
+            await send(message)
+
+        try:
+            await self.app(scope, counted, tracked)
+        except Exception as e:
+            if not isinstance(_unwrap(e), TooLarge):
+                raise
+            if not started:
+                await self._refuse(send, limit)
+
+    @staticmethod
+    async def _refuse(send, limit: int):
+        await JSONResponse({"error": f"request body larger than {limit / 1e6:g} MB"},
+                           status_code=413)({"type": "http"}, None, send)
+
+
 app = Starlette(
     routes=[
         Route("/", page_index),
@@ -2725,6 +2815,7 @@ app = Starlette(
         Route("/auth/passkey/register/options", passkey_register_options, methods=["POST"]),
         Route("/auth/passkey/register/verify", passkey_register_verify, methods=["POST"]),
         Route("/auth/logout", logout, methods=["POST"]),
+        Route(TOKEN_LOGIN_PATH, token_login, methods=["POST"]),
         Route("/auth/config", auth_config),
         Route("/auth/signup/options", signup_options, methods=["POST"]),
         Route("/auth/signup/verify", signup_verify, methods=["POST"]),
@@ -2748,6 +2839,7 @@ app = Starlette(
 )
 app.add_middleware(Auth)
 app.add_middleware(SecurityHeaders)
+app.add_middleware(BodyLimit)  # outermost: before anything reads the body
 
 # Startup marker for the deploy: .github/workflows/deploy.yml does not accept a deploy
 # until exactly this line, with the commit that was built, shows up in the container log.
