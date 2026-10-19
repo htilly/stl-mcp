@@ -140,6 +140,7 @@ WEB = Path(__file__).parent / "web"
 OUT = DATA  # standalone files
 TINKERCAD_MAX = int(float(os.environ.get("TINKERCAD_MAX_MB", "25")) * 1_000_000)
 MAX_UPLOAD = int(float(os.environ.get("MAX_UPLOAD_MB", "100")) * 1_000_000)
+FETCH_SECONDS = float(os.environ.get("FETCH_SECONDS", "60"))  # import_file(url=...): whole download
 ALLOW_PRIVATE_URLS = os.environ.get("ALLOW_PRIVATE_URLS") == "1"
 OAUTH = os.environ.get("OAUTH", "1") != "0"
 SIGNUP = os.environ.get("SIGNUP") == "1"
@@ -966,10 +967,16 @@ def _pinned(url: str, ip: str | None) -> tuple[str, dict, dict]:
 
 
 def _fetch(url: str) -> tuple[bytes, str]:
-    """Fetches url (max MAX_UPLOAD, max 5 redirects, public addresses only).
+    """Fetches url (max MAX_UPLOAD, max 5 redirects, public addresses only, at most
+    FETCH_SECONDS in all - the 30 s timeout is per read, so a server that sends a byte now and
+    then would otherwise keep the download going for hours).
     Returns (data, file extension from the final url)."""
-    with httpx.Client(timeout=30, follow_redirects=False) as client:
+    deadline = time.monotonic() + FETCH_SECONDS
+    too_slow = f"the download took longer than {FETCH_SECONDS:g} s"
+    with httpx.Client(timeout=min(30, FETCH_SECONDS), follow_redirects=False) as client:
         for _ in range(6):
+            if time.monotonic() > deadline:
+                raise TimeoutError(too_slow)
             u = urlparse(url)
             if u.scheme not in ("http", "https") or not u.hostname:
                 raise ValueError("only http(s) links are supported")
@@ -984,29 +991,39 @@ def _fetch(url: str) -> tuple[bytes, str]:
                     buf += chunk
                     if len(buf) > MAX_UPLOAD:
                         raise ValueError(f"the file is larger than {MAX_UPLOAD // 1_000_000} MB")
+                    if time.monotonic() > deadline:
+                        raise TimeoutError(too_slow)
                 return bytes(buf), Path(u.path).suffix.lstrip(".")
     raise ValueError("too many redirects")
 
 
 @mcp.tool()
-def import_file(name: str, url: str = "", data_base64: str = "", format: str = "", ctx: Context = None) -> dict:
+async def import_file(name: str, url: str = "", data_base64: str = "", format: str = "",
+                      ctx: Context = None) -> dict:
     """Imports a model (e.g. exported from Tinkercad) and saves it as <name>.stl.
     Provide url (http/https) OR data_base64. format: stl, obj, glb, ply, off, step/stp (STEP
     needs the sandbox); guessed from the url if empty. Zip with obj+mtl (Tinkercad's OBJ export)
     is unpacked. Dimensions are assumed to be mm.
     The user can also upload directly: curl -T file.stl -H "Authorization: Bearer ..." <server>/upload/file.stl"""
     lib = _lib(ctx)
-    lib.ensure_room()
     if bool(url) == bool(data_base64):
         raise ValueError("provide either url or data_base64")
-    if url:
-        data, ext = _fetch(url)
-        format = format or ext
-    else:
-        data = base64.b64decode(data_base64, validate=True)
-        if len(data) > MAX_UPLOAD:
-            raise ValueError(f"the file is larger than {MAX_UPLOAD // 1_000_000} MB")
-    return _save(lib, _load_import(data, format or "stl"), _safe(name))
+
+    def run_import():
+        # In a thread, like a build: the download and the mesh parsing must not stall the
+        # event loop (and with it every other user, the web UI and /health).
+        lib.ensure_room()
+        fmt = format
+        if url:
+            data, ext = _fetch(url)
+            fmt = fmt or ext
+        else:
+            data = base64.b64decode(data_base64, validate=True)
+            if len(data) > MAX_UPLOAD:
+                raise ValueError(f"the file is larger than {MAX_UPLOAD // 1_000_000} MB")
+        return _save(lib, _load_import(data, fmt or "stl"), _safe(name))
+
+    return await lib.build(run_import, job="import_file")
 
 
 def _load_import(data: bytes, fmt: str):
@@ -1217,6 +1234,10 @@ SIGNUP_PATHS = ("/auth/config", "/auth/signup/options", "/auth/signup/verify", "
 signups = RateLimiter(SIGNUPS_PER_HOUR, 3600)
 AUTH_REQUESTS_PER_MINUTE = int(os.environ.get("AUTH_REQUESTS_PER_MINUTE", "30"))
 public_hits = RateLimiter(AUTH_REQUESTS_PER_MINUTE, 60)  # per client IP and endpoint group
+# Wrong bearer tokens per client IP and minute: beyond that, requests with a bearer token get 429,
+# so MCP_TOKEN (and the other tokens) cannot be guessed online.
+BAD_TOKENS_PER_MINUTE = int(os.environ.get("BAD_TOKENS_PER_MINUTE", "10"))
+bad_tokens = RateLimiter(BAD_TOKENS_PER_MINUTE, 60)
 
 # When each user last reached /mcp (in memory, per process): the web UI's Live dot turns from
 # "waiting for Claude" to "connected" as soon as an AI client talks to the MCP endpoint.
@@ -1425,8 +1446,14 @@ class Auth(BaseHTTPMiddleware):
         if limited := _public_limit(path, method):
             if not public_hits.hit(f"{limited}:{_client_ip(request)}"):
                 return JSONResponse({"error": "too many requests - try again later"}, status_code=429)
+        bearer = TOKEN and _bearer(request)
+        if bearer and not bad_tokens.allowed(_client_ip(request)):
+            return JSONResponse({"error": "too many wrong tokens - try again later"}, status_code=429)
         user, via = (await _run(_credential, request)) if TOKEN else (await _run(_admin), "local")
         request.state.user, request.state.via = user, via
+        if bearer and via not in ("token", "personal", "oauth"):
+            bad_tokens.hit(_client_ip(request))
+            security_log("bearer_refused", path=path)   # never the token itself
         if via in ("personal", "oauth") and not _delegated_ok(path):
             security_log("token_refused", user=user["id"], via=via, path=path)
             return JSONResponse({"error": "this needs a browser session, not a token"}, status_code=403)
@@ -2716,6 +2743,24 @@ class Server(uvicorn.Server):
             print(ready_line(self.config.port), flush=True)
 
 
+PLACEHOLDER_TOKENS = {"change-me", "changeme", "secret", "password", "token", "admin", "test"}
+MIN_TOKEN_LENGTH = 32
+
+
+def token_problem(token: str) -> tuple[str, str]:
+    """("refuse" | "warn" | "", message) for MCP_TOKEN: it is a never-expiring admin login, so a
+    placeholder must not go live and a short one is worth a loud warning."""
+    if not token:
+        return "", ""
+    if token.strip().lower() in PLACEHOLDER_TOKENS:
+        return "refuse", ("MCP_TOKEN is a placeholder - set a random one, e.g. "
+                          "`openssl rand -hex 32`")
+    if len(token) < MIN_TOKEN_LENGTH:
+        return "warn", (f"MCP_TOKEN is only {len(token)} characters - use at least "
+                        f"{MIN_TOKEN_LENGTH}, e.g. `openssl rand -hex 32`")
+    return "", ""
+
+
 def default_host() -> str:
     """Without MCP_TOKEN every request is the admin: then only listen on this machine."""
     return os.environ.get("HOST") or ("0.0.0.0" if TOKEN else "127.0.0.1")
@@ -2723,4 +2768,9 @@ def default_host() -> str:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    verdict, problem = token_problem(TOKEN)
+    if verdict == "refuse":
+        raise SystemExit(problem)
+    if verdict == "warn":
+        log.warning(problem)
     Server(uvicorn.Config(app, host=default_host(), port=int(os.environ.get("PORT", "8765")))).run()

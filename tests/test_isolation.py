@@ -103,8 +103,8 @@ def test_same_names_do_not_collide(world):
     b = ctx(world.bob)
     m = run(server.create_model("anns-box", BOX, ctx=b))
     assert m["model_id"] == "anns-box-2"
-    server.import_file("part", data_base64=__import__("base64").b64encode(
-        trimesh.creation.box(extents=(1, 1, 1)).export(file_type="stl")).decode(), ctx=b)
+    run(server.import_file("part", data_base64=__import__("base64").b64encode(
+        trimesh.creation.box(extents=(1, 1, 1)).export(file_type="stl")).decode(), ctx=b))
     assert server.file_info("part.stl", ctx=b)["extents_mm"] == [1, 1, 1]
     assert server.file_info("part.stl", ctx=ctx(world.ann))["extents_mm"] == [5, 5, 5]
 

@@ -46,6 +46,7 @@ def db(test_db, monkeypatch):
     # TestClient talks to "testserver"; in local mode only local hosts are accepted.
     monkeypatch.setattr(server, "LOCAL_HOSTS", server.LOCAL_HOSTS + ("testserver",))
     monkeypatch.setattr(server, "public_hits", server.RateLimiter(server.AUTH_REQUESTS_PER_MINUTE, 60))
+    monkeypatch.setattr(server, "bad_tokens", server.RateLimiter(server.BAD_TOKENS_PER_MINUTE, 60))
     monkeypatch.setattr(server, "build_hits", server.RateLimiter(server.BUILDS_PER_MINUTE, 60))
     monkeypatch.setattr(server, "mesh_hits", server.RateLimiter(server.MESHES_PER_MINUTE, 60))
     return test_db

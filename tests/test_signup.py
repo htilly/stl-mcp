@@ -204,7 +204,7 @@ def test_disk_limit_blocks_new_data(joe, client, monkeypatch):
     run(server.create_model("one", BOX, ctx=ctx(joe)))
     monkeypatch.setattr(server, "MAX_DISK_PER_USER", 100)
     stl = base64.b64encode(trimesh.creation.box().export(file_type="stl")).decode()
-    for call in (lambda: server.import_file("x", data_base64=stl, ctx=ctx(joe)),
+    for call in (lambda: run(server.import_file("x", data_base64=stl, ctx=ctx(joe))),
                  lambda: run(server.update_model("one", changes={}, ctx=ctx(joe))),
                  lambda: run(server.create_model("two", BOX, ctx=ctx(joe)))):
         with pytest.raises(server.LimitError, match="storage"):
@@ -251,7 +251,7 @@ def test_rename(client, joe):
 def test_delete_account_removes_everything(client, joe, db):
     run(server.create_model("mine", BOX, ctx=ctx(joe)))
     stl = base64.b64encode(trimesh.creation.box().export(file_type="stl")).decode()
-    server.import_file("part", data_base64=stl, ctx=ctx(joe))
+    run(server.import_file("part", data_base64=stl, ctx=ctx(joe)))
     raw, _ = server.oauth.state.create_personal_token(joe["id"], "cli")
     logged_in(client, joe)
     cookie = client.cookies[server.SESSION_COOKIE]

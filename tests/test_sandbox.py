@@ -191,9 +191,9 @@ def test_step_import(sbx):
     import base64
     s = run(server.create_from_build123d("Rounded", BOX))
     step = server.store.file(s["model_id"], "v1/model.step").read_bytes()
-    info = server.import_file("from_cad", data_base64=base64.b64encode(step).decode(), format="step")
+    info = run(server.import_file("from_cad", data_base64=base64.b64encode(step).decode(), format="step"))
     assert info["file"] == "from_cad.stl" and info["watertight"]
     assert info["extents_mm"] == [40.0, 30.0, 10.0]
     with pytest.raises(SandboxError, match="could not read the STEP file|no solids"):
-        server.import_file("junk", data_base64=base64.b64encode(b"not a step file").decode(),
-                           format="stp")
+        run(server.import_file("junk", data_base64=base64.b64encode(b"not a step file").decode(),
+                           format="stp"))

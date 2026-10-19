@@ -105,26 +105,26 @@ def test_file_info(out_dir):
 
 def test_import_file_base64(out_dir):
     data = base64.b64encode(_stl_bytes()).decode()
-    info = server.import_file("imp", data_base64=data)
+    info = run(server.import_file("imp", data_base64=data))
     assert info["file"] == "imp.stl" and (fdir() / "imp.stl").is_file()
 
 
 def test_import_file_requires_exactly_one_source():
     with pytest.raises(ValueError, match="either url or data_base64"):
-        server.import_file("x")
+        run(server.import_file("x"))
     with pytest.raises(ValueError, match="either url or data_base64"):
-        server.import_file("x", url="http://a", data_base64="AA==")
+        run(server.import_file("x", url="http://a", data_base64="AA=="))
 
 
 def test_import_file_size_limit(out_dir, monkeypatch):
     monkeypatch.setattr(server, "MAX_UPLOAD", 10)
     with pytest.raises(ValueError, match="larger than"):
-        server.import_file("x", data_base64=base64.b64encode(b"x" * 100).decode())
+        run(server.import_file("x", data_base64=base64.b64encode(b"x" * 100).decode()))
 
 
 def test_import_file_from_url(out_dir, monkeypatch):
     monkeypatch.setattr(server, "_fetch", lambda url: (_stl_bytes(), "stl"))
-    info = server.import_file("remote", url="https://example.com/m.stl")
+    info = run(server.import_file("remote", url="https://example.com/m.stl"))
     assert info["file"] == "remote.stl"
 
 
