@@ -18,6 +18,11 @@ On top of that each build runs:
   - with stdout/stderr going to files whose tail is read back, so a chatty echo() loop cannot
     fill the server's memory.
 
+Meshes: params["meshes"] = {name: sha256} names STL files in the store's mesh dir (copied there
+from the user's own files by the server, see server._attach_meshes). Each is copied into the
+build dir as <name>.stl, and the code may read exactly those: import("<name>.stl") with a literal
+string is the one import() the check lets through.
+
 Multiple parts: list part names in params["parts"]; the code is built once per part with
 PART set to that name (`if (PART == "lid") ...`).
 
@@ -75,6 +80,9 @@ FORBIDDEN = {"import", "surface", "dxf_dim", "dxf_cross"}
 # include <...> / use <...>: only files inside a bundled library, <library dir>/<file>.scad
 LIBRARY_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_-]*")
 LIBRARY_PATH = re.compile(rf"({LIBRARY_NAME.pattern})/[A-Za-z0-9_][A-Za-z0-9_./-]*\.scad")
+SHA = re.compile(r"[0-9a-f]{64}")
+# import("name.stl") / import(file = "name.stl"): a literal name, nothing computed
+_IMPORT = re.compile(r'[ \t\r\n]*\([ \t\r\n]*(?:file[ \t\r\n]*=[ \t\r\n]*)?"([A-Za-z_][A-Za-z0-9_]*)\.stl"[ \t\r\n]*[,)]')
 _INCLUDE = re.compile(r"\b(?:include|use)[ \t\r\n>]*<([^\t\r\n>]*)>")
 NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
@@ -207,8 +215,9 @@ def _library_forbidden(libs: Path, used) -> frozenset:
     return frozenset(bad)
 
 
-def check(code: str) -> list[str]:
-    """Rejects code that could read files. Returns the include/use paths it found."""
+def check(code: str, meshes=()) -> list[str]:
+    """Rejects code that could read files, except import("<name>.stl") of the given mesh names.
+    Returns the include/use paths it found."""
     if len(code) > MAX_CODE:
         raise OpenSCADError(f"the code is too long (max {MAX_CODE} characters)")
     if "\0" in code:
@@ -237,6 +246,13 @@ def check(code: str) -> list[str]:
         elif c.isalpha() or c in "_$":
             m = re.compile(r"[A-Za-z0-9_$]+").match(code, i)
             word, i = m.group(), m.end()
+            if word == "import" and meshes:
+                m = _IMPORT.match(code, i)
+                if not m or m.group(1) not in meshes:
+                    raise OpenSCADError('import() may only read the attached meshes, as '
+                                        'import("<name>.stl") with a literal name (attached: '
+                                        + ", ".join(f"{n}.stl" for n in sorted(meshes)) + ")")
+                continue                  # the string is skipped by the string branch next
             words.append(word)
             if word in ("include", "use"):
                 # OpenSCAD's lexer: include[ \t\r\n>]*<path>
@@ -312,9 +328,9 @@ def _run(argv: list[str], cwd: Path, timeout: float) -> tuple[int, str]:
            "LANG": "C.UTF-8", "QT_QPA_PLATFORM": "offscreen", "TMPDIR": str(cwd)}
     log = cwd / "log.txt"
     with open(log, "wb") as out:
-        p = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=out,
-                             stderr=subprocess.STDOUT, start_new_session=True,
-                             preexec_fn=_limits(CPU_SECONDS) if os.name == "posix" else None)
+        p = jobs.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=out,
+                           stderr=subprocess.STDOUT, start_new_session=True,
+                           preexec_fn=_limits(CPU_SECONDS) if os.name == "posix" else None)
         jobs.add_pid(p.pid)
         try:
             rc = p.wait(timeout=timeout)
@@ -341,12 +357,31 @@ class _quiet:
         return exc[0] is not None and issubclass(exc[0], (ProcessLookupError, PermissionError))
 
 
-def build(params: dict) -> dict:
-    """params: {"code": str, "vars": {name: value}, "parts": [name, ...]} -> {part: Trimesh}."""
+def _meshes(params: dict, mesh_dir: Path | None) -> dict:
+    """{name: path} of the attached meshes; every one must be in mesh_dir."""
+    meshes = params.get("meshes") or {}
+    if not isinstance(meshes, dict) or len(meshes) > 20:
+        raise OpenSCADError("meshes must be {name: mesh} (max 20)")
+    out = {}
+    for name, sha in meshes.items():
+        if not isinstance(name, str) or not NAME.fullmatch(name):
+            raise OpenSCADError(f"invalid mesh name: {name!r} (letters, digits, _)")
+        path = mesh_dir / f"{sha}.stl" if mesh_dir and isinstance(sha, str) and SHA.fullmatch(sha) else None
+        if not path or not path.is_file():
+            raise OpenSCADError(f"mesh '{name}' is not available - attach it again with meshes="
+                                f'{{"{name}": "<file>.stl"}}')
+        out[name] = path
+    return out
+
+
+def build(params: dict, mesh_dir: Path | None = None) -> dict:
+    """params: {"code": str, "vars": {name: value}, "parts": [name, ...], "meshes": {name: sha256}}
+    -> {part: Trimesh}."""
     code = params.get("code")
     if not isinstance(code, str) or not code.strip():
         raise OpenSCADError("params.code must be OpenSCAD source")
-    check(code)
+    meshes = _meshes(params, mesh_dir)
+    check(code, meshes)
     if not available():
         raise PermissionError("OpenSCAD is not installed on this server")
     overrides = _overrides(params.get("vars") or {})
@@ -358,7 +393,7 @@ def build(params: dict) -> dict:
     if not _slots.acquire(timeout=TIMEOUT):
         raise OpenSCADError("the server is busy with other OpenSCAD builds – try again in a minute")
     try:
-        return _build(code, overrides, parts, time.monotonic() + TIMEOUT)
+        return _build(code, overrides, parts, time.monotonic() + TIMEOUT, meshes)
     finally:
         _slots.release()
 
@@ -366,17 +401,21 @@ def build(params: dict) -> dict:
 _slots = threading.BoundedSemaphore(CONCURRENCY)
 
 
-def _build(code: str, overrides: list[str], parts: list[str], deadline: float) -> dict:
+def _build(code: str, overrides: list[str], parts: list[str], deadline: float,
+           meshes: dict | None = None) -> dict:
     out, total = {}, 0
     with tempfile.TemporaryDirectory(prefix="scad-") as td:
         tdir = Path(td)
         src = tdir / "model.scad"
         src.write_text(code, encoding="utf-8")
+        for name, path in (meshes or {}).items():   # next to model.scad: import("name.stl")
+            shutil.copyfile(path, tdir / f"{name}.stl")
+        (tdir / "out").mkdir()                       # outputs apart, so no mesh name collides
         for part in parts or ["model"]:
             left = deadline - time.monotonic()
             if left <= 0:
                 raise OpenSCADError(f"OpenSCAD took longer than {TIMEOUT:g} s")
-            stl = tdir / f"{part}.stl"
+            stl = tdir / "out" / f"{part}.stl"
             # binary STL: ASCII is ~6x bigger, so MAX_OUTPUT would cap a model at ~200k triangles
             argv = [BIN, *_backend_args(), "--export-format", "binstl", "-o", str(stl), *overrides,
                     *(["-D", f"PART={_literal(part)}"] if parts else []), str(src)]

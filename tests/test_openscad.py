@@ -265,3 +265,88 @@ def test_timeout(scad, monkeypatch):
     slow = "function f(n) = n <= 0 ? 0 : 1 + f(n - 1) + f(n - 1);\nx = f(60);\ncube(1);"
     with pytest.raises(OpenSCADError, match="longer than"):
         run(server.create_from_openscad("Slow", slow))
+
+
+# ---- attached meshes: import("<name>.stl") of the user's own files
+
+def test_check_allows_import_of_attached_meshes_only():
+    meshes = {"base"}
+    assert check('import("base.stl");', meshes) == []
+    assert check('difference() { import ( file = "base.stl", convexity = 4 ); cube(1); }', meshes) == []
+    for code in ('import("other.stl");', 'import("/etc/passwd");', 'import("../base.stl");',
+                 'f = "base.stl"; import(f);', 'import(str("base", ".stl"));',
+                 'import("base.stl/../../etc/passwd");', 'surface(file="base.stl");'):
+        with pytest.raises(OpenSCADError, match="not allowed|only read the attached"):
+            check(code, meshes)
+    with pytest.raises(OpenSCADError, match="not allowed"):
+        check('import("base.stl");')               # nothing attached: no import at all
+
+
+def test_meshes_must_be_in_the_mesh_dir(tmp_path):
+    sha = "a" * 64
+    with pytest.raises(OpenSCADError, match="not available"):
+        openscad._meshes({"meshes": {"base": sha}}, tmp_path)
+    with pytest.raises(OpenSCADError, match="not available"):
+        openscad._meshes({"meshes": {"base": "../../etc/passwd"}}, tmp_path)
+    with pytest.raises(OpenSCADError, match="invalid mesh name"):
+        openscad._meshes({"meshes": {"../x": sha}}, tmp_path)
+    (tmp_path / f"{sha}.stl").write_bytes(b"x")
+    assert openscad._meshes({"meshes": {"base": sha}}, tmp_path) == {"base": tmp_path / f"{sha}.stl"}
+
+
+def ctx(user):
+    from types import SimpleNamespace
+    return SimpleNamespace(request_context=SimpleNamespace(
+        request=SimpleNamespace(state=SimpleNamespace(user=user))))
+
+
+@pytest.fixture
+def fake_build(scad, monkeypatch):
+    """Records which meshes a build got and returns the first one (or a cube)."""
+    import trimesh
+    seen = []
+
+    def _build(code, overrides, parts, deadline, meshes=None):
+        seen.append({n: p.read_bytes() for n, p in (meshes or {}).items()})
+        first = next(iter((meshes or {}).values()), None)
+        return {"model": trimesh.load(first, file_type="stl") if first else trimesh.creation.box((1, 1, 1))}
+
+    monkeypatch.setattr(openscad, "available", lambda: True)
+    monkeypatch.setattr(openscad, "_build", _build)
+    return seen
+
+
+def test_openscad_on_an_imported_mesh_for_a_member(fake_build):
+    import base64
+    import trimesh
+    joe = server.oauth.state.create_user("Joe")       # no admin needed
+    stl = base64.b64encode(trimesh.creation.box((10, 20, 30)).export(file_type="stl")).decode()
+    server.import_file("scan", data_base64=stl, ctx=ctx(joe))
+    s = run(server.create_from_openscad("Drilled", 'difference() { import("base.stl"); cylinder(d=3, h=99); }',
+                                        meshes={"base": "scan.stl"}, ctx=ctx(joe)))
+    assert s["parts"]["model"]["extents_mm"] == [10.0, 20.0, 30.0]
+    sha = server.get_model(s["model_id"], ctx=ctx(joe))["params"]["meshes"]["base"]
+    assert openscad.SHA.fullmatch(sha) and (server.store.mesh_dir / f"{sha}.stl").is_file()
+    # the recipe keeps its own copy: a changed or deleted file does not break a rebuild
+    (server.Lib(joe).dir / "scan.stl").unlink()
+    s = run(server.update_model(s["model_id"], {"d": 4}, ctx=ctx(joe)))
+    assert s["version"] == 2 and fake_build[-1]["base"] == fake_build[0]["base"]
+    # replace the mesh with another file, keeping the code
+    server.import_file("bigger", data_base64=base64.b64encode(
+        trimesh.creation.box((40, 20, 30)).export(file_type="stl")).decode(), ctx=ctx(joe))
+    s = run(server.update_model(s["model_id"], meshes={"base": "bigger.stl"}, ctx=ctx(joe)))
+    assert s["parts"]["model"]["extents_mm"] == [40.0, 20.0, 30.0]
+
+
+def test_meshes_only_from_files_the_user_can_read(fake_build):
+    import base64
+    import trimesh
+    joe, ann = server.oauth.state.create_user("Joe"), server.oauth.state.create_user("Ann")
+    stl = base64.b64encode(trimesh.creation.box().export(file_type="stl")).decode()
+    server.import_file("secret", data_base64=stl, ctx=ctx(ann))
+    with pytest.raises(FileNotFoundError):
+        run(server.create_from_openscad("x", 'import("base.stl");', meshes={"base": "secret.stl"}, ctx=ctx(joe)))
+    m = run(server.create_model("annbox", {"root": {"shape": "box", "size": [1, 1, 1]}}, ctx=ctx(ann)))
+    with pytest.raises(Exception):
+        run(server.create_from_openscad("x", 'import("base.stl");',
+                                        meshes={"base": f"{m['model_id']}/v1/model.stl"}, ctx=ctx(joe)))

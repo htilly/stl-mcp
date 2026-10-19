@@ -106,3 +106,70 @@ def test_pulse_is_admin_only(out_dir, monkeypatch):
     monkeypatch.setattr(server, "TOKEN", "secret")
     c = TestClient(server.app, follow_redirects=False)
     assert c.get("/api/admin/pulse").status_code == 401
+
+
+def test_a_job_adds_up_its_thread_and_process_cpu(monkeypatch):
+    done = []
+    monkeypatch.setattr(jobs, "on_done", lambda job, cpu, wall: done.append((job.user_id, cpu, wall)))
+    job = jobs.start({"id": "u1", "display_name": "Ann"}, "create", None)
+
+    def burn():
+        end = time.thread_time() + 0.3
+        while time.thread_time() < end:         # the thread itself: 0.3 s
+            pass
+        p = jobs.Popen([sys.executable, "-c",
+                        "import time\nend = time.process_time() + 0.5\n"
+                        "while time.process_time() < end: pass"])
+        jobs.add_pid(p.pid)
+        try:
+            p.wait()                             # the process: 0.5 s more (+ interpreter start)
+        finally:
+            jobs.remove_pid(p.pid)
+    try:
+        jobs.run_in(job, burn)
+    finally:
+        jobs.finish(job)
+    [(uid, cpu, wall)] = done
+    assert uid == "u1"
+    assert 0.75 < cpu < 3
+    assert wall >= 0.3
+
+
+def test_process_cpu_before_joining_a_job_is_not_counted(monkeypatch):
+    """A warm worker's imports happen before it is given a job: they are not the user's."""
+    done = []
+    monkeypatch.setattr(jobs, "on_done", lambda job, cpu, wall: done.append(cpu))
+    p = jobs.Popen([sys.executable, "-c",
+                    "import sys, time\nend = time.process_time() + 0.6\n"
+                    "while time.process_time() < end: pass\nprint(flush=True)\nsys.stdin.read()"],
+                   stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    p.stdout.readline()                          # it has burnt its 0.6 s
+    job = jobs.start({"id": "u1"}, "create", None)
+
+    def run():
+        jobs.add_pid(p.pid)
+        try:
+            p.communicate(b"")
+        finally:
+            jobs.remove_pid(p.pid)
+    try:
+        jobs.run_in(job, run)
+    finally:
+        jobs.finish(job)
+    assert done[0] < 0.4
+
+
+def test_builds_add_up_per_user_and_day(client):
+    lib = server._lib(None)
+    server.anyio.run(lambda: lib.build(lambda: sum(range(200_000)), job="test"))
+    server.anyio.run(lambda: lib.build(lambda: None, job="test"))
+    me = next(u for u in client.get("/api/admin/users").json()["users"] if u["id"] == lib.user["id"])
+    assert me["builds"] == 2 and me["builds_recent"] == 2
+    assert me["cpu_seconds"] >= 0 and me["cpu_seconds_recent"] == me["cpu_seconds"]
+    [day] = client.get(f"/api/admin/users/{lib.user['id']}/cpu").json()["days"]
+    assert day["builds"] == 2 and len(day["day"]) == 10
+
+
+def test_cpu_usage_of_unknown_users_is_skipped(db):
+    server.oauth.state.record_cpu("nobody", 1.0, 1.0)
+    assert server.oauth.state.cpu_stats() == {}

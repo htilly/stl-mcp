@@ -613,7 +613,8 @@ async def create_from_build123d(name: str, code: str, description: str = "",
 @mcp.tool()
 async def create_from_openscad(name: str, code: str, description: str = "",
                                vars: dict | None = None, parts: list[str] | None = None,
-                               model_id: str = "", ctx: Context = None) -> dict:
+                               meshes: dict | None = None, model_id: str = "",
+                               ctx: Context = None) -> dict:
     """Creates a model from OpenSCAD code (mm, z up). Use it for shapes the CSG spec of
     create_model cannot express; prefer create_model / templates for everything else.
 
@@ -634,7 +635,13 @@ async def create_from_openscad(name: str, code: str, description: str = "",
     - gridfinity-rebuilt-openscad: `include <gridfinity-rebuilt-openscad/src/core/standard.scad>`
       and `use` the files in src/core (gridfinityBase([x, y]), bins, baseplates).
     - MCAD: `use <MCAD/boxes.scad>` roundedBox(), MCAD/nuts_and_bolts.scad, MCAD/involute_gears.scad.
-    Not allowed (sandbox): import(), surface(), include/use of anything outside these
+    Meshes: to work on an existing STL (an imported scan, a Tinkercad part, another model's
+    part) attach it with meshes={"base": "scan.stl"} (a file from list_files, or
+    "<model_id>/v2/body.stl") and read it with import("base.stl"), e.g.
+    difference() { import("base.stl"); translate([0, 0, 5]) cylinder(d=3.4, h=20); }.
+    The mesh is stored with the recipe, so later updates and reverts keep working even if the
+    file changes. Attached meshes should be watertight (file_info / modify_file repair=True).
+    Not allowed (sandbox): any other import(), surface(), include/use of anything outside these
     libraries, and the library modules that load STL files (e.g. NopSCADlib's *_assembly and
     *_stl printed parts). Builds time out after a minute, so keep $fn moderate (e.g. 64).
 
@@ -646,19 +653,47 @@ async def create_from_openscad(name: str, code: str, description: str = "",
     viewer_url) - use it when you redo a model the user is working on, also when it was built another way (e.g. a
     create_enclosure box redone here to add engraved text).
     """
+    lib = _lib(ctx)
     params = {"code": code}
     if vars:
         params["vars"] = vars
     if parts:
         params["parts"] = parts
-    return await _create_or_replace(_lib(ctx), model_id, name, "openscad", params, description)
+    if meshes:
+        params["meshes"] = _attach_meshes(lib, meshes)
+    return await _create_or_replace(lib, model_id, name, "openscad", params, description)
+
+
+def _attach_meshes(lib: Lib, meshes: dict) -> dict:
+    """{name: file the user can read} -> {name: sha256}, with each mesh copied (as binary STL)
+    into the store's mesh dir, so the recipe does not depend on the file staying as it is.
+    A value that already is a sha256 (from the current recipe) is kept as it is."""
+    if not isinstance(meshes, dict):
+        raise ValueError('meshes must be {name: file}, e.g. {"base": "scan.stl"}')
+    out = {}
+    for name, file in meshes.items():
+        if not isinstance(file, str) or not file:
+            raise ValueError(f"meshes['{name}'] must be a file name")
+        if openscad.SHA.fullmatch(file):
+            out[name] = file
+            continue
+        data = _load(lib, file).export(file_type="stl")
+        sha = hashlib.sha256(data).hexdigest()
+        path = store.mesh_dir / f"{sha}.stl"
+        if not path.is_file():
+            tmp = path.with_suffix(f".{uuid.uuid4().hex}.tmp")
+            tmp.write_bytes(data)
+            tmp.replace(path)
+        out[name] = sha
+    return out
 
 
 @mcp.tool()
 async def update_model(model_id: str, changes: dict | None = None, remove: list[str] | None = None,
                        params: dict | None = None, note: str = "", name: str | None = None,
                        description: str | None = None, resolves: list[str] | None = None,
-                       kind: str | None = None, ctx: Context = None) -> dict:
+                       kind: str | None = None, meshes: dict | None = None,
+                       ctx: Context = None) -> dict:
     """Adjusts a model and creates a new version (the web view updates immediately).
 
     changes: {"key": value} – for CSG models this sets vars[key], otherwise the parameter.
@@ -674,6 +709,8 @@ async def update_model(model_id: str, changes: dict | None = None, remove: list[
     kind:    with params, rebuilds the model another way as its next version: "csg", "enclosure",
              "openscad", "build123d" or "script" (e.g. kind="openscad", params={"code": ...} to redo an
              enclosure in OpenSCAD). Prefer this over creating a new model.
+    meshes:  OpenSCAD only: attach or replace meshes, {"base": "scan.stl"} (see
+             create_from_openscad), kept with the ones already attached.
     Read the recipe with get_model first if you are unsure of the structure.
     """
     lib = _lib(ctx)
@@ -686,6 +723,16 @@ async def update_model(model_id: str, changes: dict | None = None, remove: list[
         params = await _run(_prepare, lib, params, model_id)
     if changes:
         changes = await _run(_inline_outlines, lib, changes)
+    if params is not None and params.get("meshes"):
+        params = {**params, "meshes": _attach_meshes(lib, params["meshes"])}
+    if meshes:
+        if params is None:
+            m = lib.models.get(model_id)
+            cur = next(v for v in m["versions"] if v["version"] == m["current"])
+            if (kind or cur["kind"]) != "openscad":
+                raise ValueError("meshes can only be attached to OpenSCAD models")
+            params = dict(cur["params"])
+        params = {**params, "meshes": {**(params.get("meshes") or {}), **_attach_meshes(lib, meshes)}}
     rebuild = params is not None or bool(changes) or bool(remove)
     m = await (lib.build if rebuild else _run)(
         lib.models.update, model_id, params=params, changes=changes, remove=remove, note=note,
@@ -1823,6 +1870,11 @@ async def api_auth_me(request):
     return resp
 
 
+# Every build's CPU time goes into the user's usage statistics (admin Users page).
+jobs.on_done = lambda job, cpu, wall: oauth.state.record_cpu(job.user_id, cpu, wall)
+CPU_STATS_DAYS = 30
+
+
 def _delete_account(uid: str) -> int:
     """Deletes a user with all their models and files. Returns how many models went."""
     n = store.delete_owner(uid)
@@ -1841,16 +1893,19 @@ async def api_admin_users(_):
     def collect():
         out = []
         stats = oauth.state.login_stats()
+        cpu = oauth.state.cpu_stats(CPU_STATS_DAYS)
         for u in oauth.state.users():
             lib = Lib(u)
             out.append({**{k: u[k] for k in ("id", "display_name", "email", "role", "bootstrap",
                                               "disabled", "created", "last_login", "passkeys",
                                               "providers", "tokens", "apps")},
                         **(stats.get(u["id"]) or {"logins": 0, "seconds": 0, "countries": []}),
+                        **(cpu.get(u["id"]) or {"builds": 0, "cpu_seconds": 0.0,
+                                                "builds_recent": 0, "cpu_seconds_recent": 0.0}),
                         "models": len(store.list(u["id"], everyone=False)),
                         "disk_mb": round(lib.disk_bytes() / 1e6, 1)})
         return out
-    return JSONResponse({"users": await _run(collect), "signup": SIGNUP})
+    return JSONResponse({"users": await _run(collect), "signup": SIGNUP, "cpu_days": CPU_STATS_DAYS})
 
 
 async def page_admin_load(_):
@@ -1912,6 +1967,11 @@ async def api_admin_load(_):
 async def api_admin_user_logins(request):
     rows = await _run(oauth.state.recent_logins, request.path_params["id"], 20)
     return JSONResponse({"logins": rows})
+
+
+async def api_admin_user_cpu(request):
+    rows = await _run(oauth.state.cpu_days, request.path_params["id"], CPU_STATS_DAYS)
+    return JSONResponse({"days": rows})
 
 
 async def api_admin_user(request):
@@ -2538,6 +2598,7 @@ app = Starlette(
         Route("/api/admin/pulse", api_admin_pulse),
         Route("/api/admin/users", api_admin_users),
         Route("/api/admin/users/{id}/logins", api_admin_user_logins),
+        Route("/api/admin/users/{id}/cpu", api_admin_user_cpu),
         Route("/api/admin/users/{id}", api_admin_user, methods=["POST", "DELETE"]),
         Route("/api/settings", api_settings, methods=["GET", "POST"]),
         Route("/api/recheck", api_recheck, methods=["POST"]),

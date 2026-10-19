@@ -79,9 +79,11 @@ def _spawn() -> subprocess.Popen:
            # numpy's BLAS reserves big buffers per thread and is not what builds need
            "OPENBLAS_NUM_THREADS": "1", "OMP_NUM_THREADS": "1",
            "BUILD_LIMITS": json.dumps(_limits())}
-    p = subprocess.Popen([sys.executable, "-I", str(Path(__file__).resolve())], cwd=home, env=env,
-                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                         start_new_session=True)
+    import jobs  # here, not at the top: the worker (python -I) cannot import it before its path is set
+    # jobs.Popen: reaped with wait4, so the job it runs is charged its CPU time
+    p = jobs.Popen([sys.executable, "-I", str(Path(__file__).resolve())], cwd=home, env=env,
+                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                   start_new_session=True)
     p.home = home
     return p
 
