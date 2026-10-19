@@ -1878,7 +1878,8 @@ _NOT_SPLITTABLE = ("scale", "rotate", "mirror", "translate", "array", "polar")
 
 def _components(v: dict) -> list[tuple[str, dict]]:
     """The recipe nodes a version is made of: [(part name, node)]. A csg part whose top node is an
-    operation (union, difference ...) without its own transform gives its children one by one;
+    operation (union, difference ...) without its own transform gives its children one by one,
+    opening nested operations the same way;
     anything else (a single shape, other recipe kinds) stays as the whole part."""
     spec = v.get("params") or {}
     if v.get("kind") != "csg" or not isinstance(spec, dict):
@@ -1889,9 +1890,24 @@ def _components(v: dict) -> list[tuple[str, dict]]:
         kids = node.get("children") if isinstance(node, dict) else None
         if (isinstance(node, dict) and "op" in node and kids
                 and not any(k in node for k in _NOT_SPLITTABLE)):
-            out += [(pname, c) for c in kids if isinstance(c, dict) and not c.get("hidden")]
+            out += [(pname, c) for c in _leaves(kids)]
         else:
             out.append((pname, None))
+    return out
+
+
+def _leaves(nodes: list, depth: int = 0) -> list[dict]:
+    """Nodes to export one by one: operations without their own transform are opened up
+    (their children share the parent's frame), everything else is kept as it is."""
+    out = []
+    for c in nodes:
+        if not isinstance(c, dict) or c.get("hidden"):
+            continue
+        kids = c.get("children")
+        if depth < 16 and "op" in c and kids and not any(k in c for k in _NOT_SPLITTABLE):
+            out += _leaves(kids, depth + 1)
+        else:
+            out.append(c)
     return out
 
 
