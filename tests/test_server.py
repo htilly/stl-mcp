@@ -269,6 +269,34 @@ def test_update_model_failed_build_saves_nothing(out_dir):
     assert server.get_model("demo")["version"] == 1
 
 
+def test_create_with_model_id_rebuilds_existing_model_another_way(out_dir):
+    box = run(server.create_enclosure("my box", 40, 30, 15))
+    s = run(server.create_model("my box", BOX_SPEC, model_id=box["model_id"]))
+    assert s["model_id"] == box["model_id"] and s["version"] == 2 and s["kind"] == "csg"
+    assert [m["model_id"] for m in server.list_models()] == [box["model_id"]]
+    hist = server.get_model(box["model_id"])["history"]
+    assert hist[-1]["note"] == "rebuilt as csg"
+    s = run(server.revert_model(box["model_id"], 1))
+    assert s["kind"] == "enclosure" and set(s["parts"]) == {"body", "lid"}
+
+
+def test_update_model_switches_kind_with_params(out_dir):
+    box = run(server.create_enclosure("box", 40, 30, 15))
+    s = run(server.update_model(box["model_id"], kind="csg", params=BOX_SPEC))
+    assert s["kind"] == "csg" and s["version"] == 2
+    s = run(server.update_model(box["model_id"], changes={"w": 30}))
+    assert s["parts"]["model"]["extents_mm"][0] == 30.0
+
+
+def test_update_model_kind_needs_params_and_a_known_kind(out_dir):
+    _new_model()
+    with pytest.raises(ValueError, match="needs params"):
+        run(server.update_model("demo", kind="openscad", changes={"w": 3}))
+    with pytest.raises(ValueError, match="unknown kind"):
+        run(server.update_model("demo", kind="stl", params={}))
+    assert server.get_model("demo")["version"] == 1
+
+
 def test_update_unknown_model(out_dir):
     with pytest.raises(KeyError):
         run(server.update_model("nope", changes={"w": 1}))

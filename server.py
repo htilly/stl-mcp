@@ -203,6 +203,11 @@ mcp = FastMCP(
         "BOSL2/gears.scad for gears, rounding/offset_sweep/path_sweep/skin for fillets and sweeps). "
         "Prefer create_model and the templates otherwise: they are easier to adjust and the web "
         "editor and comment hints understand them. "
+        "When you need to redo a model the user is working on - also with another method, e.g. an "
+        "enclosure redone in OpenSCAD to add engraved text - replace it rather than making a new "
+        "one: pass its model_id to the create_* tool (or update_model with kind and params). The "
+        "rebuild becomes its next version with the same viewer_url, and revert_model can go back. "
+        "Make a separate model only when the user asks for one or for a copy (duplicate_model). "
         "Every build runs a print check; problems (not watertight, thin walls, overhangs, too big "
         "for the bed ...) come back as print_warnings. Fix them when you can, otherwise tell the "
         "user; check_print re-checks a model or file with the current settings. "
@@ -370,20 +375,40 @@ def _open(m: dict) -> int:
 
 # ---------------------------------------------------------------- MCP tools
 
+KINDS = ("csg", "enclosure", "openscad", "script")
+
+REPLACE_DOC = """
+model_id: rebuild this existing model instead of making a new one - the new recipe becomes its
+next version (same viewer_url, history kept, revert_model goes back). Use it whenever you redo a
+model the user is working on, also with another method (e.g. an enclosure redone in OpenSCAD to
+add text); make a new model only when the user asks for a separate one or a copy."""
+
+
+async def _create_or_replace(lib: "Lib", model_id: str, name: str, kind: str, params: dict,
+                             description: str) -> dict:
+    if model_id:
+        lib.ensure_room()
+        m = await lib.build(lib.models.update, model_id, params=params, kind=kind,
+                            note=f"rebuilt as {kind}", name=name or None,
+                            description=description or None)
+    else:
+        lib.ensure_room(new_model=True)
+        m = await lib.build(lib.models.create, name, kind, params, description)
+    return _summary(m, lib=lib)
+
+
 CREATE_MODEL_DOC = """Creates a new parametric model from a CSG spec (JSON). Returns model_id and viewer_url.
 
 Put dimensions that may change in "vars" and reference them with "=expression", so later
 adjustments are easy: update_model(model_id, {"width": 60}).
 
-""" + csg.SPEC_HELP
+""" + REPLACE_DOC + "\n\n" + csg.SPEC_HELP
 
 
 @mcp.tool(description=CREATE_MODEL_DOC)
-async def create_model(name: str, spec: dict, description: str = "", ctx: Context = None) -> dict:
-    lib = _lib(ctx)
-    lib.ensure_room(new_model=True)
-    m = await lib.build(lib.models.create, name, "csg", spec, description)
-    return _summary(m, lib=lib)
+async def create_model(name: str, spec: dict, description: str = "", model_id: str = "",
+                       ctx: Context = None) -> dict:
+    return await _create_or_replace(_lib(ctx), model_id, name, "csg", spec, description)
 
 
 @mcp.tool()
@@ -397,6 +422,7 @@ async def create_enclosure(
     lid_holes: list[dict] | None = None,
     lid_slots: list[dict] | None = None,
     description: str = "",
+    model_id: str = "",
     ctx: Context = None,
 ) -> dict:
     """Creates a box + lid (parts 'body' and 'lid'). Dimensions in mm.
@@ -407,35 +433,36 @@ async def create_enclosure(
     lid_holes: [{x, y, d}]   lid_slots: [{x, y, w, h}]
     corner_screws: 4 corner posts for M3 self-tapping screws.
     Adjust later with update_model(model_id, {"inner_z": 30, "/cutouts/0/width": 14}).
+    model_id: rebuild this existing model instead of making a new one (its next version, same
+    viewer_url) - use it when you redo a model the user is working on, also from another method.
     """
-    lib = _lib(ctx)
-    lib.ensure_room(new_model=True)
     params = {"inner_x": inner_x, "inner_y": inner_y, "inner_z": inner_z, "wall": wall,
               "floor": floor, "lid_thickness": lid_thickness, "corner_screws": corner_screws,
               "standoffs": standoffs or [], "cutouts": cutouts or [], "lid_holes": lid_holes or [],
               "lid_slots": lid_slots or []}
-    m = await lib.build(lib.models.create, name, "enclosure", params, description)
-    return _summary(m, lib=lib)
+    return await _create_or_replace(_lib(ctx), model_id, name, "enclosure", params, description)
 
 
 @mcp.tool()
-async def create_from_script(name: str, code: str, description: str = "", ctx: Context = None) -> dict:
+async def create_from_script(name: str, code: str, description: str = "", model_id: str = "",
+                             ctx: Context = None) -> dict:
     """Advanced: Python that sets `result` (trimesh.Trimesh), `parts` (list -> union) or
     `parts` (dict name->mesh). Available: trimesh, numpy as np, g (blk/cyl/union/diff).
     Requires ALLOW_SCRIPT=1. Prefer create_model – it is safe and easier to adjust, and its
-    radial/heightmap/sweep/loft shapes cover organic and parametric forms."""
+    radial/heightmap/sweep/loft shapes cover organic and parametric forms.
+    model_id: rebuild this existing model instead of making a new one (its next version, same
+    viewer_url) - use it when you redo a model the user is working on, also from another method.
+    """
     lib = _lib(ctx)
-    lib.ensure_room(new_model=True)
     if lib.user["role"] != "admin":
         raise PermissionError("script models are for admins only")
-    m = await lib.build(lib.models.create, name, "script", {"code": code}, description)
-    return _summary(m, lib=lib)
+    return await _create_or_replace(lib, model_id, name, "script", {"code": code}, description)
 
 
 @mcp.tool()
 async def create_from_openscad(name: str, code: str, description: str = "",
                                vars: dict | None = None, parts: list[str] | None = None,
-                               ctx: Context = None) -> dict:
+                               model_id: str = "", ctx: Context = None) -> dict:
     """Creates a model from OpenSCAD code (mm, z up). Use it for shapes the CSG spec of
     create_model cannot express; prefer create_model / templates for everything else.
 
@@ -450,22 +477,23 @@ async def create_from_openscad(name: str, code: str, description: str = "",
     update_model(model_id, {"width": 60}) without rewriting the code. vars sets initial
     overrides. For several printable parts pass parts=["body", "lid"]: the code is run once
     per part with the variable PART set to its name (`if (PART == "lid") lid();`).
+    model_id: rebuild this existing model instead of making a new one (its next version, same
+    viewer_url) - use it when you redo a model the user is working on, also when it was built another way (e.g. a
+    create_enclosure box redone here to add engraved text).
     """
-    lib = _lib(ctx)
-    lib.ensure_room(new_model=True)
     params = {"code": code}
     if vars:
         params["vars"] = vars
     if parts:
         params["parts"] = parts
-    m = await lib.build(lib.models.create, name, "openscad", params, description)
-    return _summary(m, lib=lib)
+    return await _create_or_replace(_lib(ctx), model_id, name, "openscad", params, description)
 
 
 @mcp.tool()
 async def update_model(model_id: str, changes: dict | None = None, remove: list[str] | None = None,
                        params: dict | None = None, note: str = "", name: str | None = None,
-                       description: str | None = None, resolves: list[str] | None = None, ctx: Context = None) -> dict:
+                       description: str | None = None, resolves: list[str] | None = None,
+                       kind: str | None = None, ctx: Context = None) -> dict:
     """Adjusts a model and creates a new version (the web view updates immediately).
 
     changes: {"key": value} – for CSG models this sets vars[key], otherwise the parameter.
@@ -478,14 +506,21 @@ async def update_model(model_id: str, changes: dict | None = None, remove: list[
              top-level variable wall (like openscad -D) without touching the code.
     note:    short description of the change (shown in the history).
     resolves: comment ids (e.g. ["c2"]) that the change addresses – marked resolved with a reply.
+    kind:    with params, rebuilds the model another way as its next version: "csg", "enclosure",
+             "openscad" or "script" (e.g. kind="openscad", params={"code": ...} to redo an
+             enclosure in OpenSCAD). Prefer this over creating a new model.
     Read the recipe with get_model first if you are unsure of the structure.
     """
     lib = _lib(ctx)
     lib.ensure_room()
+    if kind is not None and kind not in KINDS:
+        raise ValueError(f"unknown kind '{kind}' - use one of {', '.join(KINDS)}")
+    if kind == "script" and lib.user["role"] != "admin":
+        raise PermissionError("script models are for admins only")
     rebuild = params is not None or bool(changes) or bool(remove)
     m = await (lib.build if rebuild else _run)(
         lib.models.update, model_id, params=params, changes=changes, remove=remove, note=note,
-        name=name, description=description, resolves=resolves)
+        name=name, description=description, resolves=resolves, kind=kind)
     return _summary(m, lib=lib)
 
 
