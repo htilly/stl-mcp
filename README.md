@@ -66,6 +66,10 @@ Every step shows up in the 3D view as soon as Claude makes it, and each one is a
 - **Expression shapes**: `radial`, `heightmap`, `sweep` and `loft` build organic and parametric
   forms (vases, knobs, wavy surfaces, pipes, springs, outline transitions) from safe per-vertex
   expressions, so script models are not needed for them.
+- **SDF shapes, outlines and pictures**: `sdf` nodes blend shapes into each other with fillets
+  (grips, figures, shells), `import_outline` turns an SVG/DXF logo or drawing into a profile to
+  extrude, and `create_relief` makes a lithophane or an embossed plate from a picture
+  ([details](#sdf-shapes-outlines-and-pictures)).
 - **Print check**: every build is checked for holes, loose pieces, thin walls, overhangs and bed size;
   problems are warnings, never blockers ([details](#print-check-and-admin-settings)).
 - **Accounts**: passkeys, Google/GitHub/Apple sign-in, a private library per user, and OAuth so
@@ -292,6 +296,8 @@ page). It requires `PUBLIC_URL` on https (or localhost); `OAUTH=0` turns it off.
 | `lookup_part` | size and mounting holes of common boards and parts (ESP32 boards from Espressif, Seeed, LOLIN, Adafruit, LILYGO and M5Stack, Raspberry Pi, Arduino, fans, NEMA 17, modules ...) |
 | `print_guide` | rules of thumb for FDM: walls, clearances, screw/insert/nut hole sizes, overhangs |
 | `import_file` | imports STL/OBJ/GLB/PLY/OFF and STEP (in the sandbox) via `url` or `data_base64` (zip with obj+mtl is unpacked) |
+| `import_outline` | an SVG or DXF file as a named outline for `{"shape": "svg", "outline": name}` profiles |
+| `create_relief` | a lithophane or an embossed relief plate from a picture (PNG/JPEG) |
 | `file_info` | dimensions, bounds, volume, number of loose parts |
 | `check_print` | re-run the print check on a library model or a standalone file with the current settings |
 | `modify_file` | scale, rotate, mirror, place, add/subtract shapes (e.g. screw holes), repair mesh, simplify |
@@ -325,6 +331,11 @@ page). It requires `PUBLIC_URL` on https (or localhost); `OAUTH=0` turns it off.
   Per-vertex expressions are parsed once and evaluated vectorized with numpy (same whitelist as
   other expressions, plus `atan2`, `exp`, `log`, `clamp`, `lerp`, `smoothstep`, `noise`). A shape
   may have at most 2 million triangles.
+- `sdf`: blended solids from a tree of distance-field primitives (sphere, box, cylinder, cone,
+  capsule, torus, ellipsoid) and `union`/`difference`/`intersection` with `smooth` (fillet
+  radius), plus `shell`, `round`, `twist`; see [below](#sdf-shapes-outlines-and-pictures).
+- `{"shape": "svg", "path": "M…Z"}` or `{"shape": "svg", "outline": name}` profiles: outlines
+  from SVG paths or imported SVG/DXF files.
 - Templates: `screw_hole`, `heat_insert`, `nut_trap` (cutting: the surface is at z=0, going downward),
   `threaded_hole` (a printed ISO metric internal thread), `boss`, `snap_hook`, `hinge`
   (print-in-place or with a separate pin), `screw` and `nut` (printable, with a real helical
@@ -413,6 +424,32 @@ whenever the binary is installed (`ALLOW_OPENSCAD=0` turns it off):
 Locally: install OpenSCAD and put the libraries in `./openscad-libs/<name>` (e.g.
 `./openscad-libs/BOSL2`, or set `OPENSCAD_LIBS`). The OpenSCAD tests skip when `openscad` or a
 library is not installed.
+
+### SDF shapes, outlines and pictures
+**`sdf` shapes** (`sdf.py`) cover what plain CSG cannot: shapes that melt into each other with a
+fillet, hollow shells with an even wall, twisted and rounded forms. The node holds a small tree of
+distance-field primitives and operations; it is evaluated with numpy over a grid (`resolution`,
+default size/150 and at least 0.2 mm, at most 12 million points) and meshed with marching cubes
+(scikit-image), so the result is an ordinary closed solid that combines with every other node:
+```json
+{"shape": "sdf", "sdf": {"op": "union", "smooth": 6, "children": [
+  {"sdf": "capsule", "a": [0, 0, 0], "b": [0, 0, 90], "r": 14},
+  {"sdf": "torus", "r": 18, "tube_r": 4, "translate": [0, 0, 25]}]}}
+```
+
+**Outlines** (`outline.py`): `import_outline(name, url | data_base64, format)` reads an SVG or DXF
+file (every closed shape, transforms applied, curves flattened, DXF lines and arcs chained into
+loops, units converted to mm) in a sandboxed build worker and stores it under `name`. A profile
+`{"shape": "svg", "outline": "logo", "size": [60, null]}` then extrudes, revolves, sweeps or
+cuts it; the server copies the outline into the recipe when it is saved, so later changes and
+copies of the model need no file. Long outline paths (and pictures) show up shortened in
+`get_model`; a recipe sent back with the short note gets the stored value again.
+
+**Pictures** (`relief.py`): `create_relief(name, url | data_base64, mode, width, ...)` makes a
+`lithophane` (thickness follows the darkness, 0.8–3 mm with a 3 mm frame by default; print it
+standing up) or an embossed `relief` plate (base + brightness × height). The picture is stored in
+the recipe as a small grayscale PNG (longest side `pixels`, default 300), one grid point per
+pixel, and every number can be changed later with `update_model`.
 
 ### Python sandbox: build123d and script models
 `create_from_build123d(name, code, vars=None, tolerance=0.02)` lets Claude write

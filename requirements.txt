@@ -16,4 +16,7 @@ webauthn==3.0.1
 psycopg[binary,pool]==3.3.6
 psycopg-pool==3.3.3
 build123d==0.13.0
+scikit-image==0.26.0
+svgelements==1.9.6
+ezdxf==1.4.5
 maxminddb==3.2.0

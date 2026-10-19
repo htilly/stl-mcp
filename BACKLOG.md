@@ -177,16 +177,19 @@ Goal: let Claude/ChatGPT make more and better models. In three PRs; the first is
   top-level `name = value` lines from the code so every dimension can be changed by hand. (M)
 
 ### SDF shapes and import (PR 3) (M-L)
-- [ ] **SDF kind as a data recipe** (not code, so safe like the CSG spec): `sphere/box/capsule/
-  torus/...`, `smooth_union/smooth_difference(k)`, `shell`, `twist`, `round`, `offset`; evaluated
-  with numpy and marching cubes (scikit-image) in `buildworker` (add it to `KINDS`). Reuse the
-  expression engine and limits from `fnshapes.py`/`csg.py`. For grips, figures and soft
-  transitions that CSG cannot do.
-- [ ] **SVG/DXF → extrusion**: a CSG node `outline` (svgpathtools + ezdxf + shapely → polygon),
-  files brought in with `import_file`. For logos and laser-cut outlines.
-- [ ] **Image → lithophane/relief**: a CSG node `image_relief` on top of the existing heightmap
-  (pillow is already there).
-- [ ] Pin the new packages in `requirements.txt`; a test that a `smooth_union` is watertight.
+- [x] **SDF shapes** (`sdf.py`): a CSG shape `sdf` with a tree of primitives (sphere, box,
+  cylinder, cone, capsule, torus, ellipsoid), union/difference/intersection with `smooth`, and
+  shell/round/twist/translate/rotate/scale; numpy over a grid + marching cubes (scikit-image),
+  so it combines with every other node. Built in the build worker like all CSG.
+- [x] **SVG/DXF outlines** (`outline.py`): profile `{"shape":"svg","path"|"outline"}`, and the
+  tool `import_outline` (parsed in a build worker, stored per user, copied into the recipe on
+  save; long paths are shortened in `get_model` and restored when sent back).
+- [x] **Image → lithophane/relief** (`relief.py`): tool `create_relief`, kind `relief` built from
+  the shared `fnshapes.height_solid`; the picture is a small grayscale PNG in the recipe.
+- [x] Tests (`tests/test_sdf_outline_relief.py`).
+- [ ] **Text in SVG files**: today `import_outline` asks for text converted to paths; it could
+  render it with the bundled fonts instead. (S-M)
+- [ ] **Curved lithophanes** (cylinder or arc) and a light-box/frame template. (M)
 
 ### Ideas, not planned yet
 - [ ] **Better "eyes" for the AI**: a `measure` tool (distances between faces/parts, smallest wall

@@ -280,6 +280,14 @@ def heightmap(n, env):
         j, i = np.unravel_index(np.argmin(Z), Z.shape)
         raise ValueError(f"heightmap: the surface must stay above z=0 (it is {Z[j, i]:.3g} at "
                          f"x={X[j, i]:.3g}, y={Y[j, i]:.3g}) – add 'base' or raise the expression")
+    m = height_solid("heightmap", X, Y, Z)
+    return m.translate((-sx / 2, -sy / 2, 0)) if n.get("center") else m
+
+
+def height_solid(kind, X, Y, Z) -> M:
+    """The solid from z=0 up to the surface Z over a regular ny × nx grid X, Y (Z > 0)."""
+    ny, nx = X.shape
+    sx, sy = X[0, -1] - X[0, 0], Y[-1, 0] - Y[0, 0]
     top_v = np.stack([X, Y, Z], -1).reshape(-1, 3)
     # top surface: quad (i,j),(i+1,j),(i+1,j+1),(i,j+1) counter-clockwise from above → normal up
     i, j = np.meshgrid(np.arange(nx - 1), np.arange(ny - 1), indexing="ij")
@@ -299,9 +307,8 @@ def heightmap(n, env):
     pb, qb = base0 + k, base0 + (k + 1) % R
     walls = np.concatenate([np.stack([pb, qb, q], -1), np.stack([pb, q, p], -1)])
     bottom = np.stack([np.full(R, center), qb, pb], -1)
-    V = np.vstack([top_v, bot_v, [[sx / 2, sy / 2, 0]]])
-    m = _manifold("heightmap", V, np.vstack([top, walls, bottom]))
-    return m.translate((-sx / 2, -sy / 2, 0)) if n.get("center") else m
+    V = np.vstack([top_v, bot_v, [[X[0, 0] + sx / 2, Y[0, 0] + sy / 2, 0]]])
+    return _manifold(kind, V, np.vstack([top, walls, bottom]))
 
 
 # ---------------------------------------------------------------- paths
