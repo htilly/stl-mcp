@@ -14,6 +14,6 @@ Then sign in once, in a terminal: `python3 <plugin dir>/scripts/stl_watch.py log
 (or put a personal token from the 🔑 dialog in `STL_MCP_TOKEN` or the macOS keychain item
 `stl-mcp-token`). Until you have signed in the monitor exits silently.
 
-Set `STL_MCP_URL` if you do not use https://stl.tilly.se.
+Set `STL_MCP_URL` if you do not use https://autosmith.eu.
 
 Plugin monitors are experimental in Claude Code and only run in interactive sessions.
