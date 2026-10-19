@@ -551,7 +551,7 @@ def test_preview_png_is_rendered_then_cached(client, out_dir):
     _new_model()
     r = client.get("/api/models/demo/preview.png")
     assert r.status_code == 200 and r.content[:4] == b"\x89PNG"
-    assert (out_dir / "models" / "demo" / "v1" / "preview.png").is_file()
+    assert (out_dir / "models" / "demo" / "v1" / "preview-2.png").is_file()
     assert client.get("/api/models/demo/preview.png").content == r.content
     assert client.get("/api/models/nope/preview.png").status_code == 404
 

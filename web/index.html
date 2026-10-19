@@ -163,7 +163,7 @@ function render(flashId) {
     const parts = Object.values(m.parts);
     const dims = parts.length === 1 ? fmt(parts[0].extents_mm) : `${parts.length}`;
     return `<a class="card${m.id === flashId ? " flash" : ""}" href="/m/${encodeURIComponent(m.id)}">
-      <div class="thumb"><img loading="lazy" alt="" src="/api/models/${encodeURIComponent(m.id)}/preview.png?v=${m.version}">
+      <div class="thumb"><img loading="lazy" alt="" src="/api/models/${encodeURIComponent(m.id)}/preview.png?v=${m.version}.2">
         ${m.open_comments ? `<span class="cbadge" title="Open comments">${icon("comment")}${m.open_comments}</span>` : ""}
         ${m.warnings ? `<span class="cbadge wbadge" title="Print-check warnings">${icon("warning")}${m.warnings}</span>` : ""}
         ${visBadge(m.visibility)}</div>

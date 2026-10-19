@@ -357,8 +357,8 @@ main.lib { padding: var(--s5) var(--s5) var(--s4); max-width: 1440px; margin: 0 
 .card:hover { text-decoration: none; border-color: var(--rule-strong); }
 @media (hover: hover) { .card:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); } }
 .card:hover .name { color: var(--layout); }
-.card .thumb { position: relative; aspect-ratio: 4 / 3.4; background: var(--plate); display: grid; place-items: center; }
-.card .thumb img { width: 100%; height: 100%; object-fit: contain; }
+.card .thumb { position: relative; aspect-ratio: 4 / 3.4; background: var(--plate); overflow: hidden; }
+.card .thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 .card .name {
   padding: var(--s3) var(--s3) var(--s2); font-weight: 600; font-size: var(--t-base);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-top: 1px solid var(--rule);
