@@ -1298,11 +1298,11 @@ async function load() {
   $("crumb").textContent = model.name;
   $("viewlink").href = `/m/${encodeURIComponent(id)}`;
   if (cur.kind !== "csg") {
-    $("loading").innerHTML = `The editor works on shape recipes. This model is a <b>${esc(cur.kind)}</b>; open it in the <a href="/m/${encodeURIComponent(id)}">viewer</a> and ask Claude to change it.`;
+    $("loading").innerHTML = `<p>The editor works on shape recipes. This model is a <b>${esc(cur.kind)}</b>; open it in the <a href="/m/${encodeURIComponent(id)}">viewer</a> and ask Claude to change it.</p>`;
     return;
   }
   if (!partEntries(cur.params).length) {
-    $("loading").innerHTML = `This recipe has no shapes. Open it in the <a href="/m/${encodeURIComponent(id)}">viewer</a>.`;
+    $("loading").innerHTML = `<p>This recipe has no shapes. Open it in the <a href="/m/${encodeURIComponent(id)}">viewer</a>.</p>`;
     return;
   }
   const keep = spec ? sel.map((n) => pointerOf(spec, n)) : [];
