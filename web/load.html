@@ -39,11 +39,29 @@
     <dl class="tb full" id="server"></dl>
     <p class="msg" style="margin: var(--s2) 0" id="limits"></p>
   </section>
+  <section class="group scad">
+    <h2>OpenSCAD builds</h2>
+    <p class="help">Applies to the next build, no restart needed; running builds keep their limits.
+       The server's environment sets the maximum. A blue dot marks values below it.</p>
+    <div class="field" id="f-timeout">
+      <label class="lbl" for="scad-timeout">Timeout per build</label>
+      <div class="ctl"><input type="number" id="scad-timeout" step="1"><span class="unit">s</span>
+        <button type="button" data-reset="timeout" class="icon quiet" aria-label="Reset the timeout to the maximum"></button></div>
+      <p class="help" id="h-timeout"></p>
+    </div>
+    <div class="field" id="f-concurrency">
+      <label class="lbl" for="scad-concurrency">Builds at the same time</label>
+      <div class="ctl"><input type="number" id="scad-concurrency" step="1"><span class="unit"></span>
+        <button type="button" data-reset="concurrency" class="icon quiet" aria-label="Reset builds at the same time to the maximum"></button></div>
+      <p class="help" id="h-concurrency"></p>
+    </div>
+    <div class="acts"><button class="primary" id="scad-save">Save</button><span class="msg" id="scad-msg"></span></div>
+  </section>
   <div id="users"></div>
   <p class="msg" id="msg"></p>
 </main>
 <script type="module">
-import { api, esc } from "/static/common.js";
+import { api, esc, icon } from "/static/common.js";
 
 const $ = (id) => document.getElementById(id);
 const pct = (v) => (v == null ? "–" : `${v.toFixed(0)} %`);
@@ -99,6 +117,46 @@ function draw(d) {
       ${jobs(u, cpus)}
     </section>`).join("") || `<p class="msg">Nobody is online.</p>`;
 }
+
+// ---- OpenSCAD limits: drawn on load and after a save, not by the 2 s refresh (that would
+// overwrite what is being typed)
+const sayScad = (t, err) => { $("scad-msg").textContent = t; $("scad-msg").className = "msg" + (err ? " err" : ""); };
+
+function drawScad(o) {
+  const t = $("scad-timeout"), c = $("scad-concurrency");
+  Object.assign(t, { value: o.timeout, min: o.timeout_min, max: o.timeout_cap });
+  Object.assign(c, { value: o.concurrency, min: 1, max: o.concurrency_cap });
+  for (const k of ["timeout", "concurrency"]) {
+    $(`f-${k}`).classList.toggle("changed", o[`${k}_cap`] !== o[k]);
+    const b = document.querySelector(`[data-reset="${k}"]`);
+    b.innerHTML = icon("restore");
+    b.title = `Back to the maximum (${o[`${k}_cap`]})`;
+    b.disabled = !o.changed[k];
+  }
+  const cpu = o.cpu_seconds_env ? `${o.cpu_seconds} CPU seconds per build (fixed by OPENSCAD_CPU_SECONDS)`
+    : `${o.cpu_seconds} CPU seconds per build (4 × the timeout: Manifold uses several cores)`;
+  $("h-timeout").innerHTML = `A build that runs longer is stopped. Also how long a build waits for a free slot. ${esc(cpu)}, ` +
+    `${o.mem_mb} MB memory. <span class="dflt">Maximum: ${o.timeout_cap} s (OPENSCAD_TIMEOUT).</span>`;
+  $("h-concurrency").innerHTML = `Server-wide; more builds wait. ${o.running} running now. ` +
+    `<span class="dflt">Maximum: ${o.concurrency_cap} (OPENSCAD_CONCURRENCY).</span>`;
+  if (o.updated_by) sayScad(`Last changed by ${o.updated_by}, ${new Date(o.updated * 1000).toLocaleString()}.`);
+}
+
+async function saveScad(body, done) {
+  try { drawScad((await api("/api/admin/limits", { method: "POST", body })).openscad); sayScad(done); }
+  catch (err) { sayScad(err.message, true); }
+}
+
+$("scad-save").addEventListener("click", () => {
+  const t = $("scad-timeout").valueAsNumber, c = $("scad-concurrency").valueAsNumber;
+  if (Number.isNaN(t) || Number.isNaN(c)) return sayScad("Fill in both values.", true);
+  saveScad({ timeout: t, concurrency: c }, "Saved. The next build uses the new limits.");
+});
+document.querySelector(".scad").addEventListener("click", (e) => {
+  const k = e.target.closest("[data-reset]")?.dataset.reset;
+  if (k) saveScad({ [k]: null }, "Back to the maximum.");
+});
+api("/api/admin/limits").then((d) => drawScad(d.openscad)).catch((err) => sayScad(err.message, true));
 
 let timer = null;
 async function tick() {

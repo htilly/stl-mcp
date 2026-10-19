@@ -32,7 +32,10 @@ Environment:
   OPENSCAD_BACKEND  geometry engine, passed as --backend when the binary has that option
                     (default manifold: much faster than CGAL; empty = the binary's default)
   OPENSCAD_CONCURRENCY  builds running at the same time, server-wide (default 2); a build that
-                    cannot start within OPENSCAD_TIMEOUT fails with "busy"
+                    cannot start within the timeout fails with "busy"
+
+OPENSCAD_TIMEOUT and OPENSCAD_CONCURRENCY are the defaults and also the upper bounds: an admin can
+lower them while the server runs (the Load page, see configure()), never raise them above these.
 """
 from __future__ import annotations
 
@@ -56,11 +59,14 @@ BIN = os.environ.get("OPENSCAD_BIN") or shutil.which("openscad") or ""
 _default_libs = Path("/opt/openscad-libs")
 LIBS = Path(os.environ.get("OPENSCAD_LIBS") or
             (_default_libs if _default_libs.is_dir() else Path(__file__).parent / "openscad-libs"))
-TIMEOUT = float(os.environ.get("OPENSCAD_TIMEOUT", "60"))
+TIMEOUT_CAP = float(os.environ.get("OPENSCAD_TIMEOUT", "60"))
+TIMEOUT = TIMEOUT_CAP      # in effect now: TIMEOUT_CAP or lower, see configure()
 MEM_MB = int(os.environ.get("OPENSCAD_MEM_MB", "2048"))
-CPU_SECONDS = int(os.environ.get("OPENSCAD_CPU_SECONDS", "0")) or int(4 * TIMEOUT)
+CPU_SECONDS_ENV = int(os.environ.get("OPENSCAD_CPU_SECONDS", "0"))  # 0 = follow the timeout
 BACKEND = os.environ.get("OPENSCAD_BACKEND", "manifold")
-CONCURRENCY = max(1, int(os.environ.get("OPENSCAD_CONCURRENCY", "2")))
+CONCURRENCY_CAP = max(1, int(os.environ.get("OPENSCAD_CONCURRENCY", "2")))
+CONCURRENCY = CONCURRENCY_CAP
+MIN_TIMEOUT = 5            # seconds; below that even a cube with BOSL2 included may not finish
 MAX_OUTPUT = 50_000_000    # bytes, per written file (STL or log); ~1M triangles of binary STL
 MAX_TOTAL_STL = 150_000_000  # bytes of STL over all parts, loaded into the server's memory
 MAX_CODE = 200_000         # characters of source
@@ -77,6 +83,34 @@ LIBRARY_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_-]*")
 LIBRARY_PATH = re.compile(rf"({LIBRARY_NAME.pattern})/[A-Za-z0-9_][A-Za-z0-9_./-]*\.scad")
 _INCLUDE = re.compile(r"\b(?:include|use)[ \t\r\n>]*<([^\t\r\n>]*)>")
 NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def cpu_seconds() -> int:
+    """The CPU rlimit per process: OPENSCAD_CPU_SECONDS, else 4 x the timeout in effect."""
+    return CPU_SECONDS_ENV or int(4 * TIMEOUT)
+
+
+def configure(timeout: float | None = None, concurrency: int | None = None, clamp: bool = False):
+    """Sets the timeout and the number of concurrent builds while the server runs (None = the
+    environment's value). Values above the environment's caps raise ValueError, or with clamp
+    (stored values after the caps were lowered) are cut down to them. Running builds keep their
+    deadline and their slot; the next build uses the new values."""
+    global TIMEOUT, CONCURRENCY
+    t = TIMEOUT_CAP if timeout is None else timeout
+    c = CONCURRENCY_CAP if concurrency is None else concurrency
+    if isinstance(t, bool) or not isinstance(t, (int, float)) or t != t:
+        raise ValueError("timeout must be a number of seconds")
+    if isinstance(c, bool) or not isinstance(c, int):
+        raise ValueError("concurrent builds must be a whole number")
+    if clamp:
+        t, c = min(t, TIMEOUT_CAP), min(c, CONCURRENCY_CAP)
+    low = min(MIN_TIMEOUT, TIMEOUT_CAP)
+    if not low <= t <= TIMEOUT_CAP:
+        raise ValueError(f"timeout must be {low:g}-{TIMEOUT_CAP:g} s (OPENSCAD_TIMEOUT is the maximum)")
+    if not 1 <= c <= CONCURRENCY_CAP:
+        raise ValueError(f"concurrent builds must be 1-{CONCURRENCY_CAP} (OPENSCAD_CONCURRENCY is the maximum)")
+    TIMEOUT, CONCURRENCY = float(t), c
+    _slots.resize(c)
 
 
 def available() -> bool:
@@ -314,7 +348,7 @@ def _run(argv: list[str], cwd: Path, timeout: float) -> tuple[int, str]:
     with open(log, "wb") as out:
         p = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=out,
                              stderr=subprocess.STDOUT, start_new_session=True,
-                             preexec_fn=_limits(CPU_SECONDS) if os.name == "posix" else None)
+                             preexec_fn=_limits(cpu_seconds()) if os.name == "posix" else None)
         jobs.add_pid(p.pid)
         try:
             rc = p.wait(timeout=timeout)
@@ -355,18 +389,53 @@ def build(params: dict) -> dict:
         raise OpenSCADError("parts must be a list of names (letters, digits, _)")
     if len(set(parts)) != len(parts) or len(parts) > 20:
         raise OpenSCADError("parts must be unique (max 20)")
-    if not _slots.acquire(timeout=TIMEOUT):
+    timeout = TIMEOUT                         # one value for the whole build, even if it changes
+    if not _slots.acquire(timeout=timeout):
         raise OpenSCADError("the server is busy with other OpenSCAD builds – try again in a minute")
     try:
-        return _build(code, overrides, parts, time.monotonic() + TIMEOUT)
+        return _build(code, overrides, parts, timeout)
     finally:
         _slots.release()
 
 
-_slots = threading.BoundedSemaphore(CONCURRENCY)
+class Slots:
+    """A counting semaphore whose size can change while slots are taken. Shrinking it takes no
+    slot away: running builds finish, and new ones wait until fewer than the new size run."""
+
+    def __init__(self, size: int):
+        self._cond = threading.Condition()
+        self.size, self.used = size, 0
+
+    def acquire(self, timeout: float | None = None) -> bool:
+        with self._cond:
+            if not self._cond.wait_for(lambda: self.used < self.size, timeout):
+                return False
+            self.used += 1
+            return True
+
+    def release(self):
+        with self._cond:
+            if self.used <= 0:
+                raise ValueError("Slots released too many times")
+            self.used -= 1
+            self._cond.notify()
+
+    def resize(self, size: int):
+        with self._cond:
+            self.size = size
+            self._cond.notify_all()
 
 
-def _build(code: str, overrides: list[str], parts: list[str], deadline: float) -> dict:
+_slots = Slots(CONCURRENCY)
+
+
+def running() -> int:
+    """OpenSCAD builds holding a slot right now."""
+    return _slots.used
+
+
+def _build(code: str, overrides: list[str], parts: list[str], timeout: float) -> dict:
+    deadline = time.monotonic() + timeout
     out, total = {}, 0
     with tempfile.TemporaryDirectory(prefix="scad-") as td:
         tdir = Path(td)
@@ -375,7 +444,7 @@ def _build(code: str, overrides: list[str], parts: list[str], deadline: float) -
         for part in parts or ["model"]:
             left = deadline - time.monotonic()
             if left <= 0:
-                raise OpenSCADError(f"OpenSCAD took longer than {TIMEOUT:g} s")
+                raise OpenSCADError(f"OpenSCAD took longer than {timeout:g} s")
             stl = tdir / f"{part}.stl"
             # binary STL: ASCII is ~6x bigger, so MAX_OUTPUT would cap a model at ~200k triangles
             argv = [BIN, *_backend_args(), "--export-format", "binstl", "-o", str(stl), *overrides,

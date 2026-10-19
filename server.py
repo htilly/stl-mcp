@@ -24,7 +24,9 @@ Environment variables:
                  surface(), include/use outside the bundled libraries) and runs sandboxed with a
                  timeout and resource limits; see openscad.py
   OPENSCAD_TIMEOUT / OPENSCAD_MEM_MB  per-build limits (default 60 s / 2048 MB);
-                 OPENSCAD_BIN / OPENSCAD_LIBS override the binary and the libraries dir
+                 OPENSCAD_BIN / OPENSCAD_LIBS override the binary and the libraries dir.
+                 OPENSCAD_TIMEOUT and OPENSCAD_CONCURRENCY are also the maximum an admin can set
+                 on the Load page (saved in the database, applied without a restart)
   SIGNUP         1 = anyone can create an account with a passkey (needs MCP_TOKEN)
   TURNSTILE_SITE_KEY / TURNSTILE_SECRET  Cloudflare Turnstile on the signup form (off when unset)
   SIGNUPS_PER_HOUR  new accounts per client IP and hour (default 5)
@@ -78,6 +80,7 @@ from mcp.server.auth.routes import (build_resource_metadata_url, create_auth_rou
 from mcp.server.auth.settings import ClientRegistrationOptions, RevocationOptions
 from mcp.server.fastmcp import Context, FastMCP, Image
 from mcp.server.transport_security import TransportSecuritySettings
+from psycopg.types.json import Jsonb
 from starlette.applications import Starlette
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import (FileResponse, HTMLResponse, JSONResponse, PlainTextResponse,
@@ -1884,6 +1887,61 @@ async def api_admin_load(_):
     return JSONResponse(await _run(collect))
 
 
+def _openscad_limits() -> dict:
+    """What the Load page shows: the limits in effect, the environment's caps and who set them."""
+    row = db.one("SELECT value, updated, updated_by FROM server_settings WHERE key = 'openscad'")
+    saved = row["value"] if row else {}
+    by = oauth.state.user(row["updated_by"]) if row and row["updated_by"] else None
+    return {"timeout": openscad.TIMEOUT, "timeout_cap": openscad.TIMEOUT_CAP,
+            "timeout_min": min(openscad.MIN_TIMEOUT, openscad.TIMEOUT_CAP),
+            "concurrency": openscad.CONCURRENCY, "concurrency_cap": openscad.CONCURRENCY_CAP,
+            "cpu_seconds": openscad.cpu_seconds(), "cpu_seconds_env": bool(openscad.CPU_SECONDS_ENV),
+            "mem_mb": openscad.MEM_MB, "running": openscad.running(),
+            "changed": {k: saved.get(k) is not None for k in ("timeout", "concurrency")},
+            "updated": row["updated"] if row else None,
+            "updated_by": (by.get("display_name") or by.get("email")) if by else None}
+
+
+def _apply_openscad_limits():
+    """At startup: the admin's saved OpenSCAD limits, cut down to the environment's caps if those
+    were lowered since."""
+    row = db.one("SELECT value FROM server_settings WHERE key = 'openscad'")
+    if row:
+        v = row["value"]
+        openscad.configure(v.get("timeout"), v.get("concurrency"), clamp=True)
+
+
+async def api_admin_limits(request):
+    """GET: the OpenSCAD build limits. POST {timeout, concurrency}: changes them now, for the
+    next build (null = back to the environment's value, which is also the maximum)."""
+    if request.method == "POST":
+        try:
+            body = await request.json()
+            if not isinstance(body, dict) or set(body) - {"timeout", "concurrency"}:
+                raise ValueError("send {timeout, concurrency}")
+            old = (openscad.TIMEOUT, openscad.CONCURRENCY)
+            row = await _run(db.one, "SELECT value FROM server_settings WHERE key = 'openscad'")
+            new = {**(row["value"] if row else {}), **body}
+            new = {k: new.get(k) for k in ("timeout", "concurrency")}
+            openscad.configure(new["timeout"], new["concurrency"])   # validates against the caps
+        except Exception as e:  # noqa: BLE001 – the error is shown in the UI
+            return _err(e)
+        me = _user(request)
+        try:
+            if all(v is None for v in new.values()):
+                await _run(db.execute, "DELETE FROM server_settings WHERE key = 'openscad'")
+            else:
+                await _run(db.execute, "INSERT INTO server_settings (key, value, updated, updated_by) "
+                           "VALUES ('openscad', %s, %s, %s) ON CONFLICT (key) DO UPDATE SET "
+                           "value = EXCLUDED.value, updated = EXCLUDED.updated, updated_by = EXCLUDED.updated_by",
+                           (Jsonb(new), time.time(), me["id"]))
+        except Exception:
+            openscad.configure(*old)              # not saved: do not keep it in effect either
+            raise
+        security_log("admin_action", by=me["id"], action="openscad_limits", **new)
+    return JSONResponse({"openscad": await _run(_openscad_limits)})
+
+
 async def api_admin_user_logins(request):
     rows = await _run(oauth.state.recent_logins, request.path_params["id"], 20)
     return JSONResponse({"logins": rows})
@@ -2464,6 +2522,7 @@ def startup():
     applied = db.migrate()
     if applied:
         print(f"database migrations applied: {', '.join(applied)}", flush=True)
+    _apply_openscad_limits()
     admin = _admin()
     if oauth.state.import_legacy(DATA / "auth.json", admin["id"]):
         print("imported auth.json into the database (renamed to auth.json.imported)", flush=True)
@@ -2509,6 +2568,7 @@ app = Starlette(
         Route("/admin/users", page_admin_users),
         Route("/admin/load", page_admin_load),
         Route("/api/admin/load", api_admin_load),
+        Route("/api/admin/limits", api_admin_limits, methods=["GET", "POST"]),
         Route("/api/admin/users", api_admin_users),
         Route("/api/admin/users/{id}/logins", api_admin_user_logins),
         Route("/api/admin/users/{id}", api_admin_user, methods=["POST", "DELETE"]),

@@ -120,7 +120,7 @@ def test_builds_are_limited_server_wide(monkeypatch):
     """No more than CONCURRENCY builds at once: one that cannot start in time fails as busy."""
     monkeypatch.setattr(openscad, "available", lambda: True)
     monkeypatch.setattr(openscad, "TIMEOUT", 0.05)
-    monkeypatch.setattr(openscad, "_slots", openscad.threading.BoundedSemaphore(1))
+    monkeypatch.setattr(openscad, "_slots", openscad.Slots(1))
     monkeypatch.setattr(openscad, "_build", lambda *a: {"model": "built"})
     assert openscad.build({"code": "cube(1);"}) == {"model": "built"}   # the slot is given back
     openscad._slots.acquire()
