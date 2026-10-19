@@ -471,6 +471,7 @@ div.card:hover .name { color: var(--layout); }
 .foot-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px var(--s4); }
 .foot-row a { color: var(--scribe); font-weight: 500; }
 .foot-row a:hover { color: var(--graphite); }
+.copyright { font-size: 11px; opacity: .6; }
 
 /* a link to the demo page: play icon, title and one line, an arrow */
 .demo-link {
