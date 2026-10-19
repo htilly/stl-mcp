@@ -13,13 +13,14 @@
 <meta property="og:title" content="autosmith: STL, made by AI">
 <meta property="og:image" content="/static/brand/og-image.png">
 <link rel="stylesheet" href="/static/style.css">
+<script src="/static/theme.js"></script>
 </head>
 <body>
+<div class="gate-theme" data-theme-switch></div>
 <main class="gate"><div class="panel"><div class="body">
   <div class="wordmark"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-mark"/></svg><span>auto<b>smith</b></span></div>
   <h2 id="title">Log in</h2>
   <p>STL, made by AI. Describe a part to Claude; it builds a printable 3D model that shows up here, with every revision.</p>
-  <p class="demolink"><a href="/demo"><svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-play"/></svg> Watch the one-minute demo</a></p>
 
   <div class="stack" id="sso" hidden></div>
   <div class="stack" id="pk" hidden>
@@ -58,6 +59,7 @@
       <button>Log in</button>
     </form>
   </details>
+  <a class="demo-link" href="/demo"><span class="play"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-play"/></svg></span><span class="cap"><b>See it in action</b><span>A one-minute demo: Claude designs an ESP32 box</span></span><svg class="i go" aria-hidden="true"><use href="/static/icons.svg#i-back"/></svg></a>
 </div></div></main>
 <script type="module">
 import { api, passkeyLogin, passkeyRegister, passkeySignup, passkeysSupported } from "/static/common.js";

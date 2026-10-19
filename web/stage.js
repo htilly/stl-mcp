@@ -50,7 +50,8 @@ export function createStage(el, { onFrame } = {}) {
     scene.add(grid);
   }
   buildGrid(null);
-  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => buildGrid());
+  // theme.js fires this on every theme change, including the system flipping while on auto
+  window.addEventListener("themechange", () => buildGrid());
 
   function resize() {
     const w = el.clientWidth, h = el.clientHeight;

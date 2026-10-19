@@ -2,6 +2,7 @@
 an account."""
 import asyncio
 import base64
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -273,5 +274,8 @@ def test_bootstrap_admin_cannot_delete_itself(client):
 
 def test_library_page_hides_admin_link_until_it_knows_the_role(client, joe):
     page = logged_in(client, joe).get("/").text
-    assert 'id="adminlink" hidden' in page and '$("adminlink").hidden = u.role !== "admin"' in page
+    # the admin link lives in the user menu, which adds it only once /api/auth says the role is admin
+    assert 'href="/admin"' not in page and 'data-usermenu' in page and "/static/nav.js" in page
+    nav = (Path(server.__file__).parent / "web" / "nav.js").read_text()
+    assert 'if (u?.role === "admin") out.push(item("/admin"' in nav
     assert 'id="wizmore"' in page and 'id="tokadd"' in page and 'id="delacct"' in page

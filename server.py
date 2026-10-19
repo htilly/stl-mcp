@@ -2051,7 +2051,8 @@ async def preview(request):
     try:
         m = lib.models.get(mid)
         v = Store.current(m)
-        cache = store.dir / mid / f"v{v['version']}" / "preview.png"
+        # bump the suffix when the rendering changes, so cached thumbnails are redrawn
+        cache = store.dir / mid / f"v{v['version']}" / "preview-2.png"
         if cache.is_file():
             return FileResponse(cache, media_type="image/png", headers={"Cache-Control": "private"})
 

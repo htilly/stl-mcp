@@ -85,7 +85,7 @@ guarded by one shared `MCP_TOKEN`. This phase adds real users.
 ## Phase 1: safe to expose
 
 - [x] **Keep `ALLOW_SCRIPT=0`** in production: with the Python sandbox, script models run there
-  instead and no longer need it (`deploy/README.md`).
+  instead and no longer need it (README, "Python sandbox").
 - [ ] **Resource limits in the app** (M)
   - Max number of models and a disk quota, per user (from phase 0b) and in total for `/data`.
   - Lower `MAX_UPLOAD_MB` to about 20 for the test.
@@ -169,7 +169,7 @@ Goal: let Claude/ChatGPT make more and better models. In three PRs; the first is
 - [x] Tests (`tests/test_sandbox.py`), plus a manual run in a container with the compose
   settings: no network or DNS, read-only root, no secrets, cannot reach the daemon's socket or
   signal it, no setuid, fork bomb stopped at 63 processes.
-- [ ] **Set up `stl-mcp-sandbox` on tillyse** (see `deploy/README.md`, "The Python sandbox"). (S)
+- [ ] **Set up the sandbox service on the server** (README, "Python sandbox"). (S)
 - [ ] **A seccomp profile** for the sandbox narrower than Docker's default (or gVisor on
   tillyse). (M)
 - [ ] **Code models in the web UI**: the editor only opens CSG recipes, and the 3D view only

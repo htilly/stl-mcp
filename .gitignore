@@ -19,3 +19,6 @@ openscad-libs/
 
 # security review output (repo-security-review skill)
 .security-review/
+
+# local deploy notes, not for the repo
+deploy/README.md

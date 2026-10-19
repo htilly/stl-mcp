@@ -10,6 +10,7 @@
 <link rel="manifest" href="/static/brand/site.webmanifest">
 <meta name="theme-color" content="#0f172a">
 <link rel="stylesheet" href="/static/style.css">
+<script src="/static/theme.js"></script>
 <!-- three.js r169 (MIT) is served locally from web/vendor/three -->
 <script type="importmap">
 { "imports": {
@@ -21,16 +22,16 @@
   .ed-palette, .ed-inspector { background: var(--sheet); overflow-y: auto; padding: var(--s3); min-height: 0; }
   .ed-palette { border-right: 1px solid var(--rule); display: flex; flex-direction: column; gap: var(--s2); }
   .ed-inspector { border-left: 1px solid var(--rule); }
-  .ed-palette h2, .ed-inspector h2 { margin: var(--s2) 0 var(--s2); font-size: var(--t-sm); color: var(--scribe); font-weight: 600; display: flex; align-items: center; gap: var(--s2); }
+  .ed-palette h2, .ed-inspector h2 { margin: var(--s2) 0 var(--s2); font-size: var(--t-xs); color: var(--scribe); font-weight: 650; text-transform: none; letter-spacing: .02em; display: flex; align-items: center; gap: var(--s2); }
   .ed-palette h2 .grow, .ed-inspector h2 .grow { flex: 1; }
   .shapes { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
-  .shape-btn { display: flex; align-items: center; gap: 6px; width: 100%; height: 32px; justify-content: flex-start; cursor: grab; font-size: 12px; padding: 0 6px; overflow: hidden; white-space: nowrap; }
+  .shape-btn { display: flex; align-items: center; gap: 6px; width: 100%; height: 34px; justify-content: flex-start; cursor: grab; font-size: 12px; padding: 0 6px; overflow: hidden; white-space: nowrap; }
   .shape-btn svg { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; }
   .shape-btn.cut { color: var(--fault, #c0392b); }
   details.more > summary { cursor: pointer; font-size: var(--t-sm); color: var(--scribe); margin: 2px 0 4px; }
   .tree { font-size: 13px; user-select: none; }
-  .tree .row-n { display: flex; align-items: center; gap: 4px; height: 26px; padding-right: 4px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
-  .tree .row-n:hover { background: var(--layout-wash); }
+  .tree .row-n { display: flex; align-items: center; gap: 4px; height: 28px; padding-right: 4px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+  .tree .row-n:hover { background: var(--inset); }
   .tree .row-n.sel { background: color-mix(in srgb, #4f8cff 22%, transparent); }
   .tree .row-n.drop-in { outline: 2px solid #4f8cff; }
   .tree .row-n.drop-before { box-shadow: inset 0 2px 0 #4f8cff; }
@@ -49,9 +50,11 @@
   #stage { min-height: 0; position: relative; }
   .ed-tools { position: absolute; top: var(--s3); left: var(--s3); right: var(--s3); display: flex; gap: var(--s2); flex-wrap: wrap; pointer-events: none; z-index: 2; }
   .ed-tools > * { pointer-events: auto; }
-  .ed-tools button, .ed-tools select { height: 30px; padding: 0 10px; font-size: 13px; background: color-mix(in srgb, var(--sheet) 90%, transparent); }
-  .ed-tools button.on { background: var(--layout-wash); }
-  .ed-tools #commentmode.on { background: var(--pei); border-color: var(--pei); color: var(--pei-ink); }
+  .ed-tools .seg { background: var(--glass); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); box-shadow: var(--shadow-sm); }
+  .ed-tools .seg > button { padding: 0 9px; }
+  .ed-tools .seg > button.danger { color: var(--fault); }
+  .ed-tools select { height: 28px; padding: 0 6px; font-size: 13px; border: 0; background: transparent; box-shadow: none; color: var(--graphite); }
+  .ed-tools #commentmode.on { background: var(--pei); color: var(--pei-ink); }
   .ed-tools .sp { flex: 1; }
   .ed-grid { display: grid; grid-template-columns: 30px 1fr 1fr 1fr; gap: 4px 6px; align-items: center; margin-bottom: var(--s3); }
   .ed-grid label, .prm label { font-size: var(--t-sm); color: var(--scribe); }
@@ -67,31 +70,46 @@
   .vars input { width: 100%; min-width: 0; font-size: 13px; }
   .errnote { color: var(--fault, #c0392b); font-size: var(--t-sm); margin: var(--s2) 0; }
   .ed-banner { position: absolute; left: 50%; bottom: var(--s3); transform: translateX(-50%); z-index: 5; max-width: 90%; padding: var(--s2) var(--s3);
-    background: var(--sheet); border: 1px solid var(--rule-strong); border-radius: var(--r-control); display: flex; gap: var(--s3); align-items: center; font-size: 13px; }
+    background: var(--sheet); border: 1px solid var(--rule-strong); border-radius: var(--r-panel); box-shadow: var(--shadow-md); display: flex; gap: var(--s3); align-items: center; font-size: 13px; }
   .ed-banner[hidden] { display: none; }
   .ed-mode { position: absolute; left: var(--s3); bottom: var(--s3); z-index: 3; font-size: 12px; padding: 4px 8px; border-radius: var(--r-control); background: var(--sheet); border: 1px solid var(--rule); }
   .ed-mode[hidden] { display: none; }
   .measure { position: absolute; z-index: 3; pointer-events: none; transform: translate(-50%, -130%); font: 12px/1.3 ui-monospace, monospace; background: #111827; color: #fff; padding: 3px 6px; border-radius: 4px; white-space: nowrap; }
   .measure[hidden] { display: none; }
   .loading a { pointer-events: auto; }
+  .loading p { max-width: 42ch; margin: 0; padding: 0 var(--s3); text-align: center; line-height: 1.5; }
   .ed-warns .warn { margin-top: var(--s2); }
   .dirty { color: var(--scribe); font-size: var(--t-sm); }
   @media (max-width: 900px) {
-    .ed-layout { grid-template-columns: 1fr; grid-template-rows: auto 60vh auto; height: auto; }
-    .ed-palette { border-right: 0; border-bottom: 1px solid var(--rule); max-height: 40vh; }
+    /* phones: the 3D view on top, then shapes and recipe, then the inspector */
+    .ed-layout { grid-template-columns: 1fr; grid-template-rows: 58vh auto auto; height: auto; }
+    #stage { order: -1; }
+    .ed-palette { border-right: 0; border-top: 1px solid var(--rule); }
     .ed-inspector { border-left: 0; border-top: 1px solid var(--rule); }
+    .shapes { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); }
+    /* the toolbar is one row that scrolls sideways instead of covering the model */
+    .ed-tools { flex-wrap: nowrap; overflow-x: auto; pointer-events: auto; scrollbar-width: none; margin: -4px; padding: 4px; }
+    .ed-tools::-webkit-scrollbar { display: none; }
+    .ed-tools > * { flex: none; }
+    .ed-tools .sp { display: none; }
+  }
+  @media (max-width: 600px) {
+    header.top .crumb { display: none; }
+    /* "Unsaved changes" shrinks to an amber dot next to Save */
+    .dirty:not(:empty) { font-size: 0; width: 8px; height: 8px; border-radius: 50%; background: var(--wait); }
   }
 </style>
 </head>
 <body>
 <header class="top">
   <a class="wordmark" href="/" title="Back to the library"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-mark"/></svg><span class="name">auto<b>smith</b></span></a>
-  <span class="crumb">/ <b id="crumb"></b> / editor</span>
+  <span class="crumb"><a href="/">My models</a><span class="sep">/</span><b id="crumb"></b><span class="sep">/</span><span>Editor</span></span>
   <div class="grow"></div>
   <span class="dirty" id="dirty"></span>
-  <a class="btn" id="viewlink" href="#">View</a>
-  <a class="btn" id="stl" href="#" download title="The STL of the last saved version">Export STL</a>
-  <button class="primary" id="save" title="Build and save a new version (Ctrl/⌘ + S)">Save</button>
+  <a class="btn sm" id="viewlink" href="#" title="Back to the 3D view of this model">View</a>
+  <a class="btn sm" id="stl" href="#" download title="The STL of the last saved version"><svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-download"/></svg><span class="label">Export STL</span></a>
+  <button class="primary sm" id="save" title="Build and save a new version (Ctrl/⌘ + S)">Save</button>
+  <div data-usermenu></div>
 </header>
 <div class="ed-layout">
   <aside class="ed-palette">
@@ -104,37 +122,41 @@
   </aside>
   <div id="stage">
     <div class="ed-tools">
+      <div class="seg" role="group" aria-label="History">
+        <button id="undo" title="Undo (Ctrl/⌘ + Z)">Undo</button>
+        <button id="redo" title="Redo (Ctrl/⌘ + Shift + Z)">Redo</button>
+      </div>
       <div class="seg" role="group" aria-label="Tool">
         <button data-mode="translate" class="on" title="Move (W)">Move</button>
         <button data-mode="rotate" title="Rotate (E)">Rotate</button>
         <button data-mode="scale" title="Resize (R)">Resize</button>
       </div>
-      <select id="snap" aria-label="Snap to grid" title="Snap to grid">
-        <option value="0">No snap</option><option value="0.5">Snap 0.5 mm</option><option value="1">Snap 1 mm</option><option value="5" selected>Snap 5 mm</option><option value="10">Snap 10 mm</option>
-      </select>
-      <button id="magnet" class="on" title="Snap edges and centres to other shapes while moving (hold Alt to switch off)">Magnet</button>
-      <div class="seg" role="group" aria-label="Edit">
-        <button id="undo" title="Undo (Ctrl/⌘ + Z)">Undo</button>
-        <button id="redo" title="Redo (Ctrl/⌘ + Shift + Z)">Redo</button>
+      <div class="seg" role="group" aria-label="Snapping">
+        <select id="snap" aria-label="Snap to grid" title="Snap to grid">
+          <option value="0">No snap</option><option value="0.5">Snap 0.5 mm</option><option value="1">Snap 1 mm</option><option value="5" selected>Snap 5 mm</option><option value="10">Snap 10 mm</option>
+        </select>
+        <button id="magnet" class="on" title="Snap edges and centres to other shapes while moving (hold Alt to switch off)">Magnet</button>
       </div>
-      <button id="holebtn" title="Make the selection a hole (H)">Hole</button>
-      <button id="drop" title="Put the selection on the workplane (D)">Drop</button>
-      <button id="dup" title="Duplicate (Ctrl/⌘ + D)">Duplicate</button>
-      <div class="seg" role="group" aria-label="Group">
+      <div class="seg" role="group" aria-label="Arrange">
+        <button id="dup" title="Duplicate (Ctrl/⌘ + D)">Duplicate</button>
         <button id="group" title="Group the selection (Ctrl/⌘ + G)">Group</button>
         <button id="ungroup" title="Ungroup (Ctrl/⌘ + Shift + G)">Ungroup</button>
+        <button id="holebtn" title="Make the selection a hole (H)">Hole</button>
+        <button id="drop" title="Put the selection on the workplane (D)">Drop</button>
+        <button id="del" class="danger" title="Delete (Delete)">Delete</button>
       </div>
-      <button id="del" class="danger" title="Delete (Delete)">Delete</button>
       <div class="seg" role="group" aria-label="Tools">
         <button id="measure" title="Measure: click two points (M). Shift-click two faces for the distance between them.">Measure</button>
         <button id="workplane" title="Workplane: click a face to build on it (P)">Workplane</button>
         <button id="commentmode" title="Comment: click the model to leave a comment for Claude (C)">Comment</button>
       </div>
       <div class="sp"></div>
-      <button id="spread" title="Show the parts side by side or as they are placed" hidden>Spread</button>
-      <button id="holes" title="Show the holes as see-through shapes instead of cut out (a selected hole always shows)">Holes</button>
-      <button id="result" title="Show the built result with the holes cut (the server builds it)">Result</button>
-      <button id="fit" title="Zoom to fit">Fit</button>
+      <div class="seg" role="group" aria-label="View">
+        <button id="spread" title="Show the parts side by side or as they are placed" hidden>Spread</button>
+        <button id="holes" title="Show the holes as see-through shapes instead of cut out (a selected hole always shows)">Holes</button>
+        <button id="result" title="Show the built result with the holes cut (the server builds it)">Result</button>
+        <button id="fit" title="Zoom to fit">Fit</button>
+      </div>
     </div>
     <div id="pins"></div>
     <form class="cpop" id="cpop" hidden>
@@ -185,5 +207,6 @@
   </aside>
 </div>
 <script type="module" src="/static/editor.js"></script>
+<script type="module" src="/static/nav.js"></script>
 </body>
 </html>

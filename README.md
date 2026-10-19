@@ -1,5 +1,7 @@
 # autosmith.eu
 
+> **This code runs live at [https://autosmith.eu](https://autosmith.eu).**
+
 *STL, made by AI.* (repo and service name: `stl-mcp`)
 
 autosmith is a self-hosted [MCP](https://modelcontextprotocol.io) server that lets Claude (or ChatGPT,
@@ -12,9 +14,9 @@ Every change is a small, versioned edit, and you download an STL when you are ha
 
 ## See it in action
 
-[![Claude designing an ESP32 box in autosmith: click to watch the video](docs/img/demo-poster.png)](https://stl.tilly.se/demo)
+[![Claude designing an ESP32 box in autosmith: click to watch the video](docs/img/demo-poster.png)](https://autosmith.eu/demo)
 
-*A real session, sped up 4× (about one minute): [**▶ watch it on stl.tilly.se/demo**](https://stl.tilly.se/demo)
+*A real session, sped up 4× (about one minute): [**▶ watch it on autosmith.eu/demo**](https://autosmith.eu/demo)
 (or [the mp4 in the repo](web/demo.mp4)).* Claude on claude.ai
 on the right, the live 3D view on the left. A handful of short messages take an ESP32 dev board box from
 nothing to printable:
@@ -162,7 +164,7 @@ monitor in the session. It follows the server's `/api/events` stream and prints 
 `NEW_COMMENT model=<id> open=<n> url=...` line for each new open comment, which wakes Claude, who
 reads it (`tools/stl_watch.py comments`) and answers it with `update_model(..., resolves=[...])`.
 ```
-export STL_MCP_URL=https://your-server          # default: https://stl.tilly.se
+export STL_MCP_URL=https://your-server          # default: https://autosmith.eu
 python3 tools/stl_watch.py login                # once: sign in in the browser, like connecting claude.ai
 python3 tools/stl_watch.py watch
 ```
@@ -223,8 +225,7 @@ purpose, with the tests.
 The container only listens on `127.0.0.1:8765`. Set `BIND=0.0.0.0` to expose the port directly,
 or set `DOMAIN` and run `docker compose --profile caddy up -d` for automatic HTTPS.
 
-**Deploy:** merging to `main` builds the image on GitHub and deploys it to stl.tilly.se; see
-[`deploy/README.md`](deploy/README.md).
+**Deploy:** merging to `main` builds the image on GitHub and deploys it to autosmith.eu.
 
 Open `http://localhost:8765/` and log in with the token, or go to `/?token=<token>`, which
 sets a session cookie for the admin account (`ADMIN_EMAILS`, the first entry). Then add a passkey (the banner in the library, or 🔑 in the header):
@@ -249,10 +250,10 @@ Each run uses its own schema in that database (`TEST_DATABASE_URL` overrides the
 Once, about a minute. The connector then also works in the Claude apps on your phone and desktop.
 
 1. **Get a passkey (recommended).** Open the library (`https://<your-url>/`, for this deployment
-   `https://stl.tilly.se/`), log in with the token once and click **Add passkey** in the banner
+   `https://autosmith.eu/`), log in with the token once and click **Add passkey** in the banner
    (or under 🔑 in the header). Without a passkey you can still log in with the token in step 5.
 2. In claude.ai, open **Settings → Connectors** and click **Add custom connector**.
-3. Name: `autosmith`. URL: `https://<your-url>/mcp` (here: `https://stl.tilly.se/mcp`).
+3. Name: `autosmith`. URL: `https://<your-url>/mcp` (here: `https://autosmith.eu/mcp`).
    Leave the advanced settings (OAuth client id/secret) empty. Click **Add**.
 4. Click **Connect** next to the new connector. A page from your server opens.
 5. If you are not logged in there, click **Log in with passkey** (or use the token).
@@ -265,7 +266,7 @@ Once, about a minute. The connector then also works in the Claude apps on your p
 **If something goes wrong**
 - *"The request has expired"*: the approval page is valid for 10 minutes. Click Connect again.
 - Connect fails before any page opens: `PUBLIC_URL` must be the exact https address (here
-  `https://stl.tilly.se`), and the server log must not say `OAuth disabled`.
+  `https://autosmith.eu`), and the server log must not say `OAuth disabled`.
 - **Disconnecting:** 🔑 → Connected apps → **Disconnect** stops the app's access at once (it must
   be approved again to reconnect). Rotating `MCP_TOKEN` logs browsers out but does *not*
   disconnect apps, so use Disconnect for that.
@@ -451,6 +452,13 @@ With the sandbox, `create_from_script` is available to every user and `ALLOW_SCR
 needed. Without it (`SANDBOX_SOCKET` unset), build123d and STEP import are off and script models
 are back to admins-only behind `ALLOW_SCRIPT=1`. The sandbox tests (`tests/test_sandbox.py`)
 start a daemon on a temporary socket; run as root they also exercise the per-slot users.
+
+On a server with its own compose file, copy the `sandbox` service from `docker-compose.yml`
+(same image, `entrypoint: ["python", "sandboxd.py"]` and all its security settings, no env
+file and no other volumes, so it sees no secret), mount the same named volume on
+`/run/sandbox` in the server's service and set `SANDBOX_SOCKET=/run/sandbox/sandbox.sock` there.
+The deploy workflow recreates a service called `stl-mcp-sandbox` before `stl-mcp` when the
+compose file has one.
 
 ### Reference material for the AI
 `lookup_part` and `print_guide` (also MCP resources: `autosmith://guides/printing` and
