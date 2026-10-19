@@ -289,7 +289,7 @@ page). It requires `PUBLIC_URL` on https (or localhost); `OAUTH=0` turns it off.
 | `list_models`, `revert_model`, `duplicate_model`, `delete_model` | `duplicate_model` also copies someone else's public model |
 | `set_visibility` | make a model `public` (listed in the gallery) or `private` again |
 | `whoami` | the account the connection is signed in as |
-| `lookup_part` | size and mounting holes of common boards and parts (Raspberry Pi, Arduino, ESP32, fans, NEMA 17, modules ...) |
+| `lookup_part` | size and mounting holes of common boards and parts (ESP32 boards from Espressif, Seeed, LOLIN, Adafruit, LILYGO and M5Stack, Raspberry Pi, Arduino, fans, NEMA 17, modules ...) |
 | `print_guide` | rules of thumb for FDM: walls, clearances, screw/insert/nut hole sizes, overhangs |
 | `import_file` | imports STL/OBJ/GLB/PLY/OFF and STEP (in the sandbox) via `url` or `data_base64` (zip with obj+mtl is unpacked) |
 | `file_info` | dimensions, bounds, volume, number of loose parts |

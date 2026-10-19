@@ -703,9 +703,11 @@ def whoami(ctx: Context) -> dict:
 
 @mcp.tool()
 def lookup_part(query: str = "") -> dict:
-    """Size, mounting holes and notes for common boards and parts (Raspberry Pi 3/4/5/Zero/Pico,
-    Arduino Uno/Nano, ESP32 DevKit, Seeed XIAO, relay, rotary encoder, 1602 LCD, buck/boost/
-    charger modules, 30-120 mm fans, NEMA 17, 18650 cell ...), e.g. query="esp32" or "fan 40".
+    """Size, mounting holes and notes for common boards and parts: ESP32 boards (DevKit V1/
+    DevKitC V4, S3/C3/C6 DevKits, XIAO ESP32, C3 SuperMini, LOLIN S2/C3/S3 mini and D32,
+    ESP32-CAM, Feather ESP32 V2/S3, M5Stack Atom, LILYGO T-Display/-S3), Raspberry Pi 3/4/5/
+    Zero/Pico, Arduino Uno/Nano, relay, rotary encoder, 1602 LCD, buck/boost/charger modules,
+    30-120 mm fans, NEMA 17, 18650 cell ..., e.g. query="esp32" or "s3 mini".
     Use it before designing an enclosure, holder or mount for a real part instead of guessing
     sizes. Empty query lists everything. `nopscadlib` names the matching NopSCADlib constant
     for create_from_openscad (pcb(...), pcb_cutouts(...))."""

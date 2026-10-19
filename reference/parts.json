@@ -1,5 +1,5 @@
 {
-  "_note": "Board outlines and mounting holes in mm. Holes are [x, y] from the board's lower-left corner, seen from above with the long side along x. Values match NopSCADlib's pcbs.scad; check the datasheet when a fit is critical. In OpenSCAD the NopSCADlib constant gives the full board with connectors: pcb(TYPE), and pcb_cutouts(TYPE) cuts the openings for its connectors in an enclosure wall (NopSCADlib centres the board on the origin).",
+  "_note": "Board outlines and mounting holes in mm; size is [length, width, thickness] (thickness null = not published). Notes starting with APPROXIMATE come from secondary sources or clones that vary: ask the user to measure before a tight fit. source says where the numbers come from. Holes are [x, y] from the board's lower-left corner, seen from above with the long side along x. Values match NopSCADlib's pcbs.scad; check the datasheet when a fit is critical. In OpenSCAD the NopSCADlib constant gives the full board with connectors: pcb(TYPE), and pcb_cutouts(TYPE) cuts the openings for its connectors in an enclosure wall (NopSCADlib centres the board on the origin).",
   "parts": {
     "raspberry-pi-5": {
       "name": "Raspberry Pi 5",
@@ -88,15 +88,16 @@
       "nopscadlib": "ESP32_DOIT_V1"
     },
     "seeed-xiao": {
-      "name": "Seeed Studio XIAO (SAMD21/RP2040/ESP32-C3/S3)",
-      "aliases": ["xiao"],
-      "size": [21, 18, 1.2],
+      "name": "Seeed Studio XIAO (ESP32-C3/S3/C6, SAMD21, RP2040 ...)",
+      "aliases": ["xiao", "xiao esp32c3", "xiao esp32s3", "xiao esp32c6", "xiao esp32 c3", "xiao esp32 s3", "xiao esp32 c6", "xiao s3 sense"],
+      "size": [21, 17.8, 1.2],
       "corner_radius": 1.5,
       "holes": [],
       "hole_d": null,
       "screw": null,
-      "notes": "No mounting holes: hold it in a pocket or on its castellated pins. USB-C at the short edge x = 21.",
-      "nopscadlib": "XIAO"
+      "notes": "No mounting holes: hold it in a pocket or on its castellated pins (2 x 7, rows 15.24 mm apart). USB-C centred on the short edge x = 21, sticking out about 1.8 mm. The ESP32-C3/S3 use an external U.FL antenna (leave room for the cable); the S3 Sense with its camera board is 15 mm tall. Size from Seeed's wiki.",
+      "nopscadlib": "XIAO",
+      "source": "https://github.com/Seeed-Studio/wiki-documents (XIAO_ESP32C3/S3/C6 Getting Started)"
     },
     "18650-cell": {
       "name": "18650 Li-ion cell",
@@ -237,6 +238,153 @@
       "screw": "M3",
       "notes": "Face 42.3 mm square; M3 threaded holes 31 mm apart; centre boss 22 mm diameter, 2 mm high (cut a 22.5 mm hole); shaft 5 mm with a flat. Body length 20-60 mm (47 mm common): ask which one.",
       "nopscadlib": "NEMA17_47"
+    },
+    "esp32-devkitc-v4": {
+      "name": "Espressif ESP32-DevKitC V4",
+      "aliases": ["devkitc", "esp32-devkitc", "devkitc v4", "esp32 devkitc"],
+      "size": [48.2, 27.9, null],
+      "holes": [],
+      "hole_d": null,
+      "screw": null,
+      "notes": "PCB 48.2 x 27.9 mm; the WROOM module's antenna sticks out 6.2 mm past the far end (x = 48.2 to 54.4), so the overall length is 54.4 mm - keep metal and screws away from the antenna. No mounting holes: hold it in a pocket or on its pins (2 x 19, 2.54 mm pitch, rows 25.4 mm apart). Micro-USB on the short edge x = 0. Thickness not published.",
+      "source": "https://github.com/espressif/esp-dev-kits (esp32-devkitc-v4-dimensions-back.jpg), kicad-libraries ESP32-DevKitC.kicad_mod",
+      "nopscadlib": null
+    },
+    "esp32-s3-devkitc-1": {
+      "name": "Espressif ESP32-S3-DevKitC-1",
+      "aliases": ["s3 devkitc", "esp32-s3-devkitc", "esp32s3 devkit", "esp32-s3 devkit"],
+      "size": [62.7, 25.5, null],
+      "holes": [],
+      "hole_d": null,
+      "screw": null,
+      "notes": "APPROXIMATE: about 62.7 x 25.5 mm (sources differ on the width, 25.4-26 mm), plus about 6 mm of module antenna past the far end. No mounting holes. 2 x 22 pins at 2.54 mm; the row spacing is 22.86 mm in Espressif's footprint but 25.4 mm was measured on a real board - ask the user to measure before fixing the pin positions. Two USB-C on the short edge x = 0. Espressif's DXF is the exact reference.",
+      "source": "https://dl.espressif.com/dl/schematics/esp_idf/DXF_ESP32-S3-DevKitC-1_V1.1_20220429.dxf (not checked), kicad-libraries ESP32-S3-DevKitC.kicad_mod",
+      "nopscadlib": null
+    },
+    "esp32-c3-devkitm-1": {
+      "name": "Espressif ESP32-C3-DevKitM-1",
+      "aliases": ["c3 devkitm", "esp32-c3-devkitm", "esp32c3 devkit", "esp32-c3 devkit"],
+      "size": [38.9, 25.4, null],
+      "holes": [],
+      "hole_d": null,
+      "screw": null,
+      "notes": "APPROXIMATE size (38.9 x 25.4 mm without the antenna, which adds about 7 mm at the far end). No mounting holes. 2 x 15 pins at 2.54 mm, rows 22.86 mm apart (Espressif footprint). USB at the short edge x = 0.",
+      "source": "https://github.com/espressif/kicad-libraries (ESP32-C3-DevKitM-1.kicad_mod); size from CNX Software",
+      "nopscadlib": null
+    },
+    "esp32-c6-devkitc-1": {
+      "name": "Espressif ESP32-C6-DevKitC-1",
+      "aliases": ["c6 devkitc", "esp32-c6-devkitc", "esp32c6 devkit", "esp32-c6 devkit"],
+      "size": [51.8, 25.4, null],
+      "holes": [],
+      "hole_d": null,
+      "screw": null,
+      "notes": "APPROXIMATE: 51.8 x 25.4 mm PCB; with the module antenna about 58 mm long. No mounting holes. 2 x 16 pins at 2.54 mm, rows 22.86 mm apart (Espressif footprint). Two USB-C on the short edge x = 0.",
+      "source": "https://github.com/espressif/kicad-libraries (ESP32-C6-DevKitC-1.kicad_mod); size from Espressif's PCB PDF via search",
+      "nopscadlib": null
+    },
+    "esp32-c3-supermini": {
+      "name": "ESP32-C3 SuperMini (generic)",
+      "aliases": ["supermini", "c3 supermini", "esp32c3 supermini", "esp32-c3 super mini"],
+      "size": [22.5, 18, null],
+      "holes": [],
+      "hole_d": null,
+      "screw": null,
+      "notes": "APPROXIMATE, clones vary (22.5-23 x 18 mm): ask the user to measure theirs. No mounting holes: hold it in a pocket. 2 x 8 pins at 2.54 mm, rows 15.24 mm apart. USB-C on a short edge; small ceramic/PCB antenna at the other end.",
+      "source": "https://protosupplies.com/product/esp32c3-supermini/",
+      "nopscadlib": null
+    },
+    "lolin-s2-mini": {
+      "name": "Wemos/LOLIN S2 mini, C3 mini, S3 mini",
+      "aliases": ["s2 mini", "c3 mini", "s3 mini", "lolin s2 mini", "lolin c3 mini", "lolin s3 mini", "wemos s2 mini", "wemos c3 mini", "wemos s3 mini"],
+      "size": [34.3, 25.4, null],
+      "corner_radius": 4,
+      "holes": [[31.0, 2.5], [31.0, 22.9]],
+      "hole_d": 2.0,
+      "screw": "M2",
+      "notes": "Same outline for all three. USB-C on the short edge x = 0; that end is narrower: the last 7.7 mm (x = 0-7.7) are 23.5 mm wide (a 1.9 mm step on one side). Corners R4 at the hole end, R1 at the USB end. Pins at 2.54 mm in rows 1.27 mm in from the long edges (outer rows 22.86 mm apart; S2/S3 mini have double rows, C3 mini single).",
+      "source": "https://github.com/wemos/docs/tree/master/docs/en/_static/files (dim_*mini*.pdf)",
+      "nopscadlib": null
+    },
+    "lolin-d32": {
+      "name": "Wemos/LOLIN D32",
+      "aliases": ["d32", "lolin d32", "wemos d32"],
+      "size": [57.0, 25.4, null],
+      "corner_radius": 2,
+      "holes": [[55.0, 2.0], [55.0, 23.4]],
+      "hole_d": 2.1,
+      "screw": "M2",
+      "notes": "The two holes flank the WROOM antenna at the far end (x = 57); keep metal away from the antenna. Micro-USB and a JST-PH 2.0 battery connector on the short edge x = 0. 16 pins per side.",
+      "source": "https://github.com/wemos/docs/tree/master/docs/en/_static/files (dim_d32.pdf)",
+      "nopscadlib": null
+    },
+    "esp32-cam": {
+      "name": "ESP32-CAM (AI-Thinker)",
+      "aliases": ["esp32 cam", "esp32-cam", "ai-thinker cam", "ai thinker esp32-cam"],
+      "size": [40.5, 27, 4.5],
+      "holes": [],
+      "hole_d": null,
+      "screw": null,
+      "notes": "APPROXIMATE (27 x 40.5 x 4.5 mm +-0.2, clones vary). No mounting holes and no USB (the separate ESP32-CAM-MB adapter adds micro-USB and makes it about 20 mm taller). The camera sits on a short ribbon cable; the microSD slot is on the short edge opposite the antenna. 2 x 8 pins.",
+      "source": "AI-Thinker ESP32-CAM datasheet (via search, not checked)",
+      "nopscadlib": null
+    },
+    "feather-esp32-v2": {
+      "name": "Adafruit Feather ESP32 V2",
+      "aliases": ["feather esp32", "feather esp32 v2", "adafruit feather esp32", "huzzah32"],
+      "size": [50.8, 22.86, 1.6],
+      "corner_radius": 2.54,
+      "holes": [[2.54, 2.54], [2.54, 20.32], [48.26, 2.54], [48.26, 20.32]],
+      "hole_d": 2.5,
+      "screw": "M2.5",
+      "notes": "Feather standard 2.0 x 0.9 inch. USB-C centred on the short edge x = 0, sticking out about 1.1 mm; the module and antenna at the far end. Pins: 16 at y = 1.27 and 12 at y = 21.59 (2.54 mm pitch).",
+      "source": "https://github.com/adafruit/Adafruit-ESP32-Feather-V2-PCB",
+      "nopscadlib": "Feather405"
+    },
+    "feather-esp32-s3": {
+      "name": "Adafruit Feather ESP32-S3",
+      "aliases": ["feather esp32-s3", "feather esp32 s3", "feather s3", "adafruit feather esp32-s3"],
+      "size": [50.8, 22.86, 1.6],
+      "corner_radius": 2.54,
+      "holes": [[2.54, 2.54], [2.54, 20.32], [48.26, 1.84], [48.26, 20.96]],
+      "hole_d": 2.5,
+      "screw": "M2",
+      "notes": "Not symmetric: the two holes at the far (antenna) end are 2.2 mm and sit 1.84 mm from the long edges; the USB-end ones are 2.5 mm, 2.54 mm in. USB-C centred on the short edge x = 0, sticking out about 1.1 mm. Pins: 16 at y = 1.27 and 12 at y = 21.59.",
+      "source": "https://github.com/adafruit/Adafruit-Feather-ESP32-S3-PCB",
+      "nopscadlib": "Feather405"
+    },
+    "m5stack-atom": {
+      "name": "M5Stack Atom Lite / AtomS3 Lite",
+      "aliases": ["atom lite", "atoms3", "atom s3", "m5stack atom", "m5 atom", "atoms3 lite"],
+      "size": [24, 24, 10],
+      "holes": [],
+      "hole_d": null,
+      "screw": null,
+      "notes": "A finished module in its own case: 24 x 24 x 10 mm (AtomS3 Lite 9.5 mm, Atom Matrix 14 mm). USB-C on one side; an M2 threaded hole in the back (position not published - ask the user or hold it in a 24.3 mm pocket).",
+      "source": "https://github.com/m5stack/m5-docs (atom_lite.md, atom_matrix.md)",
+      "nopscadlib": null
+    },
+    "lilygo-t-display": {
+      "name": "LILYGO T-Display (ESP32)",
+      "aliases": ["t-display", "ttgo t-display", "lilygo t-display", "ttgo"],
+      "size": [51.49, 25.19, 1.0],
+      "holes": [],
+      "hole_d": null,
+      "screw": null,
+      "notes": "No mounting holes. 1.14\" display on top. 2 x 12 pins at 2.54 mm, rows 22.91 mm apart, 1.26 and 1.02 mm in from the long edges; they start 16.1 mm from one end. USB-C on a short edge. Measured from LILYGO's STEP model.",
+      "source": "https://github.com/Xinyuan-LilyGO/TTGO-T-Display (3d_file/T-Display.step)",
+      "nopscadlib": null
+    },
+    "lilygo-t-display-s3": {
+      "name": "LILYGO T-Display-S3",
+      "aliases": ["t-display-s3", "t-display s3", "lilygo t-display-s3", "tdisplay s3"],
+      "size": [60.8, 25.5, 1.2],
+      "holes": [],
+      "hole_d": null,
+      "screw": null,
+      "notes": "APPROXIMATE (measured from LILYGO's STL): PCB about 60.8 x 25.5 x 1.2 mm; with the display and parts about 62.0 x 26.0 x 9.9 mm overall; the display module is 49.9 x 25.95 mm. USB-C face about 1.2 mm past the PCB edge. No mounting holes found.",
+      "source": "https://github.com/Xinyuan-LilyGO/T-Display-S3/tree/main/dimensions",
+      "nopscadlib": null
     }
   }
 }
