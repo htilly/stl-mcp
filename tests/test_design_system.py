@@ -181,6 +181,19 @@ def test_phone_layout_keeps_toolbars_off_the_model_and_settings_full_screen():
     assert ".ed-tools { flex-wrap: nowrap; overflow-x: auto;" in editor and "#stage { order: -1; }" in editor
 
 
+def test_viewer_and_editor_headers_have_a_back_link_that_shows_only_on_phones():
+    """The breadcrumb is hidden on phones, so the header needs an explicit way back to the library."""
+    css = (WEB / "style.css").read_text()
+    assert "header.top .back { display: none; }" in css
+    phone = css[css.index("@media (max-width: 520px) {"):]
+    assert "header.top .back { display: inline-flex; }" in phone
+    for page in ("viewer.html", "editor.html"):
+        html = (WEB / page).read_text()
+        header = html[html.index('<header class="top">'):html.index("</header>")]
+        assert 'class="btn icon back" href="/"' in header and "#i-back" in header
+        assert header.index('class="btn icon back"') < header.index('class="wordmark"')
+
+
 def test_settings_tabs_have_short_labels_for_phones():
     index = (WEB / "index.html").read_text()
     for short in ("Profile", "Security", "AI apps"):
