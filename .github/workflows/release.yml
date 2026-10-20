@@ -1,0 +1,42 @@
+name: Release
+
+# Ships a version to prod (autosmith.eu, service stl-mcp on tillyse):
+#
+#   git tag v1.4.0 <a commit on main> && git push origin v1.4.0
+#
+# No new build: deploy.yml's promote job retags the :main-<sha> image that
+# main built (and dev has been running) as :v1.4.0 and :release, then deploys
+# it. If main's build is still running the tag waits for it.
+#
+# Roll back, or redeploy: run this workflow by hand (from main) with an older
+# version. Its image already exists, so it is just retagged and deployed.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Existing release to deploy to prod, e.g. v1.3.2"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-stl-mcp-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.repository == 'htilly/stl-mcp'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/deploy.yml
+    with:
+      target: prod
+      version: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
+      run_actor: ${{ github.actor }}
+      rerun_actor: ${{ github.triggering_actor }}

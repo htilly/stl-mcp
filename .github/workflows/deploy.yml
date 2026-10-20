@@ -1,75 +1,104 @@
 name: Deploy to tillyse
 
-# Runs on the self-hosted runner (stl-mcp-runner) on tillyse after
-# "Build and Push Docker Image" has pushed a new image for a push to main.
+# Reusable: called by deploy-dev.yml (every successful build of main ->
+# dev.autosmith.eu) and release.yml (a v* tag -> autosmith.eu). Nothing
+# triggers it directly.
+#
+#   target  service       image tag on tillyse  URL                  token var
+#   dev     stl-mcp-dev   :main                 dev.autosmith.eu     MCP_TOKEN_DEV
+#   prod    stl-mcp       :release              autosmith.eu         MCP_TOKEN
+#
+# Prod never runs a fresh build: release.yml's tag is promoted by retagging the
+# :main-<sha> image that dev already ran, so prod gets byte-for-byte that image.
 #
 # The runner talks to Docker through kraftmon-docker-proxy, which has BUILD=0
 # and EXEC=0: this job CANNOT build anything on tillyse and cannot exec into any
 # container. It can only pull an already published image from ghcr.io and
-# recreate the single service `stl-mcp` - it never touches the other ~60
+# recreate the single service for its target - it never touches the other ~60
 # containers on the machine.
 #
-# The repo is PUBLIC, so the gates below are what keep fork code off the
-# machine: the job requires a successful build of a push to main in this repo,
-# AND that the account behind the build is listed in ALLOWED_ACTORS in the
-# gate job.
+# The repo is PUBLIC, so the gates are what keep fork code off the machine: the
+# callers only call this for pushes in this repo, and the gate job below
+# requires that the accounts behind the run are listed in ALLOWED_ACTORS.
 #
 # Every compose call below passes --env-file "$COMPOSE_ENV_FILE". The runner
 # cannot see /config/.env, so without that flag ${TZ} etc. would be empty when
 # compose reads the file.
 
 on:
-  workflow_run:
-    workflows: ["Build and Push Docker Image"]
-    types: [completed]
-    branches: [main]
+  workflow_call:
+    inputs:
+      target:
+        description: "dev or prod"
+        type: string
+        required: true
+      sha:
+        description: "dev: the full commit sha that was built on main"
+        type: string
+        default: ""
+      version:
+        description: "prod: the release tag to deploy, e.g. v1.4.0"
+        type: string
+        default: ""
+      run_actor:
+        description: "whoever started the run that led here"
+        type: string
+        required: true
+      rerun_actor:
+        description: "whoever started this run attempt (differs on a re-run)"
+        type: string
+        required: true
+      commit_message:
+        description: "dev: the commit message, for the ntfy notification"
+        type: string
+        default: ""
+      build_url:
+        description: "dev: link to the build run, for the summary"
+        type: string
+        default: ""
 
 permissions:
   contents: read
 
-concurrency:
-  group: deploy-stl-mcp-tillyse
-  cancel-in-progress: false
+env:
+  IMAGE: ghcr.io/htilly/stl-mcp
 
 jobs:
   # ---------------------------------------------------------------------------
   # Gate. Runs on GitHub's own runner, i.e. BEFORE anything at all may land on
-  # tillyse. If it does not let the run through, the self-hosted runner never
-  # starts.
+  # tillyse or be retagged on ghcr.io. If it does not let the run through,
+  # nothing else starts.
   gate:
     name: Check who triggered this
     runs-on: ubuntu-latest
-
-    # Only a successful build, of a push (not a PR), to main, in this repo
-    # (not a fork).
-    if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.head_repository.full_name == github.repository
 
     outputs:
       allowed: ${{ steps.check.outputs.allowed }}
 
     env:
       # =====================================================================
-      # WHICH ACCOUNTS MAY DEPLOY TO TILLYSE
+      # WHICH ACCOUNTS MAY DEPLOY TO TILLYSE (dev and prod)
       # Space-separated GitHub usernames. Add more here.
       # Empty list = no deploy happens at all.
       ALLOWED_ACTORS: "htilly"
       # =====================================================================
 
-      # actor = whoever started the build. triggering_actor = whoever started
-      # this particular run attempt, which differs on a re-run. Both must be in
-      # the list, otherwise someone else could re-run your build and deploy.
-      RUN_ACTOR: ${{ github.event.workflow_run.actor.login }}
-      RERUN_ACTOR: ${{ github.event.workflow_run.triggering_actor.login }}
+      # Both must be in the list, otherwise someone else could re-run your
+      # build and deploy.
+      RUN_ACTOR: ${{ inputs.run_actor }}
+      RERUN_ACTOR: ${{ inputs.rerun_actor }}
+      TARGET: ${{ inputs.target }}
 
     steps:
       - name: Match actor against the allowlist
         id: check
         run: |
           set -euo pipefail
+
+          case "$TARGET" in
+            dev|prod) ;;
+            *) echo "::error::unknown target '$TARGET'"; exit 1 ;;
+          esac
 
           allowed=true
           for who in "$RUN_ACTOR" "$RERUN_ACTOR"; do
@@ -86,57 +115,143 @@ jobs:
 
           echo "allowed=$allowed" >> "$GITHUB_OUTPUT"
           {
-            echo "### Gate"
+            echo "### Gate ($TARGET)"
             echo ""
             echo "| | |"
             echo "|---|---|"
-            echo "| started the build | \`$RUN_ACTOR\` |"
-            echo "| started the run | \`$RERUN_ACTOR\` |"
+            echo "| started the run | \`$RUN_ACTOR\` |"
+            echo "| started this attempt | \`$RERUN_ACTOR\` |"
             echo "| allowed accounts | \`$ALLOWED_ACTORS\` |"
             echo "| deploy | \`$allowed\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
   # ---------------------------------------------------------------------------
-  deploy:
-    name: Deploy stl-mcp to tillyse
+  # Prod only: point :<version> and :release on ghcr.io at the image main built
+  # from the tagged commit. No build happens here.
+  promote:
+    name: Promote the main image to the release
     needs: gate
+    if: needs.gate.outputs.allowed == 'true' && inputs.target == 'prod'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+      subject: ${{ steps.resolve.outputs.subject }}
+
+    env:
+      VERSION: ${{ inputs.version }}
+
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Resolve the release tag
+        id: resolve
+        run: |
+          set -euo pipefail
+
+          if ! printf '%s' "$VERSION" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::'$VERSION' is not a release tag like v1.4.0"
+            exit 1
+          fi
+          git rev-parse -q --verify "refs/tags/$VERSION" > /dev/null \
+            || { echo "::error::tag $VERSION does not exist"; exit 1; }
+
+          SHA=$(git rev-parse "refs/tags/$VERSION^{commit}")
+          # Only what has been on main - and therefore on dev - may reach prod.
+          git merge-base --is-ancestor "$SHA" origin/main \
+            || { echo "::error::$VERSION ($SHA) is not on main"; exit 1; }
+
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "subject=Release $VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GitHub Container Registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Retag the main image as the release
+        env:
+          SHA: ${{ steps.resolve.outputs.sha }}
+        run: |
+          set -euo pipefail
+          SRC="$IMAGE:main-${SHA::7}"
+
+          # Tagging right after a merge is fine: wait for main's build to push
+          # the image (up to 20 minutes) instead of failing.
+          for attempt in $(seq 1 40); do
+            if docker buildx imagetools inspect "$SRC" > /dev/null 2>&1; then
+              break
+            fi
+            if [ "$attempt" -eq 40 ]; then
+              echo "::error::$SRC does not exist - main never built $VERSION's commit successfully"
+              exit 1
+            fi
+            echo "waiting for $SRC ($attempt/40)"
+            sleep 30
+          done
+
+          docker buildx imagetools create -t "$IMAGE:$VERSION" -t "$IMAGE:release" "$SRC"
+          echo "| release | \`$IMAGE:$VERSION\` = \`:release\` = \`$SRC\` |" >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Deploy stl-mcp (${{ inputs.target }}) to tillyse
+    needs: [gate, promote]
+    # promote is skipped for dev, which would skip this job too without the
+    # explicit result check.
     if: >-
+      !cancelled() &&
       needs.gate.outputs.allowed == 'true' &&
-      github.event.workflow_run.head_repository.full_name == github.repository
+      (needs.promote.result == 'success' ||
+       (inputs.target == 'dev' && needs.promote.result == 'skipped'))
     runs-on: [self-hosted, stl-mcp]
 
     # Second gate, on GitHub's side and independent of the YAML expressions
-    # above: the tillyse environment only admits runs from main.
-    environment: tillyse
+    # above: the dev environment only admits main, prod only main and v* tags.
+    environment: ${{ inputs.target }}
 
     env:
-      IMAGE: ghcr.io/htilly/stl-mcp
-      SERVICE: stl-mcp
-      SANDBOX_SERVICE: stl-mcp-sandbox
-      CONTAINER: stl-mcp
+      TARGET: ${{ inputs.target }}
+      SERVICE: ${{ inputs.target == 'prod' && 'stl-mcp' || 'stl-mcp-dev' }}
+      CONTAINER: ${{ inputs.target == 'prod' && 'stl-mcp' || 'stl-mcp-dev' }}
+      SANDBOX_SERVICE: ${{ inputs.target == 'prod' && 'stl-mcp-sandbox' || 'stl-mcp-dev-sandbox' }}
+      # The tag the service in /config/docker-compose.yml points at. The deploy
+      # moves it locally to the image it pulled.
+      MOVING_TAG: ${{ inputs.target == 'prod' && 'release' || 'main' }}
+      # The name of the runner env var holding this instance's token.
+      TOKEN_VAR: ${{ inputs.target == 'prod' && 'MCP_TOKEN' || 'MCP_TOKEN_DEV' }}
+      FULL_SHA: ${{ inputs.target == 'prod' && needs.promote.outputs.sha || inputs.sha }}
+      VERSION: ${{ inputs.version }}
       COMPOSE_PROJECT: config
       COMPOSE_DIR: /config
       # The runner shares config_default with the app and reaches it on the
-      # container port (8765), not the host's 127.0.0.1:8892.
-      APP_URL: http://stl-mcp:8765
+      # container port (8765), not the host's 127.0.0.1 port.
+      APP_URL: ${{ inputs.target == 'prod' && 'http://stl-mcp:8765' || 'http://stl-mcp-dev:8765' }}
       # The startup marker the app prints once it is actually up (server.py).
       # If it changes in one place it must change in both.
       READY_MARKER: STL_MCP_READY
       READY_TIMEOUT_SECONDS: "120"
-      # DOCKER_HOST, NTFY_URL, NTFY_TOKEN, MCP_TOKEN, COMPOSE_FILE_PATH and
-      # COMPOSE_ENV_FILE come from the runner's container environment (see
-      # /config/docker-compose.yml and /config/secrets/stl-mcp-runner.env on
-      # tillyse). MCP_TOKEN only lives there - never in this repo.
+      # DOCKER_HOST, NTFY_URL, NTFY_TOKEN, MCP_TOKEN, MCP_TOKEN_DEV,
+      # COMPOSE_FILE_PATH and COMPOSE_ENV_FILE come from the runner's container
+      # environment (see /config/docker-compose.yml and
+      # /config/secrets/stl-mcp-runner.env on tillyse). The tokens only live
+      # there - never in this repo.
 
     steps:
       # -----------------------------------------------------------------------
       - name: Preflight
         id: pre
+        env:
+          BUILD_URL: ${{ inputs.build_url }}
         run: |
           set -euo pipefail
 
           fail=0
-          for v in DOCKER_HOST NTFY_URL NTFY_TOKEN MCP_TOKEN COMPOSE_FILE_PATH COMPOSE_ENV_FILE; do
+          for v in DOCKER_HOST NTFY_URL NTFY_TOKEN "$TOKEN_VAR" COMPOSE_FILE_PATH COMPOSE_ENV_FILE; do
             if [ -z "${!v:-}" ]; then
               echo "::error::$v is not set in the runner's environment"
               fail=1
@@ -149,30 +264,36 @@ jobs:
           docker version --format '{{.Server.Version}}' > /dev/null \
             || { echo "::error::cannot reach the socket proxy at $DOCKER_HOST"; exit 1; }
 
-          # The compose file must actually point the service at the tag we deploy.
-          if ! grep -qE "^\s+image:\s+${IMAGE}:main\s*$" "$COMPOSE_FILE_PATH"; then
-            echo "::error::$COMPOSE_FILE_PATH does not point $SERVICE at ${IMAGE}:main"
+          # The compose file must actually point a service at the tag we deploy.
+          if ! grep -qE "^\s+image:\s+${IMAGE}:${MOVING_TAG}\s*$" "$COMPOSE_FILE_PATH"; then
+            echo "::error::$COMPOSE_FILE_PATH does not point $SERVICE at ${IMAGE}:${MOVING_TAG}"
             exit 1
           fi
 
-          FULL_SHA="${{ github.event.workflow_run.head_sha }}"
+          printf '%s' "$FULL_SHA" | grep -qE '^[0-9a-f]{40}$' \
+            || { echo "::error::no commit sha to deploy ('$FULL_SHA')"; exit 1; }
           SHORT_SHA="${FULL_SHA:0:7}"
           STAMP="$(date +%Y%m%d-%H%M%S)"
 
-          echo "full_sha=$FULL_SHA"           >> "$GITHUB_OUTPUT"
-          echo "short_sha=$SHORT_SHA"         >> "$GITHUB_OUTPUT"
-          echo "rollback_tag=rollback-$STAMP" >> "$GITHUB_OUTPUT"
-          echo "started_epoch=$(date +%s)"    >> "$GITHUB_OUTPUT"
+          # dev pulls the sha-pinned build of main, prod the release tag that
+          # promote pointed at that same image.
+          if [ "$TARGET" = "prod" ]; then PULL_TAG="$VERSION"; else PULL_TAG="main-$SHORT_SHA"; fi
+
+          echo "full_sha=$FULL_SHA"                   >> "$GITHUB_OUTPUT"
+          echo "short_sha=$SHORT_SHA"                 >> "$GITHUB_OUTPUT"
+          echo "pull_tag=$PULL_TAG"                   >> "$GITHUB_OUTPUT"
+          echo "rollback_tag=rollback-$TARGET-$STAMP" >> "$GITHUB_OUTPUT"
+          echo "started_epoch=$(date +%s)"            >> "$GITHUB_OUTPUT"
 
           {
-            echo "### Deploy stl-mcp to tillyse"
+            echo "### Deploy $SERVICE ($TARGET) to tillyse"
             echo ""
             echo "| | |"
             echo "|---|---|"
             echo "| commit | \`$FULL_SHA\` |"
-            echo "| image | \`${IMAGE}:main-$SHORT_SHA\` |"
-            echo "| rollback tag | \`rollback-$STAMP\` |"
-            echo "| build | [#${{ github.event.workflow_run.run_number }}](${{ github.event.workflow_run.html_url }}) |"
+            echo "| image | \`${IMAGE}:$PULL_TAG\` |"
+            echo "| rollback tag | \`rollback-$TARGET-$STAMP\` |"
+            [ -z "$BUILD_URL" ] || echo "| build | $BUILD_URL |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       # -----------------------------------------------------------------------
@@ -182,34 +303,35 @@ jobs:
           set -euo pipefail
           TAG="${{ steps.pre.outputs.rollback_tag }}"
 
-          if docker image inspect "$IMAGE:main" > /dev/null 2>&1; then
-            docker tag "$IMAGE:main" "$IMAGE:$TAG"
-            echo "tagged $IMAGE:main -> $IMAGE:$TAG"
+          if docker image inspect "$IMAGE:$MOVING_TAG" > /dev/null 2>&1; then
+            docker tag "$IMAGE:$MOVING_TAG" "$IMAGE:$TAG"
+            echo "tagged $IMAGE:$MOVING_TAG -> $IMAGE:$TAG"
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::$IMAGE:main does not exist locally, nothing to roll back to"
+            echo "::warning::$IMAGE:$MOVING_TAG does not exist locally, nothing to roll back to"
             echo "available=false" >> "$GITHUB_OUTPUT"
           fi
 
       # -----------------------------------------------------------------------
-      # Pull exactly the sha-pinned tag the build pushed and move :main to it.
-      # That is what makes the deploy provably equal to the triggering commit.
+      # Pull exactly the pinned tag (:main-<sha> or :vX.Y.Z) and move the
+      # service's tag to it. That is what makes the deploy provably equal to
+      # the triggering commit.
       - name: Pull the image built from this commit
         id: pull
         run: |
           set -euo pipefail
-          SHORT="${{ steps.pre.outputs.short_sha }}"
+          PULL_TAG="${{ steps.pre.outputs.pull_tag }}"
 
-          echo "::group::pull $IMAGE:main-$SHORT"
-          docker pull "$IMAGE:main-$SHORT"
-          docker tag  "$IMAGE:main-$SHORT" "$IMAGE:main"
-          TARGET=$(docker image inspect -f '{{.Id}}' "$IMAGE:main")
-          echo "target image id: $TARGET"
-          echo "target_id=$TARGET" >> "$GITHUB_OUTPUT"
+          echo "::group::pull $IMAGE:$PULL_TAG"
+          docker pull "$IMAGE:$PULL_TAG"
+          docker tag  "$IMAGE:$PULL_TAG" "$IMAGE:$MOVING_TAG"
+          TARGET_ID=$(docker image inspect -f '{{.Id}}' "$IMAGE:$MOVING_TAG")
+          echo "target image id: $TARGET_ID"
+          echo "target_id=$TARGET_ID" >> "$GITHUB_OUTPUT"
           echo "::endgroup::"
 
       # -----------------------------------------------------------------------
-      - name: Recreate stl-mcp
+      - name: Recreate the service
         id: recreate
         run: |
           set -euo pipefail
@@ -251,7 +373,6 @@ jobs:
         run: |
           set -uo pipefail
           SINCE="${{ steps.recreate.outputs.since }}"
-          FULL_SHA="${{ steps.pre.outputs.full_sha }}"
 
           LOG=$(mktemp)
           trap 'rm -f "$LOG"' EXIT
@@ -297,7 +418,7 @@ jobs:
           echo "| startup marker | found after ${waited}s |" >> "$GITHUB_STEP_SUMMARY"
 
       # -----------------------------------------------------------------------
-      - name: Wait for stl-mcp to become healthy
+      - name: Wait for the service to become healthy
         run: |
           set -euo pipefail
           deadline=$(( $(date +%s) + 300 ))
@@ -383,8 +504,9 @@ jobs:
       - name: Verify /mcp answers with a token
         run: |
           set -euo pipefail
+          TOKEN="${!TOKEN_VAR}"
           CODE=$(curl -o /dev/null -sS -w '%{http_code}' --max-time 15 \
-            -H "Authorization: Bearer $MCP_TOKEN" \
+            -H "Authorization: Bearer $TOKEN" \
             -H 'Content-Type: application/json' \
             -H 'Accept: application/json, text/event-stream' \
             -X POST "$APP_URL/mcp" \
@@ -480,7 +602,7 @@ jobs:
               echo "$unknown error line(s) matched no known pattern and are NOT shown here - the log for this repo is public. Read them on tillyse with:"
               echo ""
               echo '```bash'
-              echo "docker logs --since $SINCE stl-mcp"
+              echo "docker logs --since $SINCE $CONTAINER"
               echo '```'
             fi
             if [ "$ERRORS" -eq 0 ]; then
@@ -494,16 +616,16 @@ jobs:
         run: |
           set -uo pipefail
           TAG="${{ steps.pre.outputs.rollback_tag }}"
-          echo "::warning::rolling $IMAGE:main back to $IMAGE:$TAG"
+          echo "::warning::rolling $IMAGE:$MOVING_TAG back to $IMAGE:$TAG"
 
-          docker tag "$IMAGE:$TAG" "$IMAGE:main" || { echo "::error::retag failed"; exit 1; }
+          docker tag "$IMAGE:$TAG" "$IMAGE:$MOVING_TAG" || { echo "::error::retag failed"; exit 1; }
           docker compose \
             -p "$COMPOSE_PROJECT" \
             --project-directory "$COMPOSE_DIR" \
             --env-file "$COMPOSE_ENV_FILE" \
             -f "$COMPOSE_FILE_PATH" \
             up -d --no-deps --force-recreate \
-            "$SERVICE" || { echo "::error::rollback recreate failed - stl-mcp may be down"; exit 1; }
+            "$SERVICE" || { echo "::error::rollback recreate failed - $SERVICE may be down"; exit 1; }
 
           for attempt in $(seq 1 24); do
             if OUT=$(curl -fsS --max-time 10 "$APP_URL/health"); then
@@ -512,7 +634,7 @@ jobs:
             fi
             sleep 5
           done
-          echo "::error::rolled back but stl-mcp does not answer on /health"
+          echo "::error::rolled back but $SERVICE does not answer on /health"
           exit 1
 
       # -----------------------------------------------------------------------
@@ -523,11 +645,15 @@ jobs:
             echo ""
             echo "The deploy succeeded. All checks passed."
             echo ""
+            if [ "$TARGET" = "prod" ]; then
+              echo "Roll back: run the **Release** workflow by hand with an older version."
+              echo ""
+            fi
             echo "Roll back manually, on tillyse:"
             echo '```bash'
-            echo "docker tag $IMAGE:${{ steps.pre.outputs.rollback_tag }} $IMAGE:main"
+            echo "docker tag $IMAGE:${{ steps.pre.outputs.rollback_tag }} $IMAGE:$MOVING_TAG"
             echo "cd /config && docker compose -p config --env-file /config/stl-mcp-runner/compose.env \\"
-            echo "  -f /config/docker-compose.yml up -d --no-deps --force-recreate stl-mcp"
+            echo "  -f /config/docker-compose.yml up -d --no-deps --force-recreate $SERVICE"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -538,7 +664,7 @@ jobs:
           # The commit message is text someone else can control. It goes via
           # the environment and is only referenced as "$COMMIT_MESSAGE", so it
           # cannot be interpolated into the script and executed.
-          COMMIT_MESSAGE: ${{ github.event.workflow_run.head_commit.message }}
+          COMMIT_MESSAGE: ${{ inputs.target == 'prod' && needs.promote.outputs.subject || inputs.commit_message }}
         run: |
           set -uo pipefail
 
@@ -557,7 +683,7 @@ jobs:
 
           BODY=$(printf '%s\n' \
             "$SUBJECT" \
-            "Restarted: stl-mcp" \
+            "Restarted: $SERVICE" \
             "Time: $DUR")
 
           if [ -z "${NTFY_TOKEN:-}" ]; then
@@ -566,7 +692,7 @@ jobs:
           fi
 
           curl -s -H "Authorization: Bearer $NTFY_TOKEN" \
-               -H "Title: stl-mcp deployed: $SHORT" \
+               -H "Title: $SERVICE deployed: ${VERSION:-$SHORT}" \
                -H "Priority: default" \
                -H "Tags: white_check_mark" \
                -d "$BODY" \
@@ -584,7 +710,7 @@ jobs:
           ROLLED="${{ steps.rollback_tag.outputs.available == 'true' && 'yes (automatic)' || 'no - no rollback image existed' }}"
 
           BODY=$(printf '%s\n' \
-            "The stl-mcp deploy failed on tillyse ($(date '+%Y-%m-%d %H:%M'))." \
+            "The $SERVICE deploy failed on tillyse ($(date '+%Y-%m-%d %H:%M'))." \
             "Commit: ${SHORT:-unknown}" \
             "Rollback tag: ${TAG:-none created}" \
             "Restored: $ROLLED" \
@@ -593,7 +719,7 @@ jobs:
           [ -n "${NTFY_TOKEN:-}" ] || { echo "::error::NTFY_TOKEN is missing"; exit 0; }
 
           curl -s -H "Authorization: Bearer $NTFY_TOKEN" \
-               -H "Title: stl-mcp deploy FAILED" \
+               -H "Title: $SERVICE deploy FAILED" \
                -H "Priority: high" \
                -H "Tags: warning" \
                -d "$BODY" \
