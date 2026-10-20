@@ -161,6 +161,8 @@ header.top > .btn, header.top > button, header.top > .live { flex: none; }
 .wordmark b { font-weight: 700; color: var(--brand); }
 .wordmark small { font-size: inherit; font-weight: 500; color: var(--scribe); }
 a.wordmark:hover { text-decoration: none; }
+/* phones hide the breadcrumb, so the header gets an explicit way back to the library */
+header.top .back { display: none; }
 
 /* the admin bar: server load in the app bar (nav.js, admins only); links to /admin/load */
 .pulse {
@@ -913,6 +915,7 @@ h3.sub { font-size: var(--t-base); margin: 0 0 var(--s2); }
   .dlg-head { padding: var(--s3) var(--s3) var(--s3) var(--s4); }
 }
 @media (max-width: 520px) {
+  header.top .back { display: inline-flex; }
   .wordmark .name { display: none; }
   .crumb::before { display: none; }
   .crumb a, .crumb .sep, .crumb span:not(.sep) { display: none; }
