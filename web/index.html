@@ -87,6 +87,11 @@
           <p class="hint" id="whoami" style="margin:10px 0 0"></p>
         </div>
         <div class="sec">
+          <h2>Your CPU usage</h2>
+          <p class="hint" id="cpuhint"></p>
+          <ul class="help" id="cpulist"></ul>
+        </div>
+        <div class="sec">
           <h2>Appearance</h2>
           <div class="setting-row"><span class="hint">Light, dark, or follow your system.</span><div data-theme-switch data-labelled></div></div>
         </div>
@@ -234,6 +239,23 @@ function renderWiz() {
     <ol class="start">${c.steps.map((t, i) => `<li>${t}${extra(i)}</li>`).join("")}</ol>`;
 }
 
+// CPU time of the user's builds (all cores together): seconds below a minute, then m / h
+function cpuTime(s) {
+  if (s < 60) return `${s.toFixed(s < 10 ? 1 : 0)} s`;
+  const m = Math.round(s / 60);
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
+}
+
+function renderCpu(c) {
+  const n = (k) => `${k} build${k === 1 ? "" : "s"}`;
+  $("cpuhint").textContent = c.builds
+    ? `Last ${c.days} days: ${cpuTime(c.cpu_seconds_recent)} of CPU time, ${n(c.builds_recent)}. In total: ${cpuTime(c.cpu_seconds)}, ${n(c.builds)}. `
+      + "This is the processor time your builds used, all cores together, so it can run faster than the clock."
+    : "You have not run a build yet.";
+  $("cpulist").innerHTML = c.per_day.map((d) =>
+    `<li>${esc(d.day)} · ${cpuTime(d.cpu_seconds)} CPU · ${n(d.builds)}</li>`).join("");
+}
+
 function renderAuth() {
   const u = auth.user;
   let dismissed = false;
@@ -248,6 +270,7 @@ function renderAuth() {
   $("whoami").textContent = [u.email, u.role === "admin" ? "admin" : null,
     `${use.models}${use.max_models ? ` of ${use.max_models}` : ""} models`,
     `${use.disk_mb}${use.max_disk_mb ? ` of ${use.max_disk_mb}` : ""} MB`].filter(Boolean).join(" · ");
+  renderCpu(auth.cpu);
   $("dangersec").hidden = !auth.login_required || u.bootstrap;
   $("pklist").innerHTML = auth.passkeys.map((p) => `<li>
     <span><b>${esc(p.name)}</b> <span class="hint">added ${ago(p.created)}${p.last_used ? `, used ${ago(p.last_used)}` : ""}</span></span>
