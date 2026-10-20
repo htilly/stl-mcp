@@ -1638,6 +1638,14 @@ async def logout(request):
     return resp
 
 
+def _my_cpu(uid: str) -> dict:
+    """The user's own build CPU time, as the admin sees it: totals, the recent window, per day."""
+    st = oauth.state
+    stats = st.cpu_stats(CPU_STATS_DAYS, uid).get(uid) or {
+        "builds": 0, "cpu_seconds": 0.0, "builds_recent": 0, "cpu_seconds_recent": 0.0}
+    return {**stats, "days": CPU_STATS_DAYS, "per_day": st.cpu_days(uid, CPU_STATS_DAYS)}
+
+
 async def api_auth(request):
     user = _user(request)
     return JSONResponse({"user": _user_view(user),
@@ -1646,6 +1654,7 @@ async def api_auth(request):
                          "identities": oauth.state.identities(user["id"]),
                          "providers": _providers(),
                          "usage": await _run(Lib(user).usage),
+                         "cpu": await _run(_my_cpu, user["id"]),
                          "clients": oauth.state.clients(user["id"]) if OAUTH_ROUTES else [],
                          "oauth": bool(OAUTH_ROUTES), "mcp_url": f"{PUBLIC_URL}/mcp",
                          "login_required": bool(TOKEN),

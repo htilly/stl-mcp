@@ -168,6 +168,9 @@ def test_builds_add_up_per_user_and_day(client):
     assert me["cpu_seconds"] >= 0 and me["cpu_seconds_recent"] == me["cpu_seconds"]
     [day] = client.get(f"/api/admin/users/{lib.user['id']}/cpu").json()["days"]
     assert day["builds"] == 2 and len(day["day"]) == 10
+    mine = client.get("/api/auth").json()["cpu"]       # users see the same numbers about themselves
+    assert mine["builds"] == 2 and mine["cpu_seconds"] == me["cpu_seconds"]
+    assert mine["per_day"] == [day] and mine["days"] == server.CPU_STATS_DAYS
 
 
 def test_cpu_usage_of_unknown_users_is_skipped(db):

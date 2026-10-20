@@ -320,15 +320,17 @@ class AuthState:
             "  wall_seconds = cpu_usage.wall_seconds + EXCLUDED.wall_seconds",
             (cpu_seconds, wall_seconds, uid))
 
-    def cpu_stats(self, days: int = 30) -> dict[str, dict]:
-        """Per user: builds and CPU seconds in total and in the last `days` days (today included)."""
+    def cpu_stats(self, days: int = 30, uid: str | None = None) -> dict[str, dict]:
+        """Per user (just `uid` if given): builds and CPU seconds in total and in the last `days`
+        days (today included)."""
         rows = self.db.all(
             "SELECT user_id, sum(builds) AS builds, sum(cpu_seconds) AS cpu, "
             "coalesce(sum(builds) FILTER (WHERE day > (now() AT TIME ZONE 'UTC')::date - %s), 0) "
             "  AS builds_recent, "
             "coalesce(sum(cpu_seconds) FILTER (WHERE day > (now() AT TIME ZONE 'UTC')::date - %s), 0) "
             "  AS cpu_recent "
-            "FROM cpu_usage GROUP BY user_id", (days, days))
+            "FROM cpu_usage WHERE %s::text IS NULL OR user_id = %s GROUP BY user_id",
+            (days, days, uid, uid))
         return {r["user_id"]: {"builds": int(r["builds"]), "cpu_seconds": round(r["cpu"], 1),
                                "builds_recent": int(r["builds_recent"]),
                                "cpu_seconds_recent": round(r["cpu_recent"], 1)} for r in rows}
