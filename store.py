@@ -203,9 +203,11 @@ class Store:
     def __init__(self, root: Path, db, allow_script: bool = False, allow_openscad: bool = False):
         self.dir = Path(root) / "models"
         self.dir.mkdir(parents=True, exist_ok=True)
-        # meshes attached to OpenSCAD recipes, by content: <sha256>.stl (see openscad.py)
+        # meshes attached to recipes (OpenSCAD's import(), csg's "mesh" shape), by content:
+        # <sha256>.stl (see openscad.py)
         self.mesh_dir = Path(root) / "meshes"
         self.mesh_dir.mkdir(exist_ok=True)
+        csg.MESH_DIR = self.mesh_dir      # for csg.locate, which builds nodes in this process
         self.db = db
         self.allow_script = allow_script
         self.allow_openscad = allow_openscad
@@ -264,7 +266,7 @@ class Store:
 
     def build(self, kind: str, params: dict) -> dict:
         if kind in buildworker.KINDS:      # in a sandboxed worker process, see buildworker.py
-            return buildworker.build(kind, params)
+            return buildworker.build(kind, params, mesh_dir=self.mesh_dir)
         if kind == "script":
             return _build_script(params, self.allow_script)
         if kind == "openscad":

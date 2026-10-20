@@ -484,9 +484,10 @@ def _has_elided(v) -> bool:
 
 
 def _prepare(lib: "Lib", params, model_id: str = ""):
-    """A recipe from the AI, ready to store: short notes restored, imported outlines filled in."""
+    """A recipe from the AI, ready to store: short notes restored, imported outlines filled in,
+    mesh shapes given by file name attached."""
     old = Store.current(lib.models.get(model_id))["params"] if model_id else None
-    params = _inline_outlines(lib, _restore(params, old))
+    params = _attach_csg_meshes(lib, _inline_outlines(lib, _restore(params, old)))
     if _has_elided(params):
         raise ValueError("a shortened value from get_model ('…(… kept on the server)') can only "
                          "be sent back in the same place of the recipe - leave it where it was, or "
@@ -647,8 +648,9 @@ async def create_from_openscad(name: str, code: str, description: str = "",
     - gridfinity-rebuilt-openscad: `include <gridfinity-rebuilt-openscad/src/core/standard.scad>`
       and `use` the files in src/core (gridfinityBase([x, y]), bins, baseplates).
     - MCAD: `use <MCAD/boxes.scad>` roundedBox(), MCAD/nuts_and_bolts.scad, MCAD/involute_gears.scad.
-    Meshes: to work on an existing STL (an imported scan, a Tinkercad part, another model's
-    part) attach it with meshes={"base": "scan.stl"} (a file from list_files, or
+    Meshes: to move, cut or combine an existing STL with simple shapes, prefer create_model
+    with a "mesh" shape (the user can then also edit it in the web editor). To work on it with
+    OpenSCAD (an imported scan, a Tinkercad part, another model's part) attach it with meshes={"base": "scan.stl"} (a file from list_files, or
     "<model_id>/v2/body.stl") and read it with import("base.stl"), e.g.
     difference() { import("base.stl"); translate([0, 0, 5]) cylinder(d=3.4, h=20); }.
     The mesh is stored with the recipe, so later updates and reverts keep working even if the
@@ -674,6 +676,19 @@ async def create_from_openscad(name: str, code: str, description: str = "",
     if meshes:
         params["meshes"] = _attach_meshes(lib, meshes)
     return await _create_or_replace(lib, model_id, name, "openscad", params, description)
+
+
+def _attach_csg_meshes(lib: Lib, value):
+    """A csg spec (or part of one) with every {"shape": "mesh", "mesh": "<file>"} attached: the
+    file copied into the mesh dir and named by its sha256, as _attach_meshes does for OpenSCAD."""
+    if isinstance(value, list):
+        return [_attach_csg_meshes(lib, v) for v in value]
+    if not isinstance(value, dict):
+        return value
+    out = {k: _attach_csg_meshes(lib, v) for k, v in value.items()}
+    if out.get("shape") == "mesh":
+        out["mesh"] = _attach_meshes(lib, {"mesh": out.get("mesh")})["mesh"]
+    return out
 
 
 def _attach_meshes(lib: Lib, meshes: dict) -> dict:
@@ -734,7 +749,7 @@ async def update_model(model_id: str, changes: dict | None = None, remove: list[
     if params is not None:
         params = await _run(_prepare, lib, params, model_id)
     if changes:
-        changes = await _run(_inline_outlines, lib, changes)
+        changes = await _run(lambda: _attach_csg_meshes(lib, _inline_outlines(lib, changes)))
     if params is not None and params.get("meshes"):
         params = {**params, "meshes": _attach_meshes(lib, params["meshes"])}
     if meshes:
@@ -2440,8 +2455,12 @@ async def api_model(request):
             elif action == "rename":
                 m = lib.models.update(mid, name=body.get("name"), description=body.get("description"))
             elif action == "update":
+                # kind: only "csg", for the editor's first save of an uploaded STL (an OpenSCAD
+                # import) as a shape recipe
+                kind = "csg" if body.get("kind") == "csg" and body.get("params") is not None else None
                 m = await lib.build(lib.models.update, mid, params=body.get("params"),
-                               changes=body.get("changes"), note=body.get("note", "from the web UI"))
+                               changes=body.get("changes"), note=body.get("note", "from the web UI"),
+                               kind=kind)
             elif action == "comment_add":
                 # like a preview: per-user rate limit and build slots (the hints build CSG nodes)
                 await lib.build(lib.models.add_comment, mid, body.get("text", ""), body.get("point"),
@@ -2495,7 +2514,8 @@ async def api_mesh(request):
             raise ValueError("node too large")
 
         def work():
-            mesh = buildworker.mesh_node(node, body.get("vars") or {})  # in a sandboxed worker
+            mesh = buildworker.mesh_node(node, body.get("vars") or {},  # in a sandboxed worker
+                                         mesh_dir=store.mesh_dir)
             if mesh is None:
                 return b""
             buf = io.BytesIO()
@@ -2700,7 +2720,7 @@ async def export_obj_zip(request):
             for pname, node, leaf in comps:
                 if node is None:
                     continue
-                mesh = buildworker.mesh_node(node, env_vars)
+                mesh = buildworker.mesh_node(node, env_vars, mesh_dir=store.mesh_dir)
                 if mesh is not None:
                     label = leaf.get("name") or leaf.get("shape") or leaf.get("op") or "part"
                     add(label if len(v["parts"]) == 1 else f"{pname}_{label}", mesh)

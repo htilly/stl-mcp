@@ -179,11 +179,14 @@ def _job_in(p: subprocess.Popen, job: dict, timeout: float) -> list[tuple[str, t
         _cleanup(p)
 
 
-def build(kind: str, params: dict, timeout: float | None = None) -> dict[str, trimesh.Trimesh]:
-    """Builds a csg / enclosure / primitive recipe in a worker -> {part name: mesh}."""
+def build(kind: str, params: dict, timeout: float | None = None,
+          mesh_dir: Path | None = None) -> dict[str, trimesh.Trimesh]:
+    """Builds a csg / enclosure / primitive recipe in a worker -> {part name: mesh}.
+    mesh_dir: where csg "mesh" shapes find their STLs."""
     if kind not in KINDS:
         raise ValueError(f"unknown kind '{kind}'")
-    return dict(_job({"op": "build", "kind": kind, "params": params}, timeout))
+    return dict(_job({"op": "build", "kind": kind, "params": params,
+                      "mesh_dir": str(mesh_dir) if mesh_dir else None}, timeout))
 
 
 def import_outline(data: bytes, fmt: str, timeout: float | None = None) -> dict:
@@ -193,9 +196,11 @@ def import_outline(data: bytes, fmt: str, timeout: float | None = None) -> dict:
     return _job({"op": "outline", "data": base64.b64encode(data).decode(), "format": fmt}, timeout)
 
 
-def mesh_node(node, vars_: dict, timeout: float | None = None) -> trimesh.Trimesh | None:
+def mesh_node(node, vars_: dict, timeout: float | None = None,
+              mesh_dir: Path | None = None) -> trimesh.Trimesh | None:
     """One CSG node in its own frame (the editor's preview), or None when it is empty."""
-    parts = _job({"op": "node", "node": node, "vars": vars_}, timeout)
+    parts = _job({"op": "node", "node": node, "vars": vars_,
+                  "mesh_dir": str(mesh_dir) if mesh_dir else None}, timeout)
     return parts[0][1] if parts else None
 
 
@@ -225,6 +230,8 @@ def _apply_limits(lim: dict):
 def _run_job(job: dict) -> list:
     import csg
     import geometry as g
+    if job.get("mesh_dir"):
+        csg.MESH_DIR = Path(job["mesh_dir"])
     if job["op"] == "outline":
         import base64
 

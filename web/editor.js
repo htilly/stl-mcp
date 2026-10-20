@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { TransformControls } from "/static/vendor/three/TransformControls.js";
-import { api, subscribe, esc, warnHtml, fmt, PART_COLORS } from "/static/common.js";
+import { api, subscribe, esc, warnHtml, fmt, plainStl, PART_COLORS } from "/static/common.js";
 import { createStage, edgesFor, parseSTL, spreadX, toast as showToast } from "/static/stage.js";
 import { createComments } from "/static/comments.js";
 import {
@@ -1297,16 +1297,19 @@ async function load() {
   document.title = `${model.name} · editor`;
   $("crumb").textContent = model.name;
   $("viewlink").href = `/m/${encodeURIComponent(id)}`;
-  if (cur.kind !== "csg") {
+  const stl = plainStl(cur);   // an uploaded STL: edited as a recipe with the mesh as its one shape
+  if (cur.kind !== "csg" && !stl) {
     $("loading").innerHTML = `<p>The editor works on shape recipes. This model is a <b>${esc(cur.kind)}</b>; open it in the <a href="/m/${encodeURIComponent(id)}">viewer</a> and ask Claude to change it.</p>`;
     return;
   }
-  if (!partEntries(cur.params).length) {
+  const params = stl ? { root: { shape: "mesh", mesh: stl.sha, name: stl.name } } : cur.params;
+  if (!partEntries(params).length) {
     $("loading").innerHTML = `<p>This recipe has no shapes. Open it in the <a href="/m/${encodeURIComponent(id)}">viewer</a>.</p>`;
     return;
   }
   const keep = spec ? sel.map((n) => pointerOf(spec, n)) : [];
-  spec = clone(cur.params);
+  spec = clone(params);
+  fromStl = !!stl;
   baseVersion = model.current;
   undoStack.length = redoStack.length = 0;
   sel = keep.map((p) => atPointer(spec, p)).filter(Boolean);
@@ -1321,6 +1324,7 @@ async function load() {
 }
 
 let saving = false;
+let fromStl = false;   // the first save turns the uploaded STL into a shape recipe
 async function save() {
   if (saving || !spec) return;
   if (baseVersion !== null) {
@@ -1331,7 +1335,8 @@ async function save() {
   $("save").disabled = true;
   $("save").textContent = "Saving…";
   try {
-    await api(`/api/models/${encodeURIComponent(id)}`, { method: "POST", body: { action: "update", params: clone(spec), note: "web editor" } });
+    await api(`/api/models/${encodeURIComponent(id)}`, { method: "POST", body: { action: "update", params: clone(spec), note: "web editor", ...(fromStl && { kind: "csg" }) } });
+    fromStl = false;
     model = await api(`/api/models/${encodeURIComponent(id)}`);
     baseVersion = model.current;
     showInfo();

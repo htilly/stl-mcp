@@ -178,6 +178,15 @@ export const sourceBadge = (source, cls = "") => {
   return `<span class="sbadge ${esc(source || "")}${cls ? " " + cls : ""}" title="${esc(title)}">${esc(label)}</span>`;
 };
 
+// An uploaded STL: an OpenSCAD recipe that only imports its one attached mesh (the server's
+// _source calls it "stl") -> {name, sha}, else null. The editor opens it as a shape recipe.
+export function plainStl(ver) {
+  const p = ver?.params || {};
+  const m = ver?.kind === "openscad" && /^\s*import\s*\(\s*"([\w.]+)\.stl"\s*\)\s*;?\s*$/.exec(p.code || "");
+  const sha = m && !p.parts?.length && (p.meshes || {})[m[1]];
+  return sha ? { name: m[1], sha } : null;
+}
+
 // Whether a model is private (only its owner) or public (in the gallery), as a badge.
 export const visBadge = (visibility, cls = "") => visibility === "public"
   ? `<span class="vbadge public${cls ? " " + cls : ""}" title="Public: in the gallery, anyone logged in can view and copy it">${icon("globe")}Public</span>`
