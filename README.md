@@ -1,114 +1,128 @@
-# autosmith.eu
+<div align="center">
 
-> **This code runs live at [https://autosmith.eu](https://autosmith.eu).**
+# autosmith
 
-*STL, made by AI.* (repo and service name: `stl-mcp`)
+**STL, made by AI.** Describe a part, watch it appear in 3D, point at what to change, print it.
 
-autosmith is a self-hosted [MCP](https://modelcontextprotocol.io) server that lets Claude (or ChatGPT,
-or any MCP client) design 3D models for printing, in millimetres, and adjust them again and again until
-they are right. Next to the chat there is a web app where you look at the model, turn it around, change
-its dimensions, point at the spot that needs fixing, or build shapes by hand.
+[**autosmith.eu**](https://autosmith.eu) · [**▶ Demo video**](https://autosmith.eu/demo) ·
+[Connect claude.ai](#connect-claudeai-in-a-minute) · [Self-host](#self-hosting) ·
+[MCP tools](#mcp-tools)
 
-You describe what you want, Claude builds it, you look at it live, you say what to change.
-Every change is a small, versioned edit, and you download an STL when you are happy.
+[![Tests](https://github.com/htilly/stl-mcp/actions/workflows/tests.yml/badge.svg)](https://github.com/htilly/stl-mcp/actions/workflows/tests.yml)
+
+</div>
+
+![An ESP32 box with threaded corner posts, a vented lid and four printable screws in the 3D view](docs/img/viewer.png)
+
+autosmith (repo and service name: `stl-mcp`) is a self-hosted [MCP](https://modelcontextprotocol.io)
+server that lets Claude (or ChatGPT, or any MCP client) design 3D models for printing, in
+millimetres, and adjust them again and again until they are right. Next to the chat there is a web
+app where you look at the model, turn it around, change its dimensions, point at the spot that
+needs fixing, or build shapes by hand.
+
+> **This code runs live at [https://autosmith.eu](https://autosmith.eu).** Sign in with a passkey,
+> Google, GitHub or Apple, connect claude.ai, and ask for a part.
+
+- **Models are recipes, not files.** Every change is a small, versioned edit (`{"wall": 3}`), so
+  Claude refines instead of starting over, and you can always go back.
+- **You see every step live.** The 3D view updates the moment Claude changes the model.
+- **Point instead of describing.** Click the spot on the model and write what should change; Claude
+  gets the exact point and the part of the recipe that is there.
+- **Real printing knowledge.** Screw holes, heat inserts, printable ISO threads, hinges and snap
+  hooks as templates, board sizes for ESP32, Raspberry Pi, Arduino and more, and a print check on
+  every build.
+- **More than CSG when it is needed.** Organic expression shapes, blended `sdf` solids, SVG/DXF
+  outlines, lithophanes from pictures, sandboxed OpenSCAD and real CAD in build123d (with STEP
+  export).
+
+## Contents
+
+- [See it in action](#see-it-in-action)
+- [A tour of the web app](#a-tour-of-the-web-app): [library](#library-and-gallery),
+  [3D view](#3d-view), [comments](#commenting-directly-in-the-ui), [editor](#building-by-hand-in-the-editor),
+  [admin](#admin)
+- [Connect claude.ai in a minute](#connect-claudeai-in-a-minute)
+- [The idea: models are recipes](#the-idea-models-are-recipes-not-files)
+- [MCP tools](#mcp-tools) · [CSG spec](#the-csg-spec-in-brief) · [OpenSCAD](#openscad-models) ·
+  [SDF, outlines, pictures](#sdf-shapes-outlines-and-pictures) · [build123d](#python-sandbox-build123d-and-script-models)
+- [Self-hosting](#self-hosting) · [Tests](#tests)
+- [Tinkercad](#tinkercad) · [Print check](#print-check-and-admin-settings) ·
+  [Feedback button](#feedback-button) · [Storage](#storage) ·
+  [Accounts](#accounts-and-signup) · [Security](#security)
 
 ## See it in action
 
 [![Claude designing an ESP32 box in autosmith: click to watch the video](docs/img/demo-poster.png)](https://autosmith.eu/demo)
 
 *A real session, sped up 4× (about one minute): [**▶ watch it on autosmith.eu/demo**](https://autosmith.eu/demo)
-(or [the mp4 in the repo](web/demo.mp4)).* Claude on claude.ai
-on the right, the live 3D view on the left. A handful of short messages take an ESP32 dev board box from
-nothing to printable:
+(or [the mp4 in the repo](web/demo.mp4)).* Claude on claude.ai on the right, the live 3D view on
+the left. A handful of short messages take an ESP32 dev board box from nothing to printable:
 
-1. *"make a box for a ESP32 dev board. Add the text esp32 on the side of the box."* → body, friction-fit
-   lid and engraved text (v1).
+1. *"make a box for a ESP32 dev board. Add the text esp32 on the side of the box."* → body,
+   friction-fit lid and engraved text (v1).
 2. *"now add screws to the box so I can make the lid solid"* → four M3 corner posts in the body and
    countersunk holes in the lid (v2).
 3. A [comment](#commenting-directly-in-the-ui) clicked on the long side of the box, *"write the text
    autoSMITH centered here"*, then *"I also left a comment for you"* in the chat → engraved exactly
    there (v3).
-4. *"I did not find the screws?"* → four printable M3 countersunk screws as a separate part, with the
-   print check flagging thin walls and overhangs (v4).
-5. *"did you adjust the holes so that the screws will be able to 'screw'?"* → Claude checks the hole
-   sizes against the printed threads.
+4. *"I did not find the screws?"* → four printable M3 countersunk screws as a separate part, with
+   the print check flagging thin walls and overhangs (v4).
+5. *"did you adjust the holes so that the screws will be able to 'screw'?"* → Claude checks the
+   hole sizes against the printed threads.
 
-Every step shows up in the 3D view as soon as Claude makes it, and each one is a version you can go back to.
+Every step shows up in the 3D view as soon as Claude makes it, and each one is a version you can go
+back to.
 
-## What it does
+The video also has its own public page, [`/demo`](https://autosmith.eu/demo) (no login), to share with
+people who haven't tried autosmith yet; the mp4 is served from `/static/demo.mp4` and can be seeked.
 
-- **MCP server** (streamable HTTP) at `/mcp` with tools for creating, changing, rendering, checking
-  and importing models ([list of tools](#mcp-tools)). Claude can also *look* at its own work with
-  `render_model`.
-- **Library** at `/`: all your models with preview, search and live updates. Every card shows
-  whether the model is **Private** (the default: only you) or **Public**.
-- **Gallery** at `/gallery`: every user's public models, with owner and how often they were copied.
-  Anyone logged in can view and download a public model, or copy it into their own library to
-  change it; only the owner (and admins) can change it, and its comments stay private.
+## A tour of the web app
 
-![The library](docs/img/library.png)
+The web app has a light, dark and auto theme (it follows your system). Everything below is the
+same app; the screenshots are the dark theme unless noted. The strip in the header shows the
+server at a glance: host CPU, running builds, users online and free disk.
 
-- **3D view** at `/m/<id>`: rotate/zoom, show/hide parts, version history, edit parameters,
-  download STL. The view updates **immediately** when Claude changes the model.
+### Library and gallery
 
-![The 3D view](docs/img/viewer.png)
+**My models** at `/` is your library: every model with a live preview, size, revision and when it
+last changed. Search filters as you type, cards update live while Claude works, and a red badge
+counts print-check warnings. Each card says whether the model is **Private** (the default: only
+you) or **Public**.
 
-- **Comments**: click a point on the model and write what should change. Claude sees the point and
-  which part of the recipe is located there ([details](#commenting-directly-in-the-ui)).
-- **Web editor** at `/edit/<id>` (button **New model** in the library, **Edit** in the 3D view): build
-  a model by hand or change one Claude made: every recipe opens, including multi-part ones, templates
-  and expressions. A recipe tree, exact fields that take `=expressions`, variables, holes, groups,
-  measure, align and workplanes; saving makes a new version. Claude can keep working on the same model
-  afterwards ([details](#building-by-hand-in-the-editor)).
-- **Templates**: screw holes (M2–M8, countersunk/cylindrical, nut trap), heat inserts, screw bosses,
-  printable screws, nuts and threaded holes with real ISO threads,
-  snap hooks, hinges and text, so Claude does not have to model them from scratch.
-- **Expression shapes**: `radial`, `heightmap`, `sweep` and `loft` build organic and parametric
-  forms (vases, knobs, wavy surfaces, pipes, springs, outline transitions) from safe per-vertex
-  expressions, so script models are not needed for them.
-- **SDF shapes, outlines and pictures**: `sdf` nodes blend shapes into each other with fillets
-  (grips, figures, shells), `import_outline` turns an SVG/DXF logo or drawing into a profile to
-  extrude, and `create_relief` makes a lithophane or an embossed plate from a picture
-  ([details](#sdf-shapes-outlines-and-pictures)).
-- **Print check**: every build is checked for holes, loose pieces, thin walls, overhangs and bed size;
-  problems are warnings, never blockers ([details](#print-check-and-admin-settings)).
-- **Accounts**: passkeys, Google/GitHub/Apple sign-in, a private library per user, and OAuth so
-  claude.ai can connect with one click ([details](#accounts-and-signup)).
-- **Tinkercad exchange** via STL/OBJ files, and import of STL/OBJ/GLB/PLY/OFF files to keep working on
-  ([details](#tinkercad)).
-- **Demo** at `/demo`: the video above on a public page (no login), to share with people who
-  haven't tried autosmith yet. The mp4 is served from `/static/demo.mp4` and can be seeked.
-- **Design system**: colours, type, icons and components are documented in
-  [`docs/DESIGN.md`](docs/DESIGN.md) and shown live in the admin section at `/admin/design`.
+![The library with an ESP32 box, a printable screw and nut, a mug, a coil spring, a terrain coaster, an SDF grip and a hinge](docs/img/library.png)
 
-![The design system page](docs/img/design.png)
+<details>
+<summary>The same library in the light theme</summary>
 
-## The idea: models are recipes, not files
+![The library in the light theme](docs/img/library-light.png)
 
-Each model is stored as a *recipe* (JSON) with version history. The STL files are built from the recipe.
-This lets Claude make small, precise changes (`{"wall": 3}`) instead of redoing everything,
-and you can always go back to an earlier version.
+</details>
 
-Typical workflow, with the 3D view open in the browser next to the chat:
+The **Gallery** at `/gallery` lists every user's public models, with owner and how often they were
+copied. Anyone logged in can view and download a public model, or copy it into their own library to
+change it; only the owner (and admins) can change it, and its comments stay private.
 
-1. *"Make a pen holder with three holes for 12 mm pens"* → Claude calls `create_model` and
-   gives you the link to the 3D view.
-2. Claude calls `render_model` to see the result itself and fix obvious mistakes.
-3. *"Four holes, and a bit taller"* → `update_model(id, {"n": 4, "h": 50})` → the view updates and
-   the history shows v2.
-4. You can also change the parameters directly in the web UI. Claude sees the change the next time it reads
-   the model with `get_model`.
-5. Or point: click **💬 Comment**, click the hole and write *"2 mm larger"*. Then say
-   *"look at the comments"*. Claude gets the point, the part and `near_nodes`, that is, which node in
-   the recipe is located there (e.g. `/root/children/1`, a `screw_hole`). It changes the model
-   and closes the comment with `update_model(..., resolves=["c1"])`, or answers with
-   `reply_to_comment`.
+![The public gallery](docs/img/gallery.png)
 
-## Commenting directly in the UI
+### 3D view
+
+`/m/<id>` shows one model: rotate and zoom, Iso/Front/Top/Right views, **Spread** to pull parts
+apart, edges, mesh and spin. The side panel has the description, version history, Private/Public,
+every part with its size, volume, print warnings and STL/OBJ download (and STEP for build123d
+models), and the model's
+**Parameters**, which you can change and **Rebuild** right there. The view updates **immediately**
+when Claude changes the model.
+
+The model at the top of this page is an ESP32 DevKit box built entirely from templates in one
+`create_model` call: corner posts with printed M3 threads (`threaded_hole`), M2 standoffs for the
+board, a USB cutout, engraved text, a vented lid with countersunk holes, and four printable
+countersunk `screw`s as a third part.
+
+### Commenting directly in the UI
 
 Instead of describing *"the third hole, on the right side, near the top"* in chat, you point at it.
 
-1. Open the model at `/m/<id>` and click **💬 Comment** (<kbd>Esc</kbd> leaves comment mode).
+1. Open the model at `/m/<id>` and click **Comment** (<kbd>Esc</kbd> leaves comment mode).
 2. Click the spot on the model that you mean. A popup appears next to the point.
 3. Write what should change and press **Save** (or <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>Enter</kbd>).
 
@@ -120,10 +134,10 @@ resolved/reopened or deleted; tick **Show resolved** to see the closed ones.
 
 ![The saved comment as a pin on the model and in the side panel](docs/img/comment-pin.png)
 
-### What Claude sees
+#### What Claude sees
 Comments are stored with the model. `get_model` returns them with the exact point you clicked and
-`near_nodes`, the recipe nodes closest to that point, so Claude knows which part of the recipe you mean
-without guessing:
+`near_nodes`, the recipe nodes closest to that point, so Claude knows which part of the recipe you
+mean without guessing:
 
 ```json
 {
@@ -141,22 +155,23 @@ without guessing:
 }
 ```
 
-### Example round trip
+#### Example round trip
 1. You click the hole and write *"Make this hole 2 mm larger so a marker fits"*.
 2. You tell Claude *"look at the comments"* (or let [`tools/stl_watch.py`](#having-claude-react-to-comments)
    do it automatically).
-3. Claude reads `near_nodes`, sees that `/root/children/1` is the pen hole cylinder driven by the variable `d`,
-   and calls:
+3. Claude reads `near_nodes`, sees that `/root/children/1` is the pen hole cylinder driven by the
+   variable `d`, and calls:
    ```jsonc
    update_model("pen-holder", {"changes": {"d": 14}, "resolves": ["c1"]})
    ```
-4. The 3D view reloads as v2 and the comment is marked resolved (hidden unless **Show resolved** is ticked).
-   If Claude needs more information it calls `reply_to_comment` instead, and the answer appears under your comment.
+4. The 3D view reloads as v2 and the comment is marked resolved (hidden unless **Show resolved** is
+   ticked). If Claude needs more information it calls `reply_to_comment` instead, and the answer
+   appears under your comment.
 
-Comments belong to the version they were made on (shown as `v1 · model` in the list), so you can still tell what
-a comment referred to after the model has changed.
+Comments belong to the version they were made on (shown as `v1 · model` in the list), so you can
+still tell what a comment referred to after the model has changed.
 
-### Having Claude react to comments
+#### Having Claude react to comments
 Nothing to set up: every tool result (and `whoami`) carries a `comments_waiting` list of the models
 that have open comments, and the server instructions tell Claude to read and handle them as part of
 its answer. So Claude picks up your comments the next time it does anything in the conversation, in
@@ -183,105 +198,126 @@ Use `STL_MCP_TOKEN` (or the keychain item `stl-mcp-token`) to authenticate with 
 The script needs only the standard library and never prints a token. It runs while that session
 is open; comments made while nothing is watching simply wait.
 
-## Building by hand in the editor
-Not everything is easiest to say in words. Press **New model** in the library (or **Edit** on an
-existing model) to open the editor at `/edit/<id>`.
+### Building by hand in the editor
+Not everything is easiest to say in words. Press **New model** in the library (or **Open in
+editor** on an existing model) to open the editor at `/edit/<id>`. Every recipe opens, including
+multi-part ones, templates and expressions:
 
-![The web editor with a cylinder marked as a hole](docs/img/editor.png)
+![The editor with the ESP32 box: the recipe tree, the screw posts selected with move handles, and the variables](docs/img/editor.png)
 
 - Click a shape (box, cylinder, sphere, cone, tube, torus, wedge, text, or a template such as a
-  screw hole) to add it, or drag it onto the workplane. Screw holes and inserts are added as holes, on
-  top of the selected shape.
+  screw hole) to add it, or drag it onto the workplane. Screw holes and inserts are added as holes,
+  on top of the selected shape.
 - Select a shape in the view or in the **Recipe** tree and use **Move**, **Rotate** or **Resize**
-  (snap to the grid; **Magnet** snaps edges and centres to other shapes), or type exact values in the
-  side panel. Every field takes a number or an expression such as `=w/2 + wall`, and `+=5` moves by 5.
-  ↑/↓ steps a value. Variables are edited in the side panel too.
+  (snap to the grid; **Magnet** snaps edges and centres to other shapes), or type exact values in
+  the side panel. Every field takes a number or an expression such as `=w/2 + wall`, and `+=5`
+  moves by 5. ↑/↓ steps a value. Variables are edited in the side panel too.
 - The tree shows the whole recipe: drag rows to reorder or to move them into a group, hide parts of
-  it, **Group**/**Ungroup**, and **+ Part** for a separate STL. Alt-click in the view selects the group
-  around a shape.
-- Tick **Hole** (or press <kbd>H</kbd>) to make a shape cut out of the solids instead of adding to them.
-  **Result** shows the built model with the holes cut. **Drop** puts the selection on the workplane,
-  **Duplicate** copies it.
-- **Measure** (<kbd>M</kbd>): click two points (corners snap), or shift-click two faces for the distance
-  between them. **Workplane** (<kbd>P</kbd>): click a face to build on it. With several shapes
-  selected, **Align** lines them up or spaces them evenly.
-- Undo/redo, **Save** (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>S</kbd>) builds a new version, **Export STL**
-  downloads the last saved one.
+  it, **Group**/**Ungroup**, and **+ Part** for a separate STL. Alt-click in the view selects the
+  group around a shape.
+- Tick **Hole** (or press <kbd>H</kbd>) to make a shape cut out of the solids instead of adding to
+  them. **Result** shows the built model with the holes cut. **Drop** puts the selection on the
+  workplane, **Duplicate** copies it.
+- **Measure** (<kbd>M</kbd>): click two points (corners snap), or shift-click two faces for the
+  distance between them. **Workplane** (<kbd>P</kbd>): click a face to build on it. With several
+  shapes selected, **Align** lines them up or spaces them evenly.
+- Undo/redo, **Save** (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>S</kbd>) builds a new version, **Export
+  STL** downloads the last saved one.
 
 The editor writes the same recipe Claude uses, so you can start by hand and ask Claude to refine it
-("round the corners", "add four M3 holes"), or the other way round. It edits the recipe in place: only
-the values you change are written, and everything else (expressions, arrays, templates, keys it
-doesn't know) is saved exactly as it was. Shapes the browser can't draw itself are meshed by the
-server. If Claude changes the model while you are editing, a banner lets you load its version or keep
-yours.
+("round the corners", "add four M3 holes"), or the other way round. It edits the recipe in place:
+only the values you change are written, and everything else (expressions, arrays, templates, keys
+it doesn't know) is saved exactly as it was. Shapes the browser can't draw itself are meshed by the
+server. If Claude changes the model while you are editing, a banner lets you load its version or
+keep yours.
 
-## Running
-```
-cp .env.example .env     # fill in MCP_TOKEN, POSTGRES_PASSWORD and PUBLIC_URL
-docker compose up -d --build
-```
-The compose file starts Postgres next to the server; database migrations run at startup.
-Without Docker: `pip install -r requirements.txt && DATABASE_URL=postgresql://... MCP_TOKEN=... python server.py`
-(it listens on all interfaces with `MCP_TOKEN`, on `127.0.0.1` without; `HOST` overrides).
-Dependencies are pinned in `requirements.txt` to what the production image runs: bump them on
-purpose, with the tests.
+### Admin
 
-The container only listens on `127.0.0.1:8765`. Set `BIND=0.0.0.0` to expose the port directly,
-or set `DOMAIN` and run `docker compose --profile caddy up -d` for automatic HTTPS.
+Admins get an **Admin** section with five pages:
 
-**Deploy:** merging to `main` builds the image on GitHub and deploys it to the dev instance,
-[dev.autosmith.eu](https://dev.autosmith.eu). Production, autosmith.eu, only moves on a release:
-push a tag like `v1.4.0` on a commit of `main`, and the image dev already runs is promoted to
-prod without a rebuild. To roll back, run the **Release** workflow by hand with an older version.
+| | |
+|---|---|
+| **Print check** (`/admin`): thresholds for the [print check](#print-check-and-admin-settings) | **Users** (`/admin/users`): every account with models, storage, logins and CPU use |
+| ![The print-check settings](docs/img/admin.png) | ![The users page](docs/img/users.png) |
+| **Load** (`/admin/load`): CPU and memory of the host, per online user and per build, and OpenSCAD limits | **Feedback** (`/admin/feedback`): the [feedback button](#feedback-button) that turns a user's text into a GitHub issue |
+| ![The load page](docs/img/load.png) | ![The feedback settings](docs/img/feedback.png) |
 
-Open `http://localhost:8765/?admin` and log in with the token, which sets a session cookie for
-the admin account (`ADMIN_EMAILS`, the first entry). Then add a passkey (the banner in the library, or 🔑 in the header):
-from then on, logging in is one tap with Face ID, Touch ID or your password manager. Passkeys
-are bound to the host name in `PUBLIC_URL`.
+**Design system** (`/admin/design`): colours, type, icons and components, read live from
+`style.css` and `icons.svg`, and written up in [`docs/DESIGN.md`](docs/DESIGN.md).
 
-## Tests
-```
-pip install -r requirements.txt -r requirements-dev.txt
-docker compose --profile test up -d postgres-test   # throwaway Postgres on 127.0.0.1:55432
-python -m pytest
-```
-Each run uses its own schema in that database (`TEST_DATABASE_URL` overrides the address).
-`test_client.py` is a manual smoke script against a running server, not part of the suite.
+![The design system page](docs/img/design.png)
 
-## Connecting to Claude
-- Claude Desktop/Code: `claude mcp add --transport http stl https://<your-url>/mcp --header "Authorization: Bearer <token>"`
-- claude.ai and the Claude apps: see below. No token is needed, you approve the connection with
-  your passkey.
+## Connect claude.ai in a minute
 
-### Connecting claude.ai, step by step
 Once, about a minute. The connector then also works in the Claude apps on your phone and desktop.
+Use `https://autosmith.eu`, or your own server's address.
 
-1. **Get a passkey (recommended).** Open the library (`https://<your-url>/`, for this deployment
-   `https://autosmith.eu/`), log in with the token once and click **Add passkey** in the banner
-   (or under 🔑 in the header). Without a passkey you can still log in with the token in step 5.
+1. **Sign in** at [autosmith.eu](https://autosmith.eu) (passkey, Google, GitHub or Apple). On your
+   own server, log in with the token once (`/?admin`) and click **Add passkey** in the banner.
 2. In claude.ai, open **Settings → Connectors** and click **Add custom connector**.
-3. Name: `autosmith`. URL: `https://<your-url>/mcp` (here: `https://autosmith.eu/mcp`).
-   Leave the advanced settings (OAuth client id/secret) empty. Click **Add**.
-4. Click **Connect** next to the new connector. A page from your server opens.
-5. If you are not logged in there, click **Log in with passkey** (or use the token).
-6. The page asks *Connect Claude?* and says where you will be sent back to. Check that it is
+3. Name: `autosmith`. URL: `https://autosmith.eu/mcp` (or `https://<your-url>/mcp`). Leave the
+   advanced settings (OAuth client id/secret) empty. Click **Add**.
+4. Click **Connect** next to the new connector. A page from the server opens; sign in if needed.
+5. The page asks *Connect Claude?* and says where you will be sent back to. Check that it is
    `https://claude.ai`, then click **Allow**. You are sent back and the connector shows as
    connected.
-7. In a chat, turn the connector on in the tools menu and ask, for example, *"Make a box
+6. In a chat, turn the connector on in the tools menu and ask, for example, *"Make a box
    80×50×25 mm with a lid"*. Claude answers with a link to the model in the library.
+
+Claude Desktop/Code with a token instead:
+`claude mcp add --transport http stl https://<your-url>/mcp --header "Authorization: Bearer <token>"`.
+**Account settings** in the avatar menu show how to connect claude.ai, ChatGPT or Claude Code, and
+makes personal tokens for clients that send a header.
 
 **If something goes wrong**
 - *"The request has expired"*: the approval page is valid for 10 minutes. Click Connect again.
 - Connect fails before any page opens: `PUBLIC_URL` must be the exact https address (here
   `https://autosmith.eu`), and the server log must not say `OAuth disabled`.
-- **Disconnecting:** 🔑 → Connected apps → **Disconnect** stops the app's access at once (it must
-  be approved again to reconnect). Rotating `MCP_TOKEN` logs browsers out but does *not*
-  disconnect apps, so use Disconnect for that.
+- **Disconnecting:** account dialog → Connected apps → **Disconnect** stops the app's access at
+  once (it must be approved again to reconnect). Rotating `MCP_TOKEN` logs browsers out but does
+  *not* disconnect apps, so use Disconnect for that.
 
 The server is its own OAuth authorization server (dynamic client registration, PKCE, consent
 page). It requires `PUBLIC_URL` on https (or localhost); `OAUTH=0` turns it off.
 
+## The idea: models are recipes, not files
+
+Each model is stored as a *recipe* (JSON) with version history. The STL files are built from the
+recipe. This lets Claude make small, precise changes (`{"wall": 3}`) instead of redoing everything,
+and you can always go back to an earlier version.
+
+Typical workflow, with the 3D view open in the browser next to the chat:
+
+1. *"Make a pen holder with three holes for 12 mm pens"* → Claude calls `create_model` and gives
+   you the link to the 3D view.
+2. Claude calls `render_model` to see the result itself and fix obvious mistakes.
+3. *"Four holes, and a bit taller"* → `update_model(id, {"n": 4, "h": 50})` → the view updates and
+   the history shows v2.
+4. You can also change the parameters directly in the web UI. Claude sees the change the next time
+   it reads the model with `get_model`.
+5. Or point: click **Comment**, click the hole and write *"2 mm larger"*. Then say *"look at the
+   comments"*. Claude gets the point, the part and `near_nodes`, that is, which node in the recipe
+   is located there (e.g. `/root/children/1`, a `screw_hole`). It changes the model and closes the
+   comment with `update_model(..., resolves=["c1"])`, or answers with `reply_to_comment`.
+
+### Before and after: adding screws and text
+Start from a plain plate (v1) and let Claude add two countersunk M3 screw holes (v2) and engraved
+text (v3). Every step is a small `update_model` call and shows up in the history in the side panel:
+
+```jsonc
+update_model("name-plate", {"changes": {"/root/children/-": {"shape": "screw_hole", "size": "M3",
+  "head": "countersunk", "h": "=t", "translate": [8, 15, "=t"],
+  "array": {"count": [2, 1, 1], "step": [44, 0, 0]}}}})                       // v2
+update_model("name-plate", {"changes": {"/root/children/-": {"shape": "text", "text": "OK", "size": 8,
+  "h": 1, "halign": "center", "valign": "center", "translate": [30, 15, "=t-0.6"]}}})  // v3
+```
+
+| Before (v1) | After (v3) |
+|---|---|
+| ![Plain plate](docs/img/plate-before.png) | ![Plate with countersunk screw holes and engraved text](docs/img/plate-after.png) |
+
 ## MCP tools
+
 | tool | |
 |---|---|
 | `create_model` | new model from a CSG spec (shapes, boolean operations, transforms, variables) |
@@ -339,8 +375,8 @@ page). It requires `PUBLIC_URL` on https (or localhost); `OAUTH=0` turns it off.
   radius), plus `shell`, `round`, `twist`; see [below](#sdf-shapes-outlines-and-pictures).
 - `{"shape": "svg", "path": "M…Z"}` or `{"shape": "svg", "outline": name}` profiles: outlines
   from SVG paths or imported SVG/DXF files.
-- Templates: `screw_hole`, `heat_insert`, `nut_trap` (cutting: the surface is at z=0, going downward),
-  `threaded_hole` (a printed ISO metric internal thread), `boss`, `snap_hook`, `hinge`
+- Templates: `screw_hole`, `heat_insert`, `nut_trap` (cutting: the surface is at z=0, going
+  downward), `threaded_hole` (a printed ISO metric internal thread), `boss`, `snap_hook`, `hinge`
   (print-in-place or with a separate pin), `screw` and `nut` (printable, with a real helical
   ISO thread; socket, countersunk, button, hex or no head, hex or slot drive) and `text`
   (DejaVu Sans, raised or engraved). Dimensions for M2–M8 are in `templates.py`.
@@ -350,7 +386,10 @@ page). It requires `PUBLIC_URL` on https (or localhost); `OAUTH=0` turns it off.
 - Strings starting with `=` are expressions: `"=w/2+wall"`, `"=max(a,b)"`, `"=cos(30)"`
   (safe evaluation, no code is run)
 
-The full reference is in `csg.py` (`SPEC_HELP`), and Claude gets it in the tool description.
+The coil spring in the library is one `sweep` of a circle along a `helix`, the mug handle a `sweep`
+along a `bezier`, the terrain coaster a `heightmap` of `noise()`, and the blended grip an `sdf`
+capsule with two rings and a ball melted together (`smooth: 6`). The full reference is in
+`csg.py` (`SPEC_HELP`), and Claude gets it in the tool description.
 
 ### Adjusting with `update_model`
 ```jsonc
@@ -375,8 +414,8 @@ Example with templates, a plate with countersunk M3 holes and engraved text:
 
 ### OpenSCAD models
 For shapes the CSG spec cannot express, Claude can write OpenSCAD with
-`create_from_openscad(name, code, vars=None, parts=None)`. The Docker image ships `openscad` and
-these libraries, each pinned to a commit in the `Dockerfile`:
+`create_from_openscad(name, code, vars=None, parts=None, meshes=None)`. The Docker image ships
+`openscad` and these libraries, each pinned to a commit in the `Dockerfile`:
 
 | library | for |
 |---|---|
@@ -408,12 +447,18 @@ Top-level variables can be changed without touching the code: `update_model(id, 
 The tool descriptions still steer Claude to `create_model`, which the editor and the
 comment hints understand.
 
+To work on an existing mesh (an imported scan, a Tinkercad part, another model's part), attach it
+with `meshes={"base": "scan.stl"}` (a standalone file, or `"<model_id>/v2/body.stl"`) and read it
+with `import("base.stl")`. The mesh is stored with the recipe by content hash, so later updates and
+reverts keep working even if the file changes.
+
 OpenSCAD runs sandboxed, so unlike `ALLOW_SCRIPT` it is safe for every user and on by default
 whenever the binary is installed (`ALLOW_OPENSCAD=0` turns it off):
-- the code is tokenized before it runs and rejected if it uses `import()`, `surface()`,
-  `dxf_dim()`/`dxf_cross()` (they read files) or `include`/`use` anything but
-  `<library/file.scad>` of a bundled library (every directory in `OPENSCAD_LIBS` is one; absolute
-  paths and `..` are rejected; strings and comments are skipped, not matched);
+- the code is tokenized before it runs and rejected if it uses `import()` of anything but an
+  attached mesh (by its literal name), `surface()`, `dxf_dim()`/`dxf_cross()` (they read files) or
+  `include`/`use` anything but `<library/file.scad>` of a bundled library (every directory in
+  `OPENSCAD_LIBS` is one; absolute paths and `..` are rejected; strings and comments are skipped,
+  not matched);
 - library modules and functions that call those readers, directly or through others, are
   rejected too (e.g. NopSCADlib's printed parts, which load their STL). This is worked out per
   library from the libraries the code includes and the ones they include, so a name one library
@@ -429,6 +474,7 @@ whenever the binary is installed (`ALLOW_OPENSCAD=0` turns it off):
 An admin can lower the timeout and the concurrent builds on the admin Load page (`/admin/load`)
 without a restart; the values are saved in the database and the environment's values stay the
 maximum. The CPU seconds follow the timeout unless `OPENSCAD_CPU_SECONDS` is set.
+
 
 The Docker image installs the OpenSCAD nightly and builds with its Manifold engine
 (`OPENSCAD_BACKEND`, default `manifold`; passed only to a binary that has `--backend`, so
@@ -518,37 +564,56 @@ holes (with the NopSCADlib name for the exact board) and FDM rules of thumb for 
 and hole sizes for screws, heat-set inserts and nut traps. The data lives in `reference/`
 (`parts.json`, `print-guide.md`); add parts there.
 
-### Before and after: adding screws and text
-Start from a plain plate (v1) and let Claude add two countersunk M3 screw holes (v2) and engraved text (v3).
-Every step is a small `update_model` call and shows up in the history in the side panel:
-
-```jsonc
-update_model("name-plate", {"changes": {"/root/children/-": {"shape": "screw_hole", "size": "M3",
-  "head": "countersunk", "h": "=t", "translate": [8, 15, "=t"],
-  "array": {"count": [2, 1, 1], "step": [44, 0, 0]}}}})                       // v2
-update_model("name-plate", {"changes": {"/root/children/-": {"shape": "text", "text": "OK", "size": 8,
-  "h": 1, "halign": "center", "valign": "center", "translate": [30, 15, "=t-0.6"]}}})  // v3
+## Self-hosting
 ```
+cp .env.example .env     # fill in MCP_TOKEN, POSTGRES_PASSWORD and PUBLIC_URL
+docker compose up -d --build
+```
+The compose file starts Postgres next to the server; database migrations run at startup.
+Without Docker: `pip install -r requirements.txt && DATABASE_URL=postgresql://... MCP_TOKEN=... python server.py`
+(it listens on all interfaces with `MCP_TOKEN`, on `127.0.0.1` without; `HOST` overrides).
+Dependencies are pinned in `requirements.txt` to what the production image runs: bump them on
+purpose, with the tests.
 
-| Before (v1) | After (v3) |
-|---|---|
-| ![Plain plate](docs/img/plate-before.png) | ![Plate with countersunk screw holes and engraved text](docs/img/plate-after.png) |
+The container only listens on `127.0.0.1:8765`. Set `BIND=0.0.0.0` to expose the port directly,
+or set `DOMAIN` and run `docker compose --profile caddy up -d` for automatic HTTPS.
+
+**Deploy:** merging to `main` builds the image on GitHub and deploys it to the dev instance,
+[dev.autosmith.eu](https://dev.autosmith.eu). Production, autosmith.eu, only moves on a release:
+push a tag like `v1.4.0` on a commit of `main`, and the image dev already runs is promoted to
+prod without a rebuild. To roll back, run the **Release** workflow by hand with an older version.
+
+Open `http://localhost:8765/?admin` and log in with the token, which sets a session cookie for
+the admin account (`ADMIN_EMAILS`, the first entry). Then add a passkey (the banner in the library,
+or **Account settings** in the avatar menu): from then on, logging in is one tap with Face
+ID, Touch ID or your password manager. Passkeys are bound to the host name in `PUBLIC_URL`.
+
+## Tests
+```
+pip install -r requirements.txt -r requirements-dev.txt
+docker compose --profile test up -d postgres-test   # throwaway Postgres on 127.0.0.1:55432
+python -m pytest
+```
+Each run uses its own schema in that database (`TEST_DATABASE_URL` overrides the address).
+`test_client.py` is a manual smoke script against a running server, not part of the suite.
 
 ## Tinkercad
 Tinkercad has no public API, so exchange happens via files:
 
-- **To Tinkercad:** download the `.stl` (one part) or the `export_obj` result (several colored parts) and
-  choose *Import* in Tinkercad. Files larger than `TINKERCAD_MAX_MB` (default 25) automatically get a
-  simplified copy `<name>_tinkercad.stl`.
+- **To Tinkercad:** download the `.stl` (one part) or the `export_obj` result (several colored
+  parts) and choose *Import* in Tinkercad. Files larger than `TINKERCAD_MAX_MB` (default 25)
+  automatically get a simplified copy `<name>_tinkercad.stl`.
 - **From Tinkercad:** *Export* → `.STL` or `.OBJ` (zip). Upload the file to the server:
   ```
   curl -T model.stl -H "Authorization: Bearer <token>" https://<your-url>/upload/model.stl
   ```
-  or let Claude fetch it with `import_file` (url). Then keep building with `modify_file`.
+  or let Claude fetch it with `import_file` (url). Then keep building with `modify_file`, or attach
+  it to an [OpenSCAD model](#openscad-models) with `meshes`.
   `import_file` only fetches from public addresses unless `ALLOW_PRIVATE_URLS=1`.
 
 Imported and modified files are standalone files, private to the user who made them
-(`STL_DIR/files/<user id>/`, served at `/f/<user id>/<name>`). They do not show up in the web library.
+(`STL_DIR/files/<user id>/`, served at `/f/<user id>/<name>`). They do not show up in the web
+library.
 
 ## Print check and admin settings
 Every build runs a fast, approximate print check per part. Problems are **warnings only** (nothing
@@ -563,13 +628,11 @@ and as a badge in the library.
 | overhangs | too large a share of the surface overhangs more than the maximum angle |
 | build volume | the part does not fit the printer bed |
 
-![The admin page with print-check settings](docs/img/admin.png)
-
 Thresholds have sensible defaults (`printcheck.py`, `SCHEMA`) and can be changed at `/admin`
-(token required, even with `UI_PUBLIC=1`): per-check switches, minimum wall (1.2 mm), overhang angle
-(45°) and share (10 %), and the build volume (220 × 220 × 250 mm). Overrides are stored in
-`STL_DIR/settings.json`. New settings apply to new builds; **Re-check all models** on the admin page
-(or `POST /api/recheck`) refreshes existing models without creating versions.
+(token required, even with `UI_PUBLIC=1`): per-check switches, minimum wall (1.2 mm), overhang
+angle (45°) and share (10 %), and the build volume (220 × 220 × 250 mm). Overrides are stored in
+`STL_DIR/settings.json`. New settings apply to new builds; **Re-check all models** on the admin
+page (or `POST /api/recheck`) refreshes existing models without creating versions.
 The thin-wall and overhang checks are sampling-based estimates, not a slicer.
 
 ## Feedback button
@@ -589,9 +652,10 @@ back it up with `docker compose exec postgres pg_dump -U stl stl > backup.sql`. 
 before users existed is imported into the admin account at startup and renamed `auth.json.imported`.
 
 Every model belongs to a user. Its recipe, version history and comments are in Postgres (table
-`models`); the built files are in `STL_DIR/models/<id>/v<N>/<part>.stl`. The 50 most recent versions
-keep their files. Older versions can be recreated with `revert_model`. Models and standalone files
-from before users existed (`model.json`, files directly in `STL_DIR`) become the admin's at startup.
+`models`); the built files are in `STL_DIR/models/<id>/v<N>/<part>.stl`. The 50 most recent
+versions keep their files. Older versions can be recreated with `revert_model`. Models and
+standalone files from before users existed (`model.json`, files directly in `STL_DIR`) become the
+admin's at startup.
 
 Users only reach their own models and files; someone else's look exactly like ones that do not
 exist (404). Admins reach everything.
@@ -600,7 +664,7 @@ exist (404). Admins reach everything.
 With `SIGNUP=1` anyone can create an account on the login page: a name and a passkey, nothing
 else. Each account gets its own private library and standalone files; admins (`ADMIN_EMAILS`,
 or `MCP_TOKEN`) see everything and the `/admin` pages. New users see a getting-started checklist,
-and the account dialog (🔑) shows how to connect claude.ai, ChatGPT or Claude Code, with personal
+and the account dialog shows how to connect claude.ai, ChatGPT or Claude Code, with personal
 tokens for clients that send a header.
 
 - **Bots:** set `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET` (Cloudflare Turnstile, free) and keep
@@ -608,7 +672,7 @@ tokens for clients that send a header.
   the limit sees the real client address.
 - **Limits:** `MAX_MODELS_PER_USER` (100) and `MAX_DISK_MB_PER_USER` (500) apply to non-admins;
   Claude gets a clear error when one is reached. Script models are admin-only.
-- **Leaving:** users delete their account and all its data from the account dialog. `/privacy`
+- **Leaving:** users delete their account and all its data in **Account settings**. `/privacy`
   says what is stored.
 - **Admin → Users** (`/admin/users`) lists every account with its models, storage and ways in, and
   can make admins, disable, log out everywhere or delete.
@@ -616,8 +680,8 @@ tokens for clients that send a header.
 `SIGNUP=1` requires `MCP_TOKEN`; without it every visitor would be the admin.
 
 ### Sign in with Google, GitHub or Apple
-Each provider appears on the login page once its settings are present (see `.env.example`). Register
-`https://<your-domain>/auth/sso/<provider>/callback` as the redirect URI with the provider:
+Each provider appears on the login page once its settings are present (see `.env.example`).
+Register `https://<your-domain>/auth/sso/<provider>/callback` as the redirect URI with the provider:
 
 - **Google:** Google Cloud console → APIs & Services → Credentials → OAuth client ID (web
   application). Scopes `openid email profile`; publish the consent screen for public use.
@@ -633,23 +697,25 @@ sign-ins or `ADMIN_EMAILS`, never typed in, so nobody can claim someone else's a
 A verified email in `ADMIN_EMAILS` makes the account an admin once; after that roles are managed
 on the users page, so a demotion sticks (also after the account is deleted and the address
 reused). A sign-in is never linked by email to an admin who can already log in: whoever controls
-that mailbox at some provider would get admin, so admins link providers in the account dialog. In the account dialog users link
-or unlink providers; the last way to log in cannot be removed.
+that mailbox at some provider would get admin, so admins link providers in the account dialog. In
+the account dialog users link or unlink providers; the last way to log in cannot be removed.
 
 ## Security
 Always set `MCP_TOKEN` and put the server behind HTTPS. The web interface requires a login
-(passkey or token, kept as a signed session cookie for 90 days) unless `UI_PUBLIC=1`, which makes it readable by everyone while changes still require a token.
+(passkey or token, kept as a signed session cookie for 90 days) unless `UI_PUBLIC=1`, which makes
+it readable by everyone while changes still require a token.
 `FILES_PUBLIC=1` only makes the STL links clickable without a token (model ids are guessable); for
 anonymous visitors, `UI_PUBLIC` and `FILES_PUBLIC` cover the bootstrap admin's own models and
 models their owners made public, never other users' private ones. Python (build123d and script
 models, STEP import) runs only in the [sandbox container](#python-sandbox-build123d-and-script-models).
 Keep `ALLOW_SCRIPT` off if the server is reachable from outside: it runs script models without
 the sandbox, in the server's own container (with an empty environment, so they cannot read
-`MCP_TOKEN` or `DATABASE_URL`, but nothing more). `/upload/*`
-always requires a token when `MCP_TOKEN` is set. The CSG spec is safe to let Claude write: builds
-are capped (expression size, numbers up to 1e12, at most 5 million triangles), and imports refuse
-zip files that unpack to more than `MAX_UNZIPPED_MB` (200) or meshes over `MAX_IMPORT_FACES`.
-OpenSCAD code is safe too (it is checked and sandboxed, see [OpenSCAD models](#openscad-models)).
+`MCP_TOKEN` or `DATABASE_URL`, but nothing more). `/upload/*` always requires a token when
+`MCP_TOKEN` is set. The CSG
+spec is safe to let Claude write: builds are capped (expression size, numbers up to 1e12, at most
+5 million triangles), and imports refuse zip files that unpack to more than `MAX_UNZIPPED_MB` (200)
+or meshes over `MAX_IMPORT_FACES`. OpenSCAD code is safe too (it is checked and sandboxed, see
+[OpenSCAD models](#openscad-models)).
 
 Every login belongs to a user. `MCP_TOKEN` logs in as the bootstrap admin; without it set, every
 request runs as that admin (local single-user mode), so the server then listens on `127.0.0.1`
@@ -690,5 +756,6 @@ tokens, tokens created or deleted, connected apps, role changes and account dele
 as JSON lines on the `autosmith.security` logger, without secrets. The container runs as an
 unprivileged user; on first start it takes over ownership of an existing data volume.
 
+## Credits
 three.js (MIT) is shipped locally from `web/vendor/three`, so the interface needs no CDN.
 The DejaVu Sans font (free license, see `fonts/LICENSE`) is used for the text template.
