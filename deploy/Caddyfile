@@ -1,5 +1,10 @@
 {$DOMAIN} {
 	encode gzip
+	# the app checks body sizes too (BodyLimit); this stops oversized bodies at the edge.
+	# Uploads and MCP messages carry files up to MAX_UPLOAD_MB (default 100).
+	request_body {
+		max_size 150MB
+	}
 	reverse_proxy stl-mcp:8765 {
 		# SSE (live updates) and MCP streams must not be buffered
 		flush_interval -1

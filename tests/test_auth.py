@@ -369,8 +369,8 @@ def test_revoke_endpoint(client):
 
 # ---- sessions over HTTP
 
-def test_token_query_sets_session_cookie_and_keeps_other_params(client):
-    r = client.get("/oauth/consent?req=abc&token=secret")
+def test_token_form_sets_session_cookie_and_returns_to_the_page(client):
+    r = client.post("/auth/token", data={"token": "secret", "next": "/oauth/consent?req=abc"})
     assert r.status_code == 303 and r.headers["location"] == "/oauth/consent?req=abc"
     cookie = r.headers["set-cookie"]
     assert "stl_session=" in cookie and "secret" not in cookie.split("stl_token")[0]

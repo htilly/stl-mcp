@@ -38,6 +38,24 @@ import sandbox
 
 MAX_VERSIONS = 50  # older versions' STL files are pruned (the recipe is kept)
 MAX_COMMENTS = 200  # per model, open and resolved
+# Each model is one row, rewritten on every change: keep what a user can put in it bounded.
+MAX_RECIPE_BYTES = 2_000_000   # one version's params, as JSON
+MAX_NAME = 200
+MAX_DESCRIPTION = 5000
+MAX_NOTE = 500
+
+
+def check_sizes(name: str | None = None, description: str | None = None, note: str | None = None):
+    for what, value, limit in (("name", name, MAX_NAME), ("description", description, MAX_DESCRIPTION),
+                               ("note", note, MAX_NOTE)):
+        if value is not None and len(value) > limit:
+            raise ValueError(f"the {what} is longer than {limit} characters")
+
+
+def check_recipe_size(params) -> None:
+    n = len(json.dumps(params, ensure_ascii=False, default=str))
+    if n > MAX_RECIPE_BYTES:
+        raise ValueError(f"the recipe is {n // 1000} kB - at most {MAX_RECIPE_BYTES // 1000} kB")
 
 
 # ---------------------------------------------------------------- builders per kind
@@ -262,6 +280,7 @@ class Store:
         (a copy of a public script model, an update or revert that keeps the kind)."""
         if kind == "script" and not scripts:
             raise PermissionError("script models are for admins only")
+        check_recipe_size(params)
         t0 = time.time()
         return self.build(kind, params), time.time() - t0
 
@@ -301,6 +320,7 @@ class Store:
     # -- publikt
     def create(self, name: str, kind: str, params: dict, description: str = "",
                note: str = "", owner: str | None = None, scripts: bool = True) -> dict:
+        check_sizes(name, description, note)
         built = self._built(kind, params, scripts)
         with self.lock:
             base = slug(name)
@@ -325,6 +345,7 @@ class Store:
         """kind rebuilds the model with another builder (e.g. enclosure -> openscad) as a new
         version of the same model; it needs params, since the old recipe does not fit the new kind."""
         rebuild = params is not None or changes or remove
+        check_sizes(name, description, note)
 
         def recipe(m):
             cur = self.current(m)

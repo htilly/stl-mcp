@@ -54,7 +54,8 @@
 
   <details id="tok" hidden>
     <summary>Log in with the server token (admin)</summary>
-    <form method="get">
+    <form method="post" action="/auth/token">
+      <input type="hidden" name="next" id="toknext" value="/">
       <input type="password" name="token" placeholder="MCP_TOKEN" required aria-label="Server token" autocomplete="current-password">
       <button>Log in</button>
     </form>
@@ -94,6 +95,7 @@ if (ssoError) {
   history.replaceState(null, "", here.pathname + here.search);
 }
 const next = encodeURIComponent(here.pathname + here.search);
+$("toknext").value = here.pathname + here.search;  // the token form comes back here too
 $("sso").innerHTML = (cfg.providers || []).map((p) =>
   `<a class="btn big" href="/auth/sso/${p.id}/start?next=${next}">Continue with ${p.label}</a>`).join("");
 $("sso").hidden = !(cfg.providers || []).length;

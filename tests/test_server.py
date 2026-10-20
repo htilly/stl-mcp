@@ -421,10 +421,10 @@ def test_html_request_without_token_gets_login_page(client, monkeypatch):
     assert client.get("/api/models").json() == {"error": "unauthorized"}
 
 
-def test_token_query_sets_cookie_and_redirects(client, out_dir, monkeypatch):
+def test_token_form_sets_cookie_and_redirects(client, out_dir, monkeypatch):
     monkeypatch.setattr(server, "TOKEN", "secret")
     _write_box(out_dir)
-    r = client.get("/files/box.stl?token=secret")
+    r = client.post("/auth/token", data={"token": "secret", "next": "/files/box.stl"})
     assert r.status_code == 303 and r.headers["location"] == "/files/box.stl"
     assert "stl_session=" in r.headers["set-cookie"]
     assert "stl_token=secret" not in r.headers["set-cookie"]  # the raw token is never a cookie
