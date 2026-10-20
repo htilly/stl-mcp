@@ -208,5 +208,6 @@ Goal: let Claude/ChatGPT make more and better models. In three PRs; the first is
 
 ## Notes
 
-- Tokens are not a hosting cost: the server never calls an AI API. Costs are CPU, disk, bandwidth
-  and domain.
+- Tokens are not a hosting cost: the server calls an AI API only for the feedback button (a short
+  call per draft, limited per user and hour, off until an admin adds a key). Costs are CPU, disk,
+  bandwidth and domain.

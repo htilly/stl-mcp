@@ -104,6 +104,7 @@ from webauthn.helpers.structs import (AuthenticatorSelectionCriteria, PublicKeyC
 
 import buildworker
 import csg
+import feedback
 import jobs
 import geometry as g
 import openscad
@@ -151,6 +152,7 @@ SIGNUP = os.environ.get("SIGNUP") == "1"
 TURNSTILE_SITE_KEY = os.environ.get("TURNSTILE_SITE_KEY", "")
 TURNSTILE_SECRET = os.environ.get("TURNSTILE_SECRET", "")
 SIGNUPS_PER_HOUR = int(os.environ.get("SIGNUPS_PER_HOUR", "5"))
+SETTINGS_KEY = os.environ.get("SETTINGS_KEY", "")  # encrypts the keys an admin saves (feedback button)
 DONATE_URL = os.environ.get("DONATE_URL", "").strip()
 if not DONATE_URL.startswith("https://"):
     DONATE_URL = ""
@@ -391,6 +393,8 @@ class RateLimitError(LimitError):
 
 build_hits = RateLimiter(BUILDS_PER_MINUTE, 60)
 mesh_hits = RateLimiter(MESHES_PER_MINUTE, 60)
+feedback_hits = RateLimiter(feedback.DEFAULT_PER_HOUR, 3600)           # issues created, per user
+feedback_refine_hits = RateLimiter(feedback.DEFAULT_PER_HOUR * 3, 3600)  # model calls, per user
 _build_slots: dict[str, list] = {}  # user id -> [semaphore, builds running or waiting]
 _build_slots_lock = threading.Lock()
 
@@ -1644,7 +1648,8 @@ async def api_auth(request):
                          "usage": await _run(Lib(user).usage),
                          "clients": oauth.state.clients(user["id"]) if OAUTH_ROUTES else [],
                          "oauth": bool(OAUTH_ROUTES), "mcp_url": f"{PUBLIC_URL}/mcp",
-                         "login_required": bool(TOKEN)})
+                         "login_required": bool(TOKEN),
+                         "feedback": await feedback_enabled()})
 
 
 async def api_auth_passkey(request):
@@ -1984,6 +1989,10 @@ async def page_admin_load(_):
     return FileResponse(WEB / "load.html")
 
 
+async def page_admin_feedback(_):
+    return FileResponse(WEB / "feedback-admin.html")
+
+
 def _online(building=()) -> set[str]:
     """Users online now: an open web page (or admin page), MCP traffic in the last
     ONLINE_MCP_SECONDS, or a build."""
@@ -2091,6 +2100,87 @@ async def api_admin_limits(request):
             raise
         security_log("admin_action", by=me["id"], action="openscad_limits", **new)
     return JSONResponse({"openscad": await _run(_openscad_limits)})
+
+
+async def api_admin_feedback(request):
+    """GET: the feedback button's settings (secrets only as 'set' + last 4 characters).
+    POST {enabled, model, repo, labels, per_hour, anthropic_key, github_token, clear}: saves them;
+    an empty or missing key keeps the saved one."""
+    me = _user(request)
+    if request.method == "POST":
+        try:
+            body = await request.json()
+            row = await _run(feedback.load, db)
+            new = feedback.merge(row["value"], body, SETTINGS_KEY)
+            if new:
+                await _run(db.execute, "INSERT INTO server_settings (key, value, updated, updated_by) "
+                           "VALUES (%s, %s, %s, %s) ON CONFLICT (key) DO UPDATE SET "
+                           "value = EXCLUDED.value, updated = EXCLUDED.updated, updated_by = EXCLUDED.updated_by",
+                           (feedback.KEY, Jsonb(new), time.time(), me["id"]))
+            else:
+                await _run(db.execute, "DELETE FROM server_settings WHERE key = %s", (feedback.KEY,))
+        except Exception as e:  # noqa: BLE001 – the error is shown in the UI
+            return _err(e)
+        security_log("admin_action", by=me["id"], action="feedback_settings",
+                     fields=sorted(k for k in body if k not in feedback.SECRETS) +
+                            [f"{k}:set" for k in feedback.SECRETS if body.get(k)])
+    row = await _run(feedback.load, db)
+    by = oauth.state.user(row["updated_by"]) if row["updated_by"] else None
+    return JSONResponse({"feedback": {**feedback.view(row["value"], SETTINGS_KEY),
+                                      "updated": row["updated"],
+                                      "updated_by": (by.get("display_name") or by.get("email")) if by else None}})
+
+
+async def api_admin_feedback_test(request):
+    try:
+        row = await _run(feedback.load, db)
+        return JSONResponse(await _run(feedback.test_connection, row["value"], SETTINGS_KEY))
+    except Exception as e:  # noqa: BLE001
+        return _err(e)
+
+
+async def feedback_enabled() -> bool:
+    row = await _run(feedback.load, db)
+    return feedback.usable(row["value"], SETTINGS_KEY)
+
+
+async def _feedback_call(request, limiter, fn):
+    """Shared by the two feedback steps: same-origin, a setup that works, a per-user limit."""
+    origin = request.headers.get("origin")
+    if origin and origin != _rp()[1]:
+        return JSONResponse({"error": "cross-origin request refused"}, status_code=403)
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError("send a JSON object")
+        row = await _run(feedback.load, db)
+        if not feedback.usable(row["value"], SETTINGS_KEY):
+            raise KeyError("feedback is not switched on")
+        per_hour = feedback.config(row["value"])["per_hour"]
+        limiter.limit = per_hour * (3 if limiter is feedback_refine_hits else 1)
+        if not limiter.hit(_user(request)["id"]):
+            raise RateLimitError("you have sent a lot of feedback - try again in a while")
+        return JSONResponse(await _run(fn, row["value"], body))
+    except Exception as e:  # noqa: BLE001 – the error is shown in the dialog
+        return _err(e)
+
+
+async def api_feedback_refine(request):
+    """POST {text, page}: Claude's draft of the issue {title, body, label, refined}. Nothing is created."""
+    return await _feedback_call(request, feedback_refine_hits, lambda v, b: feedback.refine(
+        v, SETTINGS_KEY, str(b.get("text") or ""), str(b.get("page") or "")))
+
+
+async def api_feedback(request):
+    """POST {title, body, label}: creates the issue the user has looked at; returns {number, url}."""
+    me = _user(request)
+
+    def create(v, b):
+        issue = feedback.create_issue(v, SETTINGS_KEY, str(b.get("title") or ""), str(b.get("body") or ""),
+                                      str(b.get("label") or ""))
+        security_log("feedback_issue", user=me["id"], issue=issue["number"])
+        return issue
+    return await _feedback_call(request, feedback_hits, create)
 
 
 async def api_admin_user_logins(request):
@@ -2798,8 +2888,13 @@ app = Starlette(
         Route("/admin/design", page_admin_design),
         Route("/admin/users", page_admin_users),
         Route("/admin/load", page_admin_load),
+        Route("/admin/feedback", page_admin_feedback),
         Route("/api/admin/load", api_admin_load),
         Route("/api/admin/limits", api_admin_limits, methods=["GET", "POST"]),
+        Route("/api/admin/feedback", api_admin_feedback, methods=["GET", "POST"]),
+        Route("/api/admin/feedback/test", api_admin_feedback_test, methods=["POST"]),
+        Route("/api/feedback/refine", api_feedback_refine, methods=["POST"]),
+        Route("/api/feedback", api_feedback, methods=["POST"]),
         Route("/api/admin/pulse", api_admin_pulse),
         Route("/api/admin/users", api_admin_users),
         Route("/api/admin/users/{id}/logins", api_admin_user_logins),

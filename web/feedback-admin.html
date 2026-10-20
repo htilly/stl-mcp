@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Feedback · autosmith</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/static/favicon.ico" sizes="48x48">
+<link rel="apple-touch-icon" href="/static/brand/apple-touch-icon.png">
+<link rel="manifest" href="/static/brand/site.webmanifest">
+<meta name="theme-color" content="#0f172a">
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/theme.js"></script>
+</head>
+<body>
+<header class="top">
+  <a class="wordmark" href="/" title="Back to the library"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-mark"/></svg><span class="name">auto<b>smith</b></span></a>
+  <span class="crumb admin-crumb"><b>Admin</b></span>
+  <div class="grow"></div>
+  <div data-usermenu></div>
+</header>
+<div class="subnav">
+  <nav class="tabs" aria-label="Admin pages">
+    <a href="/admin"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-settings"/></svg>Print check</a>
+    <a href="/admin/users"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-user"/></svg>Users</a>
+    <a href="/admin/load"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-gauge"/></svg>Load</a>
+    <a href="/admin/feedback" aria-current="page"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-comment"/></svg>Feedback</a>
+    <a href="/admin/design"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-swatch"/></svg>Design system</a>
+  </nav>
+</div>
+<main class="admin">
+  <h1>Feedback</h1>
+  <p class="msg">The “Send feedback” item in the user menu. A user writes, Claude drafts a GitHub issue, the user
+     checks it and it is created in the repository below. Changes apply at once, no restart needed.</p>
+  <p class="banner" id="nokey" hidden>Keys cannot be saved yet: set <code>SETTINGS_KEY</code> in the server's environment
+     (any long random string) and restart. It encrypts the keys below in the database.</p>
+  <section class="group">
+    <h2>Setup</h2>
+    <div class="field"><label class="lbl" for="fb-enabled">Show the feedback button</label>
+      <div class="ctl"><input type="checkbox" id="fb-enabled"></div>
+      <p class="help" id="h-enabled">It only shows when both keys are saved.</p></div>
+    <div class="field"><label class="lbl" for="fb-anthropic">Anthropic API key</label>
+      <div class="ctl"><input type="password" id="fb-anthropic" autocomplete="off" spellcheck="false">
+        <button type="button" data-clear="anthropic_key" class="quiet sm">Remove</button></div>
+      <p class="help" id="h-anthropic">Used to turn the user's text into an issue draft.</p></div>
+    <div class="field"><label class="lbl" for="fb-github">GitHub token</label>
+      <div class="ctl"><input type="password" id="fb-github" autocomplete="off" spellcheck="false">
+        <button type="button" data-clear="github_token" class="quiet sm">Remove</button></div>
+      <p class="help" id="h-github">A fine-grained token with only “Issues: read and write” on the repository below.</p></div>
+    <div class="field"><label class="lbl" for="fb-repo">Repository</label>
+      <div class="ctl"><input type="text" id="fb-repo" placeholder="owner/name"></div>
+      <p class="help">Issues are created here. Public repositories make the feedback public.</p></div>
+    <div class="field"><label class="lbl" for="fb-model">Model</label>
+      <div class="ctl"><input type="text" id="fb-model"></div>
+      <p class="help">The Claude model that writes the draft.</p></div>
+    <div class="field"><label class="lbl" for="fb-labels">Labels</label>
+      <div class="ctl"><input type="text" id="fb-labels"></div>
+      <p class="help">Comma separated. Claude picks one of these; they must exist in the repository.</p></div>
+    <div class="field"><label class="lbl" for="fb-per-hour">Issues per user and hour</label>
+      <div class="ctl"><input type="number" id="fb-per-hour" min="1" max="1000" step="1"></div>
+      <p class="help">Drafts are limited to three times this.</p></div>
+  </section>
+  <div class="actions">
+    <button class="primary" id="fb-save">Save</button>
+    <button id="fb-test">Test the connections</button>
+    <div class="grow"></div>
+    <span class="msg" id="fb-msg" role="status"></span>
+  </div>
+</main>
+<script type="module">
+import { api } from "/static/common.js";
+
+const $ = (id) => document.getElementById(id);
+const say = (t, err) => { $("fb-msg").textContent = t; $("fb-msg").className = "msg" + (err ? " err" : ""); };
+
+function draw(f) {
+  $("nokey").hidden = f.can_store_secrets;
+  $("fb-enabled").checked = f.enabled;
+  $("fb-repo").value = f.repo; $("fb-model").value = f.model;
+  $("fb-labels").value = f.labels.join(", "); $("fb-per-hour").value = f.per_hour;
+  for (const [id, k, what] of [["anthropic", "anthropic_key", "Used to turn the user's text into an issue draft."],
+                               ["github", "github_token", "A fine-grained token with only “Issues: read and write” on the repository below."]]) {
+    const s = f[k];
+    $(`fb-${id}`).value = "";
+    $(`fb-${id}`).placeholder = s.set ? `Saved (ends in ${s.tail || "…"}). Type to replace.` : "Not saved";
+    document.querySelector(`[data-clear="${k}"]`).hidden = !s.set;
+    $(`h-${id}`).textContent = what;
+  }
+  if (f.updated_by) say(`Last changed by ${f.updated_by}, ${new Date(f.updated * 1000).toLocaleString()}.`);
+}
+
+async function save(extra = {}, done = "Saved.") {
+  try {
+    const body = { enabled: $("fb-enabled").checked, repo: $("fb-repo").value, model: $("fb-model").value,
+      labels: $("fb-labels").value, per_hour: Number($("fb-per-hour").value),
+      anthropic_key: $("fb-anthropic").value, github_token: $("fb-github").value, ...extra };
+    draw((await api("/api/admin/feedback", { method: "POST", body })).feedback);
+    say(done);
+  } catch (err) { say(err.message, true); }
+}
+
+$("fb-save").addEventListener("click", () => save());
+document.querySelectorAll("[data-clear]").forEach((b) => b.addEventListener("click", () => {
+  if (confirm("Remove the saved key? The feedback button stops working until a new one is saved."))
+    save({ clear: [b.dataset.clear], anthropic_key: "", github_token: "" }, "Removed.");
+}));
+$("fb-test").addEventListener("click", async () => {
+  say("Testing…");
+  try {
+    const r = await api("/api/admin/feedback/test", { method: "POST", body: {} });
+    const t = (n, v) => `${n}: ${v === "ok" ? "works" : v}`;
+    say(`${t("Anthropic", r.anthropic)}. ${t("GitHub", r.github)}.`, r.anthropic !== "ok" || r.github !== "ok");
+  } catch (err) { say(err.message, true); }
+});
+
+api("/api/admin/feedback").then((d) => draw(d.feedback)).catch((err) => say(err.message, true));
+</script>
+<script type="module" src="/static/nav.js"></script>
+</body>
+</html>
