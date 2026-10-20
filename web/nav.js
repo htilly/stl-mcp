@@ -2,6 +2,7 @@
 // settings, connecting an AI app, the theme, admin, and links. Mounts into [data-usermenu].
 // Account settings live in a dialog on the library page; elsewhere the menu links to /#account.
 import { api, esc, icon } from "/static/common.js";
+import { openFeedback } from "/static/feedback.js";
 
 const initials = (name) => (name || "?").split(/[\s@._-]+/).filter(Boolean).slice(0, 2)
   .map((w) => w[0]).join("").toUpperCase() || "?";
@@ -29,6 +30,7 @@ function menuHtml(auth, cfg) {
   if (u?.role === "admin") out.push(item("/admin", "settings", "Admin"));
   out.push(item("/demo", "play", "Watch the demo"));
   out.push(item("/privacy", "lock", "Privacy"));
+  if (auth?.feedback) out.push(`<button type="button" role="menuitem" data-feedback>${icon("comment")}Send feedback</button>`);
   out.push(item("https://github.com/htilly/stl-mcp", "external", "GitHub",
     ` target="_blank" rel="noopener noreferrer"`));
   if (cfg?.donate_url) {
@@ -69,6 +71,7 @@ export async function mountUserMenu(el) {
   // links into the account dialog close the menu (the library page opens the dialog on the hash)
   menu.addEventListener("click", async (e) => {
     if (e.target.closest("a")) open(false);
+    if (e.target.closest("[data-feedback]")) { open(false); openFeedback(); }
     if (e.target.closest("[data-logout]")) {
       await api("/auth/logout", { method: "POST", body: {} }).catch(() => {});
       location.href = "/";

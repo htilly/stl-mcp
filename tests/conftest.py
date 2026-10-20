@@ -49,6 +49,8 @@ def db(test_db, monkeypatch):
     monkeypatch.setattr(server, "bad_tokens", server.RateLimiter(server.BAD_TOKENS_PER_MINUTE, 60))
     monkeypatch.setattr(server, "build_hits", server.RateLimiter(server.BUILDS_PER_MINUTE, 60))
     monkeypatch.setattr(server, "mesh_hits", server.RateLimiter(server.MESHES_PER_MINUTE, 60))
+    monkeypatch.setattr(server, "feedback_hits", server.RateLimiter(5, 3600))
+    monkeypatch.setattr(server, "feedback_refine_hits", server.RateLimiter(15, 3600))
     return test_db
 
 

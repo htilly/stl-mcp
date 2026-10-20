@@ -195,7 +195,7 @@ card), PNG app icons, `apple-touch-icon.png` and `site.webmanifest`. The browser
 | `header.top` | 56 px translucent app bar: wordmark, primary `.nav` or a `.crumb`, live status, page actions, user menu |
 | `.nav` | Primary navigation (My models, Gallery); the current page has `aria-current="page"` |
 | `.crumb` | Breadcrumb on inner pages: `My models / <model> / Editor` |
-| `.umenu`, `.menu` | User menu (`<div data-usermenu>`, filled by `nav.js`): who you are, Account settings, Passkeys and sign-in, Connect an AI app, Theme, Admin, demo, Privacy, GitHub, Donate, Log out |
+| `.umenu`, `.menu` | User menu (`<div data-usermenu>`, filled by `nav.js`): who you are, Account settings, Passkeys and sign-in, Connect an AI app, Theme, Admin, demo, Privacy, Send feedback, GitHub, Donate, Log out |
 | `.theme-switch` | Light / auto / dark switch (`[data-theme-switch]`, rendered by `theme.js`) |
 | `.page-head` | Title row inside a page: heading, count, search and the page's one primary action |
 | `.subnav` | Second bar under the app bar holding `.tabs` (admin pages) |
@@ -218,6 +218,7 @@ card), PNG app icons, `apple-touch-icon.png` and `site.webmanifest`. The browser
 | `ol.start` | Getting-started checklist in the empty library; finished steps get `.done` |
 | `.secret` | A value shown only once (a new personal token), with a copy button |
 | `dialog`, `.dlg-head` | Modal with a title bar and a close button |
+| `.feedback-dlg`, `.fb-body` | Feedback dialog opened from the user menu (`feedback.js`): write, review Claude's draft of the issue, done. Only shown when an admin has set up the feedback button |
 | `.settings-dlg`, `.settings` | Account settings: a side list of panes, one shown at a time. **Profile** (name, usage, appearance, delete account), **Sign-in & security** (passkeys, linked sign-ins), **AI connections** (connect wizard, connected apps, personal tokens). Opened from the user menu with `/#account`, `/#security`, `/#connect` |
 | `.tabs` | Links between admin pages in the `.subnav`; the current one has `aria-current="page"` |
 | `.admin` | Settings page layout; `.admin .user` is one account on the Users page |

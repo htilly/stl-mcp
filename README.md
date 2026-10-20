@@ -569,6 +569,17 @@ Thresholds have sensible defaults (`printcheck.py`, `SCHEMA`) and can be changed
 (or `POST /api/recheck`) refreshes existing models without creating versions.
 The thin-wall and overhang checks are sampling-based estimates, not a slicer.
 
+## Feedback button
+Users can choose **Send feedback** in the user menu. They write a few lines, Claude drafts a GitHub
+issue (title, description, label), the user edits it if they like and it is created in your
+repository. It is off until an admin sets it up at `/admin/feedback`: Anthropic API key, a
+fine-grained GitHub token (only *Issues: read and write* on the repository), repository, model,
+the labels Claude may pick and how many issues a user can send per hour. **Test the connections**
+checks both keys. The two keys are stored encrypted in the database with `SETTINGS_KEY` from the
+environment (without it the page refuses to save keys) and are never sent back to the browser.
+Nothing is created until the user confirms the draft. If Claude cannot be reached, the user's own
+text is the draft.
+
 ## Storage
 Users, sessions, passkeys and tokens live in Postgres (`DATABASE_URL`, schema in `migrations/`);
 back it up with `docker compose exec postgres pg_dump -U stl stl > backup.sql`. An `auth.json` from
