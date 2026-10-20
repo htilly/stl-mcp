@@ -142,7 +142,7 @@
 import * as THREE from "three";
 import { createStage, loadSTL, spreadX } from "/static/stage.js";
 import { createComments } from "/static/comments.js";
-import { api, subscribe, ago, fmt, esc, icon, visBadge, warnHtml, sourceBadge, PART_COLORS } from "/static/common.js";
+import { api, subscribe, ago, fmt, esc, icon, visBadge, warnHtml, sourceBadge, plainStl, PART_COLORS } from "/static/common.js";
 
 const id = decodeURIComponent(location.pathname.split("/").pop());
 document.getElementById("editlink").href = `/edit/${encodeURIComponent(id)}`;
@@ -318,6 +318,10 @@ function renderAccess() {
   $("ronote").hidden = !ro;
   $("title").readOnly = $("desc").readOnly = !edit;
   for (const el of ["editlink", "commentmode", "commentsec", "editrecipe", "del"]) $(el).hidden = !edit;
+  // The editor works on shape recipes and uploaded STLs only: OpenSCAD, scripts and the like
+  // change through Claude.
+  const cur = model.versions.find((x) => x.version === model.current);
+  if (cur?.kind !== "csg" && !plainStl(cur)) $("editlink").hidden = true;
   $("duplabel").textContent = edit ? "Duplicate" : "Copy to my library";
 }
 

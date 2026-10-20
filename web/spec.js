@@ -509,8 +509,9 @@ export const SCHEMA = {
 SCHEMA.cube = SCHEMA.box;
 export const COMMON = [["segments", 64], ["array", { count: [2, 1, 1], step: [25, 0, 0] }], ["polar", { count: 6, degrees: 360 }], ["mirror", [1, 0, 0]]];
 
-// Keys the inspector does not list as parameters (they have their own controls).
-export const STRUCTURAL = new Set(["shape", "op", "children", "child", "name", "hidden", "translate", "rotate", "scale"]);
+// Keys the inspector does not list as parameters (they have their own controls, or none: a mesh
+// shape's "mesh" is the stored STL it stands for).
+export const STRUCTURAL = new Set(["shape", "op", "children", "child", "name", "hidden", "translate", "rotate", "scale", "mesh"]);
 
 // Text typed into a field -> value. "=..." stays an expression; JSON for lists and objects.
 export function parseValue(text, prev) {

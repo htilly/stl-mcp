@@ -19,6 +19,8 @@ from __future__ import annotations
 import ast
 import math
 import operator
+import re
+from pathlib import Path
 
 import manifold3d as mf
 import numpy as np
@@ -36,6 +38,10 @@ DEFAULT_SEGMENTS = 64
 MAX_TRIANGLES = 5_000_000  # per node and in total: a recipe cannot make the server build forever
 MAX_EXPR_LEN = 1000
 MAX_NUMBER = 1e12          # no dimension, count or angle needs more; stops runaway arithmetic
+# where the "mesh" shape finds its STLs, <sha256>.stl (the store's mesh dir; the build worker is
+# told it with each job). None: mesh shapes cannot be built.
+MESH_DIR: Path | None = None
+MESH_SHA = re.compile(r"[0-9a-f]{64}")
 
 # ---------------------------------------------------------------- expressions
 
@@ -250,8 +256,39 @@ def _profile_cs(p, depth=0):
     return cs
 
 
+_meshes: dict[str, M] = {}
+
+
+def _mesh(n) -> M:
+    """{"shape": "mesh", "mesh": "<sha256>"}: an attached STL, as it is (in its own coordinates)."""
+    sha = n.get("mesh")
+    if not isinstance(sha, str) or not MESH_SHA.fullmatch(sha):
+        raise ValueError("mesh: 'mesh' must be an attached mesh (its sha256)")
+    if sha not in _meshes:
+        path = MESH_DIR / f"{sha}.stl" if MESH_DIR else None
+        if path is None or not path.is_file():
+            raise ValueError(f"mesh {sha[:12]}… is not available – attach the file again")
+        tm = trimesh.load(path, force="mesh")            # merges the STL's duplicate vertices
+        _budget(len(tm.faces))
+        m = M(mf.Mesh(vert_properties=np.asarray(tm.vertices, dtype=np.float32),
+                      tri_verts=np.asarray(tm.faces, dtype=np.uint32)))
+        if m.status() != mf.Error.NoError:
+            tm.merge_vertices()
+            trimesh.repair.fill_holes(tm)
+            trimesh.repair.fix_normals(tm)
+            m = M(mf.Mesh(vert_properties=np.asarray(tm.vertices, dtype=np.float32),
+                          tri_verts=np.asarray(tm.faces, dtype=np.uint32)))
+        if m.status() != mf.Error.NoError:
+            raise ValueError("the mesh is not watertight, so it cannot be cut or combined – repair "
+                             "it first (modify_file repair=True)")
+        _meshes[sha] = m
+    return _meshes[sha]
+
+
 def _shape(n, env=None) -> M:
     kind = n["shape"]
+    if kind == "mesh":
+        return _mesh(n)
     segs = _segs(n)
     center = bool(n.get("center", False))
     if kind in ("box", "cube"):
@@ -305,7 +342,7 @@ def _shape(n, env=None) -> M:
     if kind in TEMPLATES:
         return TEMPLATES[kind](n)
     raise ValueError(f"unknown shape '{kind}'. Available: box, cylinder, cone, sphere, tube, torus, "
-                     f"wedge, extrude, revolve, sdf, {', '.join(fnshapes.SHAPES)}, {', '.join(TEMPLATES)}")
+                     f"wedge, extrude, revolve, sdf, mesh, {', '.join(fnshapes.SHAPES)}, {', '.join(TEMPLATES)}")
 
 
 def _transform(m: M, n: dict) -> M:
@@ -490,6 +527,9 @@ Shapes ("shape"):
   revolve  profile (in the xz plane: x=radius), degrees?
   radial, heightmap, sweep, loft – expression/path shapes, see below
   sdf      blended organic shapes (smooth unions, shells, twists), see below
+  mesh     mesh: an existing STL (a file from list_files or "<model_id>/v2/body.stl"), used as it
+           is in its own coordinates; move/rotate/scale it and combine it with other shapes like
+           any node. It is stored with the recipe (as its sha256). It must be watertight.
   profile: {"shape":"polygon","points":[[x,y],...],"holes":[[...]]} | {"shape":"circle","d":..}
            | {"shape":"rect","size":[x,y],"radius"?, "center"?} | {"shape":"spline","points":[..]}
            | {"shape":"svg","path":"M…Z","size"?:[w,h]} (logos, imported outlines, see below)
