@@ -438,3 +438,66 @@ def test_right_bearer_tokens_are_not_counted(client, monkeypatch):
 ])
 def test_token_problem(token, verdict):
     assert server.token_problem(token)[0] == verdict
+
+
+# ---- mesh tools and uploads run in a worker thread (review 2026-10: O-001)
+
+@pytest.mark.parametrize("call", [
+    lambda c: server.file_info("box.stl", ctx=c),
+    lambda c: server.check_print(file="box.stl", ctx=c),
+    lambda c: server.modify_file("box.stl", name="big", scale=2, ctx=c),
+    lambda c: server.split_file("box.stl", ctx=c),
+    lambda c: server.export_obj("set", [{"file": "box.stl"}], ctx=c),
+])
+def test_mesh_tools_load_meshes_off_the_event_loop(out_dir, monkeypatch, call):
+    admin = server._admin()
+    (server.Lib(admin).dir / "box.stl").write_bytes(trimesh.creation.box().export(file_type="stl"))
+    real, on_main = server._load, []
+
+    def load(lib, file):
+        on_main.append(threading.current_thread() is threading.main_thread())
+        return real(lib, file)
+
+    monkeypatch.setattr(server, "_load", load)
+    asyncio.run(call(_ctx(admin)))
+    assert on_main and not any(on_main)
+
+
+def test_upload_parses_off_the_event_loop(client, monkeypatch):
+    real, on_main = server._load_import, []
+
+    def load(data, fmt):
+        on_main.append(threading.current_thread() is threading.main_thread())
+        return real(data, fmt)
+
+    monkeypatch.setattr(server, "_load_import", load)
+    r = client.put("/upload/up.stl", content=trimesh.creation.box().export(file_type="stl"),
+                   headers=bearer("secret"))
+    assert r.status_code == 200 and on_main == [False]
+
+
+# ---- comment hints are computed without holding the store lock (review 2026-10: A-002)
+
+def test_comment_hints_do_not_hold_the_store_lock(out_dir, monkeypatch):
+    st = server.store
+    st.create("box", "csg", BOX)
+    free = []
+
+    def hints(m, version, part, point):
+        t = threading.Thread(target=lambda: free.append(st.lock.acquire(timeout=1) and not st.lock.release()))
+        t.start()
+        t.join()
+        return {"near_nodes": []}
+
+    monkeypatch.setattr(st, "_hints", hints)
+    c = st.add_comment("box", "here", point=[0, 0, 5], part="model")
+    assert free == [True] and c["id"] == "c1" and c["near_nodes"] == []
+
+
+def test_comments_per_model_are_capped(out_dir, monkeypatch):
+    monkeypatch.setattr(store_mod, "MAX_COMMENTS", 2)
+    server.store.create("box", "csg", BOX)
+    server.store.add_comment("box", "one")
+    server.store.add_comment("box", "two")
+    with pytest.raises(ValueError, match="2 comments"):
+        server.store.add_comment("box", "three")

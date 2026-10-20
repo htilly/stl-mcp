@@ -97,7 +97,7 @@ def test_save_makes_simplified_copy_over_limit(out_dir, monkeypatch):
 
 def test_file_info(out_dir):
     _write_box(out_dir)
-    info = server.file_info("box.stl")
+    info = run(server.file_info("box.stl"))
     assert info["watertight"] is True and info["parts"] == 1
     assert sorted(info["extents_mm"]) == [10.0, 20.0, 30.0]
     assert info["volume_cm3"] == 6.0
@@ -130,20 +130,20 @@ def test_import_file_from_url(out_dir, monkeypatch):
 
 def test_modify_file_scale_saves_under_new_name(out_dir):
     _write_box(out_dir)
-    info = server.modify_file("box.stl", name="big", scale=2)
+    info = run(server.modify_file("box.stl", name="big", scale=2))
     assert sorted(info["extents_mm"]) == [20.0, 40.0, 60.0]
     assert (fdir() / "box.stl").is_file() and (fdir() / "big.stl").is_file()
 
 
 def test_modify_file_overwrites_by_default(out_dir):
     _write_box(out_dir)
-    server.modify_file("box.stl", scale=2)
-    assert sorted(server.file_info("box.stl")["extents_mm"]) == [20.0, 40.0, 60.0]
+    run(server.modify_file("box.stl", scale=2))
+    assert sorted(run(server.file_info("box.stl"))["extents_mm"]) == [20.0, 40.0, 60.0]
 
 
 def test_modify_file_max_triangles(out_dir):
     (fdir() / "ball.stl").write_bytes(trimesh.creation.icosphere(subdivisions=4).export(file_type="stl"))
-    info = server.modify_file("ball.stl", name="small", max_triangles=200)
+    info = run(server.modify_file("ball.stl", name="small", max_triangles=200))
     assert info["triangles"] <= 200
 
 
@@ -152,7 +152,7 @@ def test_split_file_orders_largest_first(out_dir):
     b = trimesh.creation.icosphere(subdivisions=3)
     b.apply_translation([50, 0, 0])
     (fdir() / "two.stl").write_bytes(trimesh.util.concatenate([a, b]).export(file_type="stl"))
-    parts = server.split_file("two.stl")
+    parts = run(server.split_file("two.stl"))
     assert [p["file"] for p in parts] == ["two_part1.stl", "two_part2.stl"]
     assert parts[0]["triangles"] > parts[1]["triangles"]
 
@@ -160,7 +160,7 @@ def test_split_file_orders_largest_first(out_dir):
 def test_export_obj_creates_obj_mtl_zip(out_dir):
     _write_box(out_dir, "a.stl")
     _write_box(out_dir, "b.stl", (5, 5, 5))
-    res = server.export_obj("set", [{"file": "a.stl", "color": "blue"}, {"file": "b.stl"}])
+    res = run(server.export_obj("set", [{"file": "a.stl", "color": "blue"}, {"file": "b.stl"}]))
     assert res["parts"] == ["a", "b"] and res["triangles"] == 24
     for ext in ("obj", "mtl", "zip"):
         assert (fdir() / f"set.{ext}").is_file()
@@ -170,9 +170,9 @@ def test_export_obj_creates_obj_mtl_zip(out_dir):
 
 def test_export_obj_simplifies_over_limit(out_dir, monkeypatch):
     (fdir() / "ball.stl").write_bytes(trimesh.creation.icosphere(subdivisions=4).export(file_type="stl"))
-    full = server.export_obj("full", [{"file": "ball.stl"}])
+    full = run(server.export_obj("full", [{"file": "ball.stl"}]))
     monkeypatch.setattr(server, "TINKERCAD_MAX", full["size_bytes"] // 2)
-    small = server.export_obj("small", [{"file": "ball.stl"}])
+    small = run(server.export_obj("small", [{"file": "ball.stl"}]))
     assert small["triangles"] < full["triangles"]
 
 

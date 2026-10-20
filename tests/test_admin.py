@@ -95,20 +95,20 @@ def test_models_list_counts_warnings(client, out_dir):
 
 def test_check_print_tool_for_model_and_file(out_dir):
     run(server.create_model("plate", PLATE))
-    r = server.check_print(model_id="plate")
+    r = run(server.check_print(model_id="plate"))
     assert r["ok"] is False and "thin_walls" in {w["code"] for w in r["warnings"]["model"]}
     server.store.settings.update({"min_wall_mm": 0.3})
-    assert server.check_print(model_id="plate")["ok"] is True
+    assert run(server.check_print(model_id="plate"))["ok"] is True
     (server.Lib(server._admin()).dir / "big.stl").write_bytes(trimesh.creation.box((400, 10, 10)).export(file_type="stl"))
-    r = server.check_print(file="big.stl")
+    r = run(server.check_print(file="big.stl"))
     assert "exceeds_build_volume" in {w["code"] for w in r["warnings"]["model"]}
 
 
 def test_check_print_needs_exactly_one_target(out_dir):
     with pytest.raises(ValueError, match="exactly one"):
-        server.check_print()
+        run(server.check_print())
     with pytest.raises(ValueError, match="exactly one"):
-        server.check_print(model_id="a", file="b.stl")
+        run(server.check_print(model_id="a", file="b.stl"))
 
 
 def test_uploaded_file_reports_print_warnings(client, out_dir):

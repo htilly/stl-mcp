@@ -1112,42 +1112,51 @@ async def create_relief(name: str, url: str = "", data_base64: str = "", mode: s
 
 
 @mcp.tool()
-def file_info(file: str, ctx: Context = None) -> dict:
+async def file_info(file: str, ctx: Context = None) -> dict:
     """Dimensions, bounds, volume and watertightness of an STL file on the server."""
     lib = _lib(ctx)
-    mesh = _load(lib, file)
-    return {"file": Path(file).name, "watertight": bool(mesh.is_watertight),
-            "extents_mm": [round(float(v), 2) for v in mesh.extents],
-            "bounds_mm": [[round(float(v), 2) for v in b] for b in mesh.bounds],
-            "volume_cm3": round(float(mesh.volume) / 1000, 2), "triangles": len(mesh.faces),
-            "parts": len(mesh.split(only_watertight=False))}
+
+    def run():
+        mesh = _load(lib, file)
+        return {"file": Path(file).name, "watertight": bool(mesh.is_watertight),
+                "extents_mm": [round(float(v), 2) for v in mesh.extents],
+                "bounds_mm": [[round(float(v), 2) for v in b] for b in mesh.bounds],
+                "volume_cm3": round(float(mesh.volume) / 1000, 2), "triangles": len(mesh.faces),
+                "parts": len(mesh.split(only_watertight=False))}
+
+    return await lib.build(run, job="file_info")
 
 
 @mcp.tool()
-def check_print(model_id: str | None = None, file: str | None = None, ctx: Context = None) -> dict:
+async def check_print(model_id: str | None = None, file: str | None = None, ctx: Context = None) -> dict:
     """Print check (watertight, disconnected shells, thin walls, overhangs, build volume) of a
     library model's current version (model_id) or a standalone STL file (file), using the
     thresholds configured in the admin UI. Warnings only - nothing is changed."""
     lib = _lib(ctx)
     if bool(model_id) == bool(file):
         raise ValueError("give exactly one of model_id or file")
-    settings = store.settings.get()
-    if file:
-        warnings = {"model": printcheck.check(_load(lib, file), settings)}
-    else:
-        import trimesh
-        cur = Store.current(lib.models.get(model_id))
-        warnings = {n: printcheck.check(trimesh.load(lib.models.file(model_id, p["file"]), force="mesh"),
-                                        settings) for n, p in cur["parts"].items()}
-    return {"ok": not any(warnings.values()), "warnings": warnings, "settings": settings}
+
+    def run():
+        settings = store.settings.get()
+        if file:
+            warnings = {"model": printcheck.check(_load(lib, file), settings)}
+        else:
+            import trimesh
+            cur = Store.current(lib.models.get(model_id))
+            warnings = {n: printcheck.check(trimesh.load(lib.models.file(model_id, p["file"]),
+                                                         force="mesh"), settings)
+                        for n, p in cur["parts"].items()}
+        return {"ok": not any(warnings.values()), "warnings": warnings, "settings": settings}
+
+    return await lib.build(run, job="check_print")
 
 
 @mcp.tool()
-def modify_file(file: str, name: str = "", scale: float | list[float] | None = None,
-                rotate: list[float] | None = None, mirror: str = "", place_on_bed: bool = True,
-                center_xy: bool = False, add: list[dict] | None = None,
-                subtract: list[dict] | None = None, repair: bool = False,
-                max_triangles: int = 0, ctx: Context = None) -> dict:
+async def modify_file(file: str, name: str = "", scale: float | list[float] | None = None,
+                      rotate: list[float] | None = None, mirror: str = "", place_on_bed: bool = True,
+                      center_xy: bool = False, add: list[dict] | None = None,
+                      subtract: list[dict] | None = None, repair: bool = False,
+                      max_triangles: int = 0, ctx: Context = None) -> dict:
     """Builds on an existing STL (e.g. imported from Tinkercad). Saved as <name>.stl
     (default: overwrites the file). Order: repair, scale, rotate, mirror, center_xy/place_on_bed,
     add, subtract, max_triangles.
@@ -1158,49 +1167,61 @@ def modify_file(file: str, name: str = "", scale: float | list[float] | None = N
     Check bounds_mm with file_info first. add/subtract require a watertight model.
     max_triangles: simplify the mesh to at most this many triangles."""
     lib = _lib(ctx)
-    lib.ensure_room()
-    mesh = g.modify(_load(lib, file), scale=scale, rotate=rotate, mirror=mirror,
-                    place_on_bed=place_on_bed, center_xy=center_xy, add=add, subtract=subtract,
-                    do_repair=repair)
-    if max_triangles and len(mesh.faces) > max_triangles:
-        mesh = mesh.simplify_quadric_decimation(face_count=max_triangles)
-    return _save(lib, mesh, _safe(name or Path(file).stem))
+
+    def run():
+        lib.ensure_room()
+        mesh = g.modify(_load(lib, file), scale=scale, rotate=rotate, mirror=mirror,
+                        place_on_bed=place_on_bed, center_xy=center_xy, add=add, subtract=subtract,
+                        do_repair=repair)
+        if max_triangles and len(mesh.faces) > max_triangles:
+            mesh = mesh.simplify_quadric_decimation(face_count=max_triangles)
+        return _save(lib, mesh, _safe(name or Path(file).stem))
+
+    return await lib.build(run, job="modify_file")
 
 
 @mcp.tool()
-def split_file(file: str, ctx: Context = None) -> list[dict]:
+async def split_file(file: str, ctx: Context = None) -> list[dict]:
     """Splits an STL into its loose parts: <name>_part1.stl, <name>_part2.stl, ... (largest first)."""
     lib = _lib(ctx)
-    lib.ensure_room()
-    parts = sorted(_load(lib, file).split(only_watertight=False), key=lambda m: -len(m.faces))
-    stem = Path(file).stem
-    return [_save(lib, p, f"{stem}_part{i}") for i, p in enumerate(parts, 1)]
+
+    def run():
+        lib.ensure_room()
+        parts = sorted(_load(lib, file).split(only_watertight=False), key=lambda m: -len(m.faces))
+        stem = Path(file).stem
+        return [_save(lib, p, f"{stem}_part{i}") for i, p in enumerate(parts, 1)]
+
+    return await lib.build(run, job="split_file")
 
 
 @mcp.tool()
-def export_obj(name: str, parts: list[dict], ctx: Context = None) -> dict:
+async def export_obj(name: str, parts: list[dict], ctx: Context = None) -> dict:
     """Merges STL files into one colored OBJ (one object + color per part) for Tinkercad etc.
     parts: [{file: 'box_body.stl', color: 'red' | '#rrggbb' (optional)}]. Parts from the model
     library are given as '<model_id>/<file>' (file per parts[...].url in get_model, e.g. 'box/v3/lid.stl').
     Creates <name>.obj, <name>.mtl and <name>.zip (both files; import the zip's contents)."""
     lib = _lib(ctx)
-    lib.ensure_room()
     name = _safe(name)
-    loaded = [(_safe(Path(p["file"]).stem), _load(lib, p["file"]), p.get("color", "")) for p in parts]
-    obj, mtl = g.to_obj(loaded, f"{name}.mtl")
-    if len(obj) > TINKERCAD_MAX:
-        ratio = TINKERCAD_MAX / len(obj) * 0.9
-        loaded = [(n, m.simplify_quadric_decimation(face_count=max(4, int(len(m.faces) * ratio))), c)
-                  for n, m, c in loaded]
+
+    def run():
+        lib.ensure_room()
+        loaded = [(_safe(Path(p["file"]).stem), _load(lib, p["file"]), p.get("color", "")) for p in parts]
         obj, mtl = g.to_obj(loaded, f"{name}.mtl")
-    (lib.dir / f"{name}.obj").write_text(obj)
-    (lib.dir / f"{name}.mtl").write_text(mtl)
-    with zipfile.ZipFile(lib.dir / f"{name}.zip", "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr(f"{name}.obj", obj)
-        z.writestr(f"{name}.mtl", mtl)
-    return {"obj": lib.url(f"{name}.obj"), "mtl": lib.url(f"{name}.mtl"), "zip": lib.url(f"{name}.zip"),
-            "parts": [n for n, _, _ in loaded], "size_bytes": len(obj),
-            "triangles": sum(len(m.faces) for _, m, _ in loaded)}
+        if len(obj) > TINKERCAD_MAX:
+            ratio = TINKERCAD_MAX / len(obj) * 0.9
+            loaded = [(n, m.simplify_quadric_decimation(face_count=max(4, int(len(m.faces) * ratio))), c)
+                      for n, m, c in loaded]
+            obj, mtl = g.to_obj(loaded, f"{name}.mtl")
+        (lib.dir / f"{name}.obj").write_text(obj)
+        (lib.dir / f"{name}.mtl").write_text(mtl)
+        with zipfile.ZipFile(lib.dir / f"{name}.zip", "w", zipfile.ZIP_DEFLATED) as z:
+            z.writestr(f"{name}.obj", obj)
+            z.writestr(f"{name}.mtl", mtl)
+        return {"obj": lib.url(f"{name}.obj"), "mtl": lib.url(f"{name}.mtl"), "zip": lib.url(f"{name}.zip"),
+                "parts": [n for n, _, _ in loaded], "size_bytes": len(obj),
+                "triangles": sum(len(m.faces) for _, m, _ in loaded)}
+
+    return await lib.build(run, job="export_obj")
 
 
 @mcp.tool()
@@ -2289,8 +2310,10 @@ async def api_model(request):
                 m = await lib.build(lib.models.update, mid, params=body.get("params"),
                                changes=body.get("changes"), note=body.get("note", "from the web UI"))
             elif action == "comment_add":
-                await _run(lib.models.add_comment, mid, body.get("text", ""), body.get("point"),
-                           body.get("normal"), body.get("part"), body.get("version"))
+                # like a preview: per-user rate limit and build slots (the hints build CSG nodes)
+                await lib.build(lib.models.add_comment, mid, body.get("text", ""), body.get("point"),
+                                body.get("normal"), body.get("part"), body.get("version"),
+                                mesh=True, job="comment")
                 m = lib.models.get(mid)
             elif action in ("comment_resolve", "comment_reopen", "comment_reply", "comment_delete"):
                 m = lib.models.comment_action(mid, body["id"], action.removeprefix("comment_"),
@@ -2600,9 +2623,12 @@ async def upload(request):
             return JSONResponse({"error": f"larger than {MAX_UPLOAD // 1_000_000} MB"}, status_code=413)
     try:
         lib = _req_lib(request)
-        lib.ensure_room()
-        mesh = await _run(_load_import, bytes(body), fname.suffix.lstrip(".") or "stl")
-        return JSONResponse(_save(lib, mesh, _safe(fname.stem)))
+
+        def run():  # the quota check, parsing and saving all touch the disk: not on the event loop
+            lib.ensure_room()
+            return _save(lib, _load_import(bytes(body), fname.suffix.lstrip(".") or "stl"),
+                         _safe(fname.stem))
+        return JSONResponse(await lib.build(run, job="upload"))
     except Exception as e:  # noqa: BLE001
         return _err(e)
 

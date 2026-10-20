@@ -95,7 +95,7 @@ def test_public_model_over_mcp(world):
     got = server.get_model("anns-box", ctx=b)
     assert got["visibility"] == "public" and got["comments"] == [] and "read_only" in got
     assert "read_only" not in server.get_model("anns-box", ctx=ctx(world.ann))
-    assert server.check_print(model_id="anns-box", ctx=b)["warnings"]
+    assert run(server.check_print(model_id="anns-box", ctx=b))["warnings"]
     assert server.list_models(ctx=b) == []
     for call in (lambda: run(server.update_model("anns-box", changes={"x": 1}, ctx=b)),
                  lambda: server.delete_model("anns-box", ctx=b),
