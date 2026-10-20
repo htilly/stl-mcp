@@ -9,7 +9,9 @@ name: Build and Push Docker Image
 # .github/workflows/deploy.yml and the comment at stl-mcp in
 # /config/docker-compose.yml on tillyse.
 #
-# Roll back by pointing the server at a :main-<sha> tag instead.
+# This is the only build. deploy-dev.yml ships every :main-<sha> to
+# dev.autosmith.eu; release.yml promotes one of them (retag, no rebuild) to
+# :vX.Y.Z and :release for autosmith.eu.
 
 on:
   push:

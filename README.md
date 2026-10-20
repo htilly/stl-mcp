@@ -229,7 +229,10 @@ purpose, with the tests.
 The container only listens on `127.0.0.1:8765`. Set `BIND=0.0.0.0` to expose the port directly,
 or set `DOMAIN` and run `docker compose --profile caddy up -d` for automatic HTTPS.
 
-**Deploy:** merging to `main` builds the image on GitHub and deploys it to autosmith.eu.
+**Deploy:** merging to `main` builds the image on GitHub and deploys it to the dev instance,
+[dev.autosmith.eu](https://dev.autosmith.eu). Production, autosmith.eu, only moves on a release:
+push a tag like `v1.4.0` on a commit of `main`, and the image dev already runs is promoted to
+prod without a rebuild. To roll back, run the **Release** workflow by hand with an older version.
 
 Open `http://localhost:8765/?admin` and log in with the token, which sets a session cookie for
 the admin account (`ADMIN_EMAILS`, the first entry). Then add a passkey (the banner in the library, or 🔑 in the header):
