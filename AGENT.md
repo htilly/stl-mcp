@@ -10,6 +10,12 @@ Every new session must create its own branch before making any changes, and neve
 to `main`. Branch off an up-to-date `main` with a short descriptive name (e.g. `feature/<topic>`,
 `fix/<topic>`), commit the session's work there, and merge it into `main` via a pull request.
 
+Never reuse a branch whose PR has been merged: a merged branch is finished. Start follow-up work
+from the latest `main` on a new branch (`git fetch origin main && git checkout -b <new-name> origin/main`).
+`.claude/hooks/session-start.sh` does this automatically at the start of every session: it cuts
+`claude/session-<id>` from `origin/main`, unless the tree has uncommitted changes or the current
+branch already has unmerged commits.
+
 Always commit, open a PR and merge automatically: when a task is done, commit, push, open a PR to
 `main` and merge it as soon as the checks pass, without asking first. Never merge while a check is
 red or still running. Merging deploys to dev (see Deploying), so dev is always up to date.
