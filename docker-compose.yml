@@ -27,6 +27,7 @@ services:
       APPLE_PRIVATE_KEY: ${APPLE_PRIVATE_KEY:-}
       MCP_TOKEN: ${MCP_TOKEN:?set MCP_TOKEN in .env}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8765}
+      APP_ENV: ${APP_ENV:-}
       ALLOW_SCRIPT: ${ALLOW_SCRIPT:-0}
       FILES_PUBLIC: ${FILES_PUBLIC:-0}
       UI_PUBLIC: ${UI_PUBLIC:-0}

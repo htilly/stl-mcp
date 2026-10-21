@@ -1010,3 +1010,18 @@ h3.sub { font-size: var(--t-base); margin: 0 0 var(--s2); }
 @media (pointer: coarse) and (max-width: 520px) {
   header.top .btn:has(.label) { width: 40px; }
 }
+
+/* ------------------------------------------------------- environment marker
+   theme.js sets html[data-env] on anything but production: an orange bar across the top of every
+   page, and an uppercase badge after the wordmark, so dev is never mistaken for prod. */
+html[data-env] body { border-top: 4px solid var(--env, #f59e0b); }
+html[data-env="dev"] { --env: #f59e0b; }
+html[data-env]:not([data-env="dev"]) { --env: #a855f7; }
+html[data-env] header.top { box-shadow: inset 0 -2px 0 var(--env); }
+html[data-env] .wordmark::after {
+  content: var(--env-label, "DEV");
+  letter-spacing: .06em;
+  font-size: 11px; font-weight: 700; line-height: 1;
+  padding: 3px 6px; border-radius: 4px; margin-left: var(--s1, 4px);
+  background: var(--env); color: #1a1100;
+}

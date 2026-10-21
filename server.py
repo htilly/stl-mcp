@@ -155,6 +155,12 @@ TURNSTILE_SECRET = os.environ.get("TURNSTILE_SECRET", "")
 SIGNUPS_PER_HOUR = int(os.environ.get("SIGNUPS_PER_HOUR", "5"))
 SETTINGS_KEY = os.environ.get("SETTINGS_KEY", "")  # encrypts the keys an admin saves (feedback button)
 DONATE_URL = os.environ.get("DONATE_URL", "").strip()
+# Which environment this is, for the colored banner in the web UI. APP_ENV wins; otherwise a
+# PUBLIC_URL host starting with "dev." (dev.autosmith.eu) counts as dev. Empty = production.
+APP_ENV = (os.environ.get("APP_ENV", "").strip().lower()
+           or ("dev" if (urlparse(PUBLIC_URL).hostname or "").startswith("dev.") else ""))
+if APP_ENV in ("prod", "production"):
+    APP_ENV = ""
 if not DONATE_URL.startswith("https://"):
     DONATE_URL = ""
 TRUSTED_PROXY = os.environ.get("TRUSTED_PROXY") == "1"
@@ -1772,6 +1778,8 @@ async def auth_config(_):
            "providers": _providers()}
     if DONATE_URL:
         cfg["donate_url"] = DONATE_URL
+    if APP_ENV:
+        cfg["env"] = APP_ENV
     return JSONResponse(cfg)
 
 
