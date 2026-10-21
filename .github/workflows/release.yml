@@ -40,3 +40,19 @@ jobs:
       version: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
       run_actor: ${{ github.actor }}
       rerun_actor: ${{ github.triggering_actor }}
+
+  # Only after prod deployed: a failed deploy leaves no release behind.
+  github-release:
+    needs: deploy
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create GitHub Release with generated notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --title "$TAG" --generate-notes --verify-tag
