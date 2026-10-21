@@ -192,8 +192,9 @@ Goal: let Claude/ChatGPT make more and better models. In three PRs; the first is
 - [ ] **Curved lithophanes** (cylinder or arc) and a light-box/frame template. (M)
 
 ### Ideas, not planned yet
-- [ ] **Better "eyes" for the AI**: a `measure` tool (distances between faces/parts, smallest wall
-  thickness, collisions such as lid vs box), section views as images (trimesh `section`), and a
+- [ ] **Better "eyes" for the AI**: `measure_model` gives sizes and round holes/bosses; still to
+  do: distances between parts, smallest wall thickness, collisions such as lid vs box, section
+  views as images (trimesh `section`), and a
   headless slicer (PrusaSlicer/OrcaSlicer CLI) for print time, filament and where support is
   needed. (M-L)
 

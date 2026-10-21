@@ -118,6 +118,30 @@ The model at the top of this page is an ESP32 DevKit box built entirely from tem
 board, a USB cutout, engraved text, a vented lid with countersunk holes, and four printable
 countersunk `screw`s as a third part.
 
+#### Measuring
+
+- **Dimensions** (<kbd>D</kbd>) draws the size of every part as dimension lines, and rings with
+  labels on its round holes and bosses: `Ø3.4 thru`, `Ø6 ↧3` (a blind hole 3 mm deep), `Ø6 ↥8`
+  (a post 8 mm high), `hex 5.54 AF` (a nut trap, across flats). Labels that would overlap are
+  left out until you zoom in.
+- The **Measurements** list in the side panel sums them up per part, e.g. *4× Ø3.4 holes,
+  through, 48 × 28 mm apart*: the spacing of a mounting pattern at a glance. Click a line to find
+  those holes in the view.
+- **Measure** (<kbd>M</kbd>) has four tools (<kbd>1</kbd>–<kbd>4</kbd>):
+  **Distance** between two points (with dx/dy/dz; points snap to corners and to hole centres, so
+  centre-to-centre distances are one click each; hold <kbd>Alt</kbd> to place freely),
+  **Faces** (the gap between two parallel faces, or the angle between two others),
+  **Thickness** (one click: the material straight behind a face, to check a wall or a floor) and
+  **Angle** (three points). While you move the pointer the distance is shown live.
+- Measurements stay until removed (<kbd>Delete</kbd> drops the last one) and follow their parts
+  when you Spread them. **Copy** puts them on the clipboard; the comment button next to one turns
+  it into a [comment](#commenting-directly-in-the-ui) at that spot, so you can write
+  *"Measured 3.2 mm here: make this 3.4 so an M3 screw fits"* for Claude.
+
+The holes and bosses come from the server (`/api/models/<id>/measure`), the same measurement
+Claude gets from `measure_model`. A round feature is found where it meets a flat face; a hole that
+ends only on curved faces is not listed.
+
 ### Commenting directly in the UI
 
 Instead of describing *"the third hole, on the right side, near the top"* in chat, you point at it.
@@ -218,8 +242,9 @@ multi-part ones, templates and expressions:
 - Tick **Hole** (or press <kbd>H</kbd>) to make a shape cut out of the solids instead of adding to
   them. **Result** shows the built model with the holes cut. **Drop** puts the selection on the
   workplane, **Duplicate** copies it.
-- **Measure** (<kbd>M</kbd>): click two points (corners snap), or shift-click two faces for the
-  distance between them. **Workplane** (<kbd>P</kbd>): click a face to build on it. With several
+- **Measure** (<kbd>M</kbd>): distances, gaps and angles between faces, wall thickness and
+  angles, as in the [3D view](#measuring); **Dimensions** shows the size of each part while you
+  edit. **Workplane** (<kbd>P</kbd>): click a face to build on it. With several
   shapes selected, **Align** lines them up or spaces them evenly.
 - Undo/redo, **Save** (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>S</kbd>) builds a new version, **Export
   STL** downloads the last saved one.
@@ -339,6 +364,7 @@ update_model("name-plate", {"changes": {"/root/children/-": {"shape": "text", "t
 | `create_relief` | a lithophane or an embossed relief plate from a picture (PNG/JPEG) |
 | `file_info` | dimensions, bounds, volume, number of loose parts |
 | `check_print` | re-run the print check on a library model or a standalone file with the current settings |
+| `measure_model` | size of each part and its round holes and bosses: diameter, depth, through or blind, position, and the spacing of equal ones (e.g. 4 × Ø3.4 through, 48 × 28 mm apart), to check screws, inserts and boards fit |
 | `modify_file` | scale, rotate, mirror, place, add/subtract shapes (e.g. screw holes), repair mesh, simplify |
 | `split_file` | splits a file into its loose parts |
 | `export_obj` | merges several STLs (including library ones, `<model_id>/v3/lid.stl`) into one colored OBJ (+ .mtl and .zip) |

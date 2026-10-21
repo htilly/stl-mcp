@@ -74,8 +74,6 @@
   .ed-banner[hidden] { display: none; }
   .ed-mode { position: absolute; left: var(--s3); bottom: var(--s3); z-index: 3; font-size: 12px; padding: 4px 8px; border-radius: var(--r-control); background: var(--sheet); border: 1px solid var(--rule); }
   .ed-mode[hidden] { display: none; }
-  .measure { position: absolute; z-index: 3; pointer-events: none; transform: translate(-50%, -130%); font: 12px/1.3 ui-monospace, monospace; background: #111827; color: #fff; padding: 3px 6px; border-radius: 4px; white-space: nowrap; }
-  .measure[hidden] { display: none; }
   .loading a { pointer-events: auto; }
   .loading p { max-width: 42ch; margin: 0; padding: 0 var(--s3); text-align: center; line-height: 1.5; }
   .ed-warns .warn { margin-top: var(--s2); }
@@ -147,7 +145,8 @@
         <button id="del" class="danger" title="Delete (Delete)">Delete</button>
       </div>
       <div class="seg" role="group" aria-label="Tools">
-        <button id="measure" title="Measure: click two points (M). Shift-click two faces for the distance between them.">Measure</button>
+        <button id="measure" title="Measure distances, gaps between faces, wall thickness and angles (M)">Measure</button>
+        <button id="dims" title="Show the size of each part as dimension lines">Dimensions</button>
         <button id="workplane" title="Workplane: click a face to build on it (P)">Workplane</button>
         <button id="commentmode" title="Comment: click the model to leave a comment for Claude (C)">Comment</button>
       </div>
@@ -169,7 +168,6 @@
       </div>
     </form>
     <div class="loading" id="loading">Loading…</div>
-    <div class="measure" id="mlabel" hidden></div>
     <div class="ed-mode" id="modenote" hidden></div>
     <div class="ed-banner" id="banner" hidden><span id="bannertext"></span><button id="reload" class="sm">Load it</button><button id="keep" class="sm">Keep mine</button></div>
     <div class="toast" id="toast"></div>
