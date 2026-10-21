@@ -207,3 +207,17 @@ def test_only_the_login_page_links_to_the_demo_at_the_bottom():
     assert login.index('class="demo-link"') > login.index('id="tok"')
     assert "demo-poster" not in login and "<video" not in login
     assert "demo-link" not in (WEB / "index.html").read_text()
+
+
+def test_viewer_toolbar_puts_comment_first_and_measure_second():
+    """Comment and Measure are the most used controls: they come first, stay labelled on phones,
+    and camera/display controls are demoted after them."""
+    html = (WEB / "viewer.html").read_text()
+    bar = html[html.index('<div class="toolbar">'):html.index('<div id="pins">')]
+    order = [bar.index(m) for m in ('id="commentmode"', 'id="measuremode"', 'aria-label="Camera"', 'aria-label="Display"')]
+    assert order == sorted(order)
+    assert 'class="cta"' in bar and 'id="cbadge"' in bar
+    css = (WEB / "style.css").read_text()
+    assert ".toolbar .cta {" in css
+    assert ".toolbar .label:not(.keep) { display: none; }" in css
+    assert "badge" in (WEB / "comments.js").read_text()

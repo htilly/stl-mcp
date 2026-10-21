@@ -34,25 +34,25 @@
 <div class="viewer-layout">
   <div id="stage">
     <div class="toolbar">
-      <div class="seg" role="group" aria-label="Camera">
+      <button id="commentmode" class="cta" title="Then click the model to leave a comment for Claude (C)"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-comment"/></svg><span class="label keep">Comment</span><span class="count" id="cbadge" hidden></span></button>
+      <div class="seg keep" role="group" aria-label="Measure">
+        <button id="measuremode" title="Measure distances, gaps between faces, wall thickness and angles (M)"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-ruler"/></svg><span class="label keep">Measure</span></button>
+        <button id="dims" title="Show the size of each part and its holes and bosses (D)"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-dimension"/></svg><span class="label">Dimensions</span></button>
+        <button id="mshow" class="icon on" hidden title="Hide your measurements on the model (V)" aria-label="Show or hide measurements" aria-pressed="true"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-eye"/></svg></button>
+      </div>
+      <div class="seg secondary" role="group" aria-label="Camera">
         <button data-view="iso" title="Isometric view">Iso</button>
         <button data-view="front" title="Front view">Front</button>
         <button data-view="top" title="Top view">Top</button>
         <button data-view="right" title="Right view">Right</button>
         <button id="fit" class="icon" title="Zoom to fit the model" aria-label="Zoom to fit"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-fit"/></svg></button>
       </div>
-      <div class="seg" role="group" aria-label="Display">
+      <div class="seg secondary" role="group" aria-label="Display">
         <button id="spread" class="on" title="Show the parts side by side or as they are placed"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-spread"/></svg><span class="label">Spread</span></button>
         <button id="edges" class="on" title="Outline sharp edges"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-edges"/></svg><span class="label">Edges</span></button>
         <button id="wire" title="Show the triangle mesh"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-wire"/></svg><span class="label">Mesh</span></button>
         <button id="rotate" title="Turn the model slowly"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-spin"/></svg><span class="label">Spin</span></button>
       </div>
-      <div class="seg" role="group" aria-label="Measure">
-        <button id="measuremode" title="Measure distances, gaps between faces, wall thickness and angles (M)"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-ruler"/></svg><span class="label">Measure</span></button>
-        <button id="dims" title="Show the size of each part and its holes and bosses (D)"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-dimension"/></svg><span class="label">Dimensions</span></button>
-        <button id="mshow" class="icon on" hidden title="Hide your measurements on the model (V)" aria-label="Show or hide measurements" aria-pressed="true"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-eye"/></svg></button>
-      </div>
-      <button id="commentmode" title="Then click the model to leave a comment for Claude"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-comment"/></svg><span class="label">Comment</span></button>
     </div>
     <div id="pins"></div>
     <form class="cpop" id="cpop" hidden>
@@ -399,7 +399,7 @@ const comments = createComments(st, {
   comments: () => model?.comments || [],
   version: () => viewVersion,
   post, toast,
-  list: $("comments"), count: $("ccount"), hint: $("chint"),
+  list: $("comments"), count: $("ccount"), badge: $("cbadge"), hint: $("chint"),
 });
 const renderComments = () => comments.render();
 const updatePins = () => comments.updatePins();
@@ -463,6 +463,7 @@ addEventListener("keydown", (e) => {
   if (measure.key(e)) { e.preventDefault(); return; }
   const k = e.key.toLowerCase();
   if (e.key === "Escape" && commentMode && !comments.open) setCommentMode(false);
+  else if (k === "c" && !$("commentmode").hidden) $("commentmode").click();
   else if (k === "m") $("measuremode").click();
   else if (k === "d") $("dims").click();
   else if (k === "v" && measure.items.length) measure.setShown(!measure.shown);

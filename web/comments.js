@@ -13,7 +13,7 @@ export function createComments(st, {
   version,           // () => the version a new comment is about
   post,              // (body) => Promise; POSTs an action to the model (and shows its own errors)
   toast,
-  list, count, hint, // optional: the comment list, its "n open" pill and the "how to" hint
+  list, count, badge, hint, // optional: the comment list, its "n open" pill and the "how to" hint
 }) {
   const $ = (s) => document.getElementById(s);
   const pinsEl = $("pins"), pop = $("cpop"), text = $("ctext");
@@ -69,6 +69,7 @@ export function createComments(st, {
     const all = comments();
     const open = all.filter((c) => c.status === "open").length;
     if (count) count.textContent = all.length ? `${open} open` : "";
+    if (badge) { badge.textContent = open; badge.hidden = !open; }
     list.innerHTML = visible().map((c) => `
       <div class="cmt${c.status !== "open" ? " done" : ""}${c.id === focusId ? " focus" : ""}" data-id="${c.id}">
         <span class="badge">${c.id.slice(1)}</span>
