@@ -3,6 +3,7 @@ import { TransformControls } from "/static/vendor/three/TransformControls.js";
 import { api, subscribe, esc, warnHtml, fmt, plainStl, PART_COLORS } from "/static/common.js";
 import { createStage, edgesFor, parseSTL, spreadX, toast as showToast } from "/static/stage.js";
 import { createComments } from "/static/comments.js";
+import { createMeasure, showToggle } from "/static/measure.js";
 import {
   resolve, resolveVars, isExpr, isOp, kids, partEntries, setParts, indexTree, pointerOf, atPointer, isHole, directHole,
   label, setHole, group, ungroup, ungroupable, moveNode, solidsOf, holesOf, uniquePartName, primitive, foldScale,
@@ -224,6 +225,7 @@ function buildNode(node, parent, ctx) {
   mesh.userData.node = node;
   mesh.userData.ghost = !!ctx.ghost;
   mesh.userData.proxy = !!ctx.proxy && !ctx.ghost;
+  mesh.userData.hole = !!ctx.hole;
   if ((ctx.hole || ctx.proxy) && !ctx.ghost) mesh.renderOrder = 2;
   mesh.add(edgesFor(geom, 0x1b2a41, ctx.ghost ? 0.25 : 0.45));
   obj.userData.content = mesh;
@@ -305,6 +307,7 @@ function layout() {
   }
   st.buildGrid(bounds());
   placeWorkplaneGrid();
+  measure.refresh();
 }
 
 function bounds(objs) {
@@ -1082,70 +1085,41 @@ function setWorkplane(hit) {
 }
 
 // ------------------------------------------------------------ measure
-let mPoints = [], mLine = null, mFace = null;
-function clearMeasure() {
-  mPoints = []; mFace = null;
-  if (mLine) { scene.remove(mLine); mLine.geometry.dispose(); mLine = null; }
-  $("mlabel").hidden = true;
+// The meshes of what gets built: the cut results and solids, not the invisible proxies inside a
+// cut, the ghosts, nor the holes shown with Holes on.
+function builtMeshes(obj) {
+  const out = [];
+  obj.traverseVisible((o) => {
+    if (o.isMesh && !o.userData.ghost && !o.userData.proxy && !o.userData.hole && o.geometry.attributes.position) out.push(o);
+  });
+  return out;
 }
-
-// Snap a hit to the nearest corner of the face it hit when that is within 8 px.
-function snapHit(hit, ev) {
-  const pos = hit.object.geometry.attributes.position;
-  if (!hit.face || !pos) return hit.point.clone();
-  const r = canvas.getBoundingClientRect();
-  const cursor = { x: ev.clientX - r.left, y: ev.clientY - r.top };
-  let best = hit.point.clone(), bd = 8;
-  for (const i of [hit.face.a, hit.face.b, hit.face.c]) {
-    const v = new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(hit.object.matrixWorld);
-    const s = st.project(v);
-    if (s) { const d = Math.hypot(s.x - cursor.x, s.y - cursor.y); if (d < bd) { bd = d; best = v; } }
-  }
-  return best;
-}
-
-function measureClick(ev) {
-  const hit = st.ray(ev).intersectObjects(pickables.filter((m) => m.visible), false)[0];
-  const p = hit ? snapHit(hit, ev) : st.ray(ev).ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 0, 1), 0), new THREE.Vector3());
-  if (!p) return;
-  if (ev.shiftKey && hit?.face) {
-    const n = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
-    if (!mFace) { clearMeasure(); mFace = { p: hit.point.clone(), n }; toast("Now shift-click the other face."); return; }
-    const d = Math.abs(hit.point.clone().sub(mFace.p).dot(mFace.n));
-    const foot = hit.point.clone().addScaledVector(mFace.n, -hit.point.clone().sub(mFace.p).dot(mFace.n));
-    drawMeasure(foot, hit.point.clone(), `${r2(d)} mm between faces${Math.abs(n.dot(mFace.n)) < 0.999 ? " (not parallel)" : ""}`);
-    mFace = null;
-    return;
-  }
-  if (mPoints.length >= 2) clearMeasure();
-  mPoints.push(p);
-  if (mPoints.length === 2) {
-    const [a, b] = mPoints, d = b.clone().sub(a);
-    drawMeasure(a, b, `${r2(d.length())} mm  ·  dx ${r2(Math.abs(d.x))}  dy ${r2(Math.abs(d.y))}  dz ${r2(Math.abs(d.z))}`);
-  } else drawMeasure(p, p, "");
-}
-
-function drawMeasure(a, b, text) {
-  if (mLine) { scene.remove(mLine); mLine.geometry.dispose(); }
-  const g = new THREE.BufferGeometry().setFromPoints([a, b]);
-  mLine = new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0xffd400, depthTest: false }));
-  mLine.renderOrder = 10;
-  const dots = new THREE.Points(g, new THREE.PointsMaterial({ color: 0xffd400, size: 7, sizeAttenuation: false, depthTest: false }));
-  dots.renderOrder = 10;
-  mLine.add(dots);
-  mLine.userData.mid = a.clone().add(b).multiplyScalar(0.5);
-  scene.add(mLine);
-  $("mlabel").textContent = text;
-  $("mlabel").hidden = !text;
-}
+// Measure (distances, faces, thickness, angles) and Dimensions (the size of each part).
+const measure = createMeasure(st, {
+  root: $("stage"),
+  parts: () => partGroups.map((p) => ({ name: p.name, obj: p.group })),
+  meshes: () => partGroups.flatMap((p) => builtMeshes(p.group)),
+  box: (name, obj) => {
+    const b = new THREE.Box3();
+    obj.updateMatrixWorld(true);
+    builtMeshes(obj).forEach((o) => {
+      o.geometry.computeBoundingBox();
+      b.union(o.geometry.boundingBox.clone().applyMatrix4(o.matrixWorld));
+    });
+    return b;
+  },
+  toast,
+  onChange: () => {
+    $("measure").classList.toggle("on", !!measure.tool);
+    $("dims").classList.toggle("on", measure.auto);
+    showToggle($("mshow"), measure, true);
+    if (!measure.tool && tool === "measure") setTool("measure");
+  },
+});
 
 function frameOverlay() {
   comments.updatePins();
-  if (!mLine || $("mlabel").hidden) return;
-  const s = st.project(mLine.userData.mid);
-  if (!s) return;
-  $("mlabel").style.left = `${s.x}px`;
-  $("mlabel").style.top = `${s.y}px`;
+  measure.update();
 }
 
 function setTool(t) {
@@ -1153,18 +1127,17 @@ function setTool(t) {
   $("measure").classList.toggle("on", tool === "measure");
   $("workplane").classList.toggle("on", tool === "workplane");
   $("commentmode").classList.toggle("on", tool === "comment");
-  if (tool !== "measure") clearMeasure();
+  if ((tool === "measure") !== !!measure.tool) measure.setTool(tool === "measure" ? "distance" : null);
   comments.setMode(tool === "comment");
-  $("modenote").hidden = !tool;
-  $("modenote").textContent = tool === "measure" ? "Measure: click two points (corners snap). Shift-click two faces for the distance between them. Esc to stop."
-    : tool === "workplane" ? "Workplane: click a face to build on it. Esc puts it back on the build plate."
+  $("modenote").hidden = !tool || tool === "measure";
+  $("modenote").textContent = tool === "workplane" ? "Workplane: click a face to build on it. Esc puts it back on the build plate."
     : tool === "comment" ? "Comment: click the model where something should change. Esc to stop." : "";
   attachGizmo();
 }
 
 // ------------------------------------------------------------ clicks in the view
 st.onClick((e) => {
-  if (tool === "measure") return measureClick(e);
+  if (tool === "measure") return measure.click(e);
   if (tool === "comment") return comments.click(e);
   const hit = st.ray(e).intersectObjects(pickables.filter((m) => m.visible), false)[0];
   if (tool === "workplane") { if (hit?.face) { setWorkplane(hit); setTool(null); } return; }
@@ -1201,6 +1174,12 @@ $("group").onclick = () => groupSelected();
 $("ungroup").onclick = ungroupSelected;
 $("del").onclick = removeSelected;
 $("measure").onclick = () => setTool("measure");
+$("mshow").onclick = () => measure.setShown(!measure.shown);
+$("dims").onclick = () => {
+  measure.setAuto(!measure.auto);
+  try { localStorage.setItem("editor.dims", measure.auto ? "1" : "0"); } catch {}
+};
+try { if (localStorage.getItem("editor.dims") === "1") measure.setAuto(true); } catch {}
 $("workplane").onclick = () => setTool("workplane");
 $("commentmode").onclick = () => setTool("comment");
 $("fit").onclick = () => refit("iso");
@@ -1235,6 +1214,7 @@ function refreshButtons() {
 addEventListener("keydown", (e) => {
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || !spec) return;
   const mod = e.metaKey || e.ctrlKey, k = e.key.toLowerCase();
+  if (!mod && measure.key(e)) { e.preventDefault(); return; }
   if (mod && k === "s") { e.preventDefault(); save(); }
   else if (mod && k === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); }
   else if (mod && k === "a") { e.preventDefault(); setSelection(pickables.filter((m) => m.visible).map((m) => m.userData.node)); }
@@ -1247,6 +1227,7 @@ addEventListener("keydown", (e) => {
   else if (k === "h") toggleHole();
   else if (k === "d") dropSelected();
   else if (k === "m") setTool("measure");
+  else if (k === "v" && measure.items.length) measure.setShown(!measure.shown);
   else if (k === "p") setTool("workplane");
   else if (k === "c") setTool("comment");
   else if (e.key === "ArrowLeft") { e.preventDefault(); nudge(-1, 0, 0); }
@@ -1256,7 +1237,6 @@ addEventListener("keydown", (e) => {
   else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); removeSelected(); }
   else if (e.key === "Escape") {
     if (tool) setTool(tool);
-    else if (mPoints.length || mLine) clearMeasure();
     else if (!isFlat()) setWorkplane(null);
     else select(null);
   }

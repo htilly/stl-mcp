@@ -47,6 +47,11 @@
         <button id="wire" title="Show the triangle mesh"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-wire"/></svg><span class="label">Mesh</span></button>
         <button id="rotate" title="Turn the model slowly"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-spin"/></svg><span class="label">Spin</span></button>
       </div>
+      <div class="seg" role="group" aria-label="Measure">
+        <button id="measuremode" title="Measure distances, gaps between faces, wall thickness and angles (M)"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-ruler"/></svg><span class="label">Measure</span></button>
+        <button id="dims" title="Show the size of each part and its holes and bosses (D)"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-dimension"/></svg><span class="label">Dimensions</span></button>
+        <button id="mshow" class="icon on" hidden title="Hide your measurements on the model (V)" aria-label="Show or hide measurements" aria-pressed="true"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-eye"/></svg></button>
+      </div>
       <button id="commentmode" title="Then click the model to leave a comment for Claude"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-comment"/></svg><span class="label">Comment</span></button>
     </div>
     <div id="pins"></div>
@@ -87,6 +92,11 @@
       <div id="parts"></div>
       <a class="btn sm" id="objzip" href="#" download title="Every component (each shape of the recipe, each part) as its own object in one OBJ + MTL zip, with colours">OBJ (all components)</a>
       <a class="btn sm" id="step" href="#" download hidden title="The exact CAD model (all parts) as STEP, for Fusion, FreeCAD, Onshape and other CAD programs">STEP</a>
+    </div>
+    <div class="sec" id="measuresec">
+      <h2>Measurements</h2>
+      <div id="msummary"></div>
+      <div id="mlist"></div>
     </div>
     <div class="sec" id="paramsec" hidden>
       <h2>Parameters</h2>
@@ -142,6 +152,7 @@
 import * as THREE from "three";
 import { createStage, loadSTL, spreadX } from "/static/stage.js";
 import { createComments } from "/static/comments.js";
+import { createMeasure, showToggle } from "/static/measure.js";
 import { api, subscribe, ago, fmt, esc, icon, visBadge, warnHtml, sourceBadge, plainStl, PART_COLORS } from "/static/common.js";
 
 const id = decodeURIComponent(location.pathname.split("/").pop());
@@ -155,11 +166,11 @@ let spread = true, showEdges = true, wire = false;
 
 // ------------------------------------------------------------ three.js
 const group = new THREE.Group();
-const st = createStage($("stage"), { onFrame: () => updatePins() });
+const st = createStage($("stage"), { onFrame: () => { updatePins(); measure.update(); } });
 const { scene, controls } = st;
 scene.add(group);
 const geomCache = new Map();
-let loadSeq = 0;
+let loadSeq = 0, shownVersion = null;
 
 function bbox() {
   const b = new THREE.Box3();
@@ -225,6 +236,8 @@ async function showVersion(v, refit) {
     });
     applyMaterials();
     layoutParts();
+    measure.reset({ keepItems: v === shownVersion });
+    shownVersion = v;
     const r = bbox().getBoundingSphere(new THREE.Sphere()).radius;
     if (refit) setView("iso");
     else if (prevR > 0 && (r / prevR > 1.25 || r / prevR < 0.6)) setView("keep");  // big size change
@@ -395,6 +408,7 @@ function setCommentMode(on) {
   commentMode = on;
   $("commentmode").classList.toggle("on", on);
   comments.setMode(on);
+  if (on && measure.tool) measure.setTool(null);
 }
 
 // "Fix" on a print-check warning: the same as placing a comment, prefilled and anchored at the problem.
@@ -408,10 +422,51 @@ function startFix(part, w) {
   comments.startAt(part, local, `Fix this print problem in "${part}": ${w.message}. Keep the design intent and resolve this comment.`);
 }
 
-st.onClick((e) => comments.click(e));
+// ------------------------------------------------------------ measuring
+// Measure: distances, faces, thickness and angles clicked on the model. Dimensions: the size of
+// every part with its holes and bosses, which the server measures (also for Claude: measure_model).
+const measure = createMeasure(st, {
+  root: stage,
+  parts: () => group.children.map((obj) => ({ name: obj.name, obj })),
+  meshes: () => group.children.filter((o) => o.visible).map((o) => o.children[0]),
+  features: () => api(`/api/models/${encodeURIComponent(id)}/measure?version=${viewVersion}`).then((r) => r.parts),
+  toast,
+  list: $("mlist"), summary: $("msummary"),
+  onComment: ({ part, point, text }) => {
+    if (!model?.can_edit) return toast("Copy the model to your library to leave comments.", true);
+    if (measure.tool) measure.setTool(null);
+    setCommentMode(true);
+    comments.startAt(part, point, text);
+  },
+  onChange: () => {
+    $("measuremode").classList.toggle("on", !!measure.tool);
+    $("dims").classList.toggle("on", measure.auto);
+    showToggle($("mshow"), measure);
+  },
+});
+$("mshow").onclick = () => measure.setShown(!measure.shown);
+$("measuremode").onclick = () => {
+  if (commentMode) setCommentMode(false);
+  measure.setTool(measure.tool ? null : "distance");
+};
+$("dims").onclick = () => {
+  measure.setAuto(!measure.auto);
+  try { localStorage.setItem("viewer.dims", measure.auto ? "1" : "0"); } catch {}
+};
+try { if (localStorage.getItem("viewer.dims") === "1") measure.setAuto(true); } catch {}
+
+st.onClick((e) => (measure.tool ? measure.click(e) : comments.click(e)));
 $("commentmode").onclick = () => setCommentMode(!commentMode);
 $("showresolved").onchange = (e) => { comments.showResolved = e.target.checked; };
-addEventListener("keydown", (e) => { if (e.key === "Escape" && commentMode && !comments.open) setCommentMode(false); });
+addEventListener("keydown", (e) => {
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.metaKey || e.ctrlKey) return;
+  if (measure.key(e)) { e.preventDefault(); return; }
+  const k = e.key.toLowerCase();
+  if (e.key === "Escape" && commentMode && !comments.open) setCommentMode(false);
+  else if (k === "m") $("measuremode").click();
+  else if (k === "d") $("dims").click();
+  else if (k === "v" && measure.items.length) measure.setShown(!measure.shown);
+});
 
 // ------------------------------------------------------------ events
 function toast(msg, err = false) {

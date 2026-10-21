@@ -107,6 +107,7 @@ import csg
 import feedback
 import jobs
 import geometry as g
+import measure
 import openscad
 import printcheck
 import reference
@@ -242,6 +243,8 @@ mcp = FastMCP(
         "Every build runs a print check; problems (not watertight, thin walls, overhangs, too big "
         "for the bed ...) come back as print_warnings. Fix them when you can, otherwise tell the "
         "user; check_print re-checks a model or file with the current settings. "
+        "measure_model gives the sizes, and the diameters, depths and spacing of the round holes "
+        "and bosses, to check that screws, inserts and boards fit. "
         "Tinkercad: import_file takes in STL/OBJ exported from Tinkercad (standalone file), "
         "modify_file builds on a file, export_obj makes a colored OBJ with several parts "
         "(also from the model library) that can be imported into Tinkercad."),
@@ -1172,6 +1175,52 @@ async def check_print(model_id: str | None = None, file: str | None = None, ctx:
         return {"ok": not any(warnings.values()), "warnings": warnings, "settings": settings}
 
     return await lib.build(run, job="check_print")
+
+
+_measured: dict[str, dict] = {}   # part file -> measure.measure(); version files never change
+
+
+def _measure_file(path: Path) -> dict:
+    key = str(path)
+    if key not in _measured:
+        import trimesh
+        if len(_measured) >= 256:
+            _measured.pop(next(iter(_measured)))
+        _measured[key] = measure.measure(trimesh.load(path, force="mesh"))
+    return _measured[key]
+
+
+def _measure_version(lib: "Lib", mid: str, v: dict, part: str = "") -> dict:
+    if part and part not in v["parts"]:
+        raise ValueError(f"no part {part!r}; the parts are {', '.join(v['parts'])}")
+    return {n: _measure_file(lib.models.file(mid, p["file"]))
+            for n, p in v["parts"].items() if not part or n == part}
+
+
+@mcp.tool()
+async def measure_model(model_id: str | None = None, file: str | None = None, part: str = "",
+                        version: int | None = None, ctx: Context = None) -> dict:
+    """Measures a library model (model_id; the current version unless version is given, all parts
+    unless part is given) or a standalone STL file (file): size, bounds, volume, and the round holes
+    and bosses (posts, pins, standoffs) with diameter, depth, through or blind, position and axis.
+    summary counts equal features together with the spacing of their centers (pattern_mm), e.g.
+    4 x d3.4 through holes 53 x 33 mm apart. Use it to check a model against what it must fit:
+    screw and insert hole sizes, the mounting pattern of a board, the size of a pocket. Holes are
+    found where they meet a flat face; a hole that ends only on curved faces is not listed.
+    Coordinates are the part's own (as in its STL file)."""
+    lib = _lib(ctx)
+    if bool(model_id) == bool(file):
+        raise ValueError("give exactly one of model_id or file")
+
+    def run():
+        if file:
+            return {"file": Path(file).name, "parts": {"model": measure.measure(_load(lib, file))}}
+        m = lib.models.get(model_id)
+        v = Store.version(m, version) if version is not None else Store.current(m)
+        return {"model_id": model_id, "version": v["version"],
+                "parts": _measure_version(lib, model_id, v, part)}
+
+    return await lib.build(run, job="measure")
 
 
 @mcp.tool()
@@ -2645,6 +2694,22 @@ async def preview(request):
     return Response(png, media_type="image/png", headers={"Cache-Control": "private"})
 
 
+async def api_measure(request):
+    """Measurements of a version's parts (?version=N, default current), for the viewer's
+    dimensions and hole labels: see measure_model."""
+    mid = request.path_params["id"]
+    lib = _req_lib(request)
+    try:
+        m = lib.models.get(mid)
+        v = Store.version(m, int(request.query_params["version"])) if "version" in request.query_params \
+            else Store.current(m)
+        parts = await lib.build(lambda: _measure_version(lib, mid, v), mesh=True, job="measure")
+    except Exception as e:  # noqa: BLE001
+        return _err(e)
+    return JSONResponse({"version": v["version"], "parts": parts},
+                        headers={"Cache-Control": "private, max-age=3600"})
+
+
 _NOT_SPLITTABLE = ("array", "polar")      # copies of the children cannot be taken apart
 _TRANSFORMS = ("scale", "rotate", "mirror", "translate")
 
@@ -2911,6 +2976,7 @@ app = Starlette(
         Route("/api/models/{id}", api_model, methods=["GET", "POST", "DELETE"]),
         Route("/api/models/{id}/preview.png", preview),
         Route("/api/models/{id}/export.zip", export_obj_zip),
+        Route("/api/models/{id}/measure", api_measure),
         Route("/api/models/{id}/mesh", api_mesh, methods=["POST"]),
         Route("/api/events", api_events),
         Route("/admin", page_admin),

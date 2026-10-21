@@ -68,12 +68,16 @@ every page loads in `<head>` right after `style.css`, so a page never flashes th
 | `--plate` | `#f6f7f9` | same | Behind preview PNGs; matches `render.BG` |
 | `--glass` | white 78 % | `#111318` 72 % | Translucent app bar, viewport toolbars and HUD (with a backdrop blur) |
 | `--glow` | blue 16 % | blue 22 % | Soft brand light behind the login pages |
+| `--measure` | `#db2777` | same | Measurements clicked in the 3D view: their lines, labels and list badges |
+| `--measure-hole`, `--measure-boss` | `#ff8a3c`, `#10b981` | same | Dimensions: rings and labels on round holes and on bosses (dimension lines use `--layout`) |
 
 Rules of use:
 
 - `--layout` is for one thing per view: the primary action or the current selection. Two blue
   buttons side by side is a bug.
 - `--pei` always means *a comment*. Do not reuse it for warnings.
+- `--measure` always means *a measurement you made*; it is pink so it is never mistaken for a
+  comment pin or a hole.
 - `--fault` always means *something is wrong or will be destroyed*.
 - Text contrast: `--graphite` on `--sheet` and `--scribe` on `--sheet` both pass WCAG AA in both themes.
 
@@ -167,7 +171,9 @@ gives the 14 px size. An icon-only button needs `class="icon"` and an `aria-labe
 | `i-back`, `i-plus`, `i-close`, `i-check` | Navigation and confirmation |
 | `i-reply`, `i-restore`, `i-trash`, `i-logout` | Comment reply, restore a revision, delete, log out |
 | `i-fit`, `i-spin`, `i-edges`, `i-wire`, `i-spread` | Viewport: fit, auto-rotate, edges, mesh, spread parts |
-| `i-dimension` | Overall size readout in the viewport |
+| `i-dimension` | Overall size readout in the viewport, the Dimensions toggle |
+| `i-ruler` | Measure mode in the viewport |
+| `i-eye`, `i-eye-off` | Show / hide measurements on the model |
 | `i-sun`, `i-moon`, `i-monitor` | Theme switch: light, dark, auto |
 | `i-user`, `i-chevron` | Account: the user menu button, Profile in settings |
 | `i-plug` | AI connections (connecting Claude, ChatGPT, Claude Code) |
@@ -213,6 +219,7 @@ card), PNG app icons, `apple-touch-icon.png` and `site.webmanifest`. The browser
 | `.params` | Parameter editor: mono name, right-aligned value; changed values get the wash |
 | `.pin`, `.cpop`, `.cmt` | Comment pin on the model, the popover to write one, a comment in the list |
 | `.hud`, `.toast` | Viewport overlays: overall size (bottom left), notifications (bottom right) |
+| `.mtag`, `.mbar` | Measuring (`web/measure.js`): labels on the model, the Distance/Faces/Thickness/Angle bar (bottom centre) |
 | `.gate .panel` | Centred panel for login, signup, app consent and the privacy page (`.prose`) |
 | `.gate .or` | Divider with a word in it ("New here?") between two ways in |
 | `ol.start` | Getting-started checklist in the empty library; finished steps get `.done` |
