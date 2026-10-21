@@ -213,3 +213,19 @@ def test_measuring_can_be_shown_and_hidden():
     assert "setShown" in js and "export function showToggle" in js
     icons = (web / "icons.svg").read_text()
     assert 'id="i-eye"' in icons and 'id="i-eye-off"' in icons
+
+
+def test_js_snapping(js):
+    assert js["closest"] == [[5, 0, 0], [0, 0, 0], [10, 0, 0], [2, 2, 2]]
+    assert js["snaps"] == ["centre", "corner", "midpoint", "edge"]   # best first
+    assert js["snapTools"] == ["distance", "angle"]
+
+
+def test_measuring_bar_has_snap_undo_and_done():
+    from pathlib import Path
+    web = Path(server.__file__).parent / "web"
+    js = (web / "measure.js").read_text()
+    for a in ('data-a="snap"', 'data-a="undo"', 'data-a="done"', "measure.snap"):
+        assert a in js
+    icons = (web / "icons.svg").read_text()
+    assert 'id="i-magnet"' in icons and 'id="i-undo"' in icons

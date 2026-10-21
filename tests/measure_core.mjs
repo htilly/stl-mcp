@@ -28,4 +28,8 @@ const kept = [{ x: 0, y: 0, w: 10, h: 10, keep: true }, { x: 2, y: 2, w: 10, h: 
 out.kept = [m.cullOverlaps(kept), kept.map((r) => r.y)];
 out.text = m.asText([{ label: "Distance", text: "50 mm", detail: "dx 30 · dy 40 · dz 0" }, { label: "Thickness", text: "2 mm", detail: "" }]);
 out.tools = Object.fromEntries(Object.entries(m.TOOLS).map(([k, t]) => [k, t.points]));
+out.closest = [m.closestOnSegment([5, 3, 0], [0, 0, 0], [10, 0, 0]), m.closestOnSegment([-4, 1, 0], [0, 0, 0], [10, 0, 0]),
+  m.closestOnSegment([20, 0, 0], [0, 0, 0], [10, 0, 0]), m.closestOnSegment([1, 1, 1], [2, 2, 2], [2, 2, 2])];
+out.snaps = m.SNAPS.map((x) => x.kind);
+out.snapTools = Object.keys(m.TOOLS).filter((k) => m.TOOLS[k].snaps);
 console.log(JSON.stringify(out));

@@ -3,14 +3,27 @@
 
 export const TOOLS = {
   distance: { label: "Distance", points: 2, key: "1",
-    hint: "Click two points. Corners and hole centres snap; hold Alt to place freely." },
+    hint: "Click two points.", snaps: true },
   faces: { label: "Faces", points: 2, key: "2",
     hint: "Click two faces: the gap between parallel faces, or the angle between the others." },
   thickness: { label: "Thickness", points: 1, key: "3",
     hint: "Click a face: how thick the material is straight behind it." },
   angle: { label: "Angle", points: 3, key: "4",
-    hint: "Click three points: the angle at the middle one." },
+    hint: "Click three points: the angle at the middle one.", snaps: true },
 };
+
+// What a snapped point is, best first: a hole centre wins over a corner, a corner over the middle
+// of an edge, that over any point on an edge. px: how close on screen the pointer must be.
+export const SNAPS = [
+  { kind: "centre", px: 14 }, { kind: "corner", px: 10 }, { kind: "midpoint", px: 10 }, { kind: "edge", px: 8 },
+];
+
+// The point of segment a-b nearest to p.
+export function closestOnSegment(p, a, b) {
+  const ab = sub(b, a), l2 = dot(ab, ab);
+  const t = l2 ? Math.max(0, Math.min(1, dot(sub(p, a), ab) / l2)) : 0;
+  return [a[0] + ab[0] * t, a[1] + ab[1] * t, a[2] + ab[2] * t];
+}
 
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];

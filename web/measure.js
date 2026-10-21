@@ -12,7 +12,8 @@ import * as core from "/static/measure-core.js";
 
 // the lines; the labels take the same colours from style.css (--measure, --measure-hole ...)
 const COLORS = { item: 0xdb2777, dim: 0x3b82f6, hole: 0xff8a3c, boss: 0x10b981 };
-const SNAP_PX = 10, CENTER_PX = 14;
+const SNAP_PX = Object.fromEntries(core.SNAPS.map((s) => [s.kind, s.px]));
+const EDGE_ANGLE = 25;   // degrees between faces for an edge to snap to (as the drawn edges)
 
 // The page's Show/Hide button for the measurements: only there when there are some.
 export function showToggle(btn, measure, text = false) {
@@ -49,6 +50,8 @@ export function createMeasure(st, {
 
   let tool = null, auto = false, pending = [], items = [], nextId = 1;
   let shown = true;           // false: the measurements are kept but not drawn (Hide / V)
+  let snapOn = true;          // snap points to hole centres, corners and edges (S; Alt flips it for a click)
+  try { snapOn = localStorage.getItem("measure.snap") !== "0"; } catch {}
   let feats = null, featsPromise = null, featsError = "", featsSeq = 0;
   let hover = null, sig = "", autoTags = [], itemTags = [], flashKey = null;
   const hoverTag = tag("item live");
@@ -80,18 +83,20 @@ export function createMeasure(st, {
     return null;
   }
 
-  // What a click at this pointer position lands on: the mesh point, snapped to a hole centre or a
-  // corner of the triangle under the pointer when they are close on screen (not with Alt).
-  function pick(ev, snap) {
+  // What a click at this pointer position lands on: the mesh point, or with snapping (the tool
+  // snaps, Snap is on, Alt flips it) the best of a hole centre, a corner, the middle of an edge or
+  // a point on an edge that is close to the pointer on screen (core.SNAPS).
+  function pick(ev, snaps) {
     const hit = st.ray(ev).intersectObjects(meshes(), false)[0];
     const r = st.canvas.getBoundingClientRect();
     const cur = { x: ev.clientX - r.left, y: ev.clientY - r.top };
-    const near = (w, px) => { const s = st.project(w); return s && Math.hypot(s.x - cur.x, s.y - cur.y) < px ? Math.hypot(s.x - cur.x, s.y - cur.y) : null; };
-    if (snap && !ev.altKey) {
+    const px = (w) => { const s = st.project(w); return s ? Math.hypot(s.x - cur.x, s.y - cur.y) : Infinity; };
+    const snap = snaps && snapOn !== ev.altKey;
+    if (snap) {
       let best = null;
       for (const c of centers()) {
-        const d = near(c.world, CENTER_PX);
-        if (d !== null && (!best || d < best.d)) best = { d, ...c };
+        const d = px(c.world);
+        if (d < SNAP_PX.centre && (!best || d < best.d)) best = { d, ...c };
       }
       if (best) return { point: pointAt(best.part, best.world, best.normal), world: best.world, snapped: best.label };
     }
@@ -99,16 +104,48 @@ export function createMeasure(st, {
     const part = partName(hit.object);
     const n = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize() : null;
     let w = hit.point.clone(), snapped = "";
-    const pos = hit.object.geometry?.attributes?.position;
-    if (snap && !ev.altKey && hit.face && pos) {
-      let bd = SNAP_PX;
-      for (const i of [hit.face.a, hit.face.b, hit.face.c]) {
-        const vtx = new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(hit.object.matrixWorld);
-        const d = near(vtx, bd);
-        if (d !== null) { bd = d; w = vtx; snapped = "corner"; }
-      }
+    if (snap) {
+      const s = snapOnMesh(hit, px);
+      if (s) { w = s.world; snapped = s.kind; }
     }
     return { point: pointAt(part, w, n), world: w, normal: n, snapped, hit };
+  }
+
+  // The best corner / edge middle / edge point of the mesh under the pointer, within its px.
+  function snapOnMesh(hit, px) {
+    const m = hit.object.matrixWorld;
+    const local = hit.object.worldToLocal(hit.point.clone());
+    const segs = edgesOf(hit.object.geometry);
+    if (!segs) return null;
+    // only the edges near the hit point can be within a few pixels of it
+    const reach = 0.08 * (hit.object.geometry.boundingSphere?.radius || 10);
+    const cand = { corner: null, midpoint: null, edge: null };
+    const consider = (kind, v) => {
+      const w = v3(v).applyMatrix4(m), d = px(w);
+      if (d < SNAP_PX[kind] && (!cand[kind] || d < cand[kind].d)) cand[kind] = { d, world: w, kind };
+    };
+    const p = arr(local);
+    for (let i = 0; i < segs.length; i += 6) {
+      const a = [segs[i], segs[i + 1], segs[i + 2]], b = [segs[i + 3], segs[i + 4], segs[i + 5]];
+      const c = core.closestOnSegment(p, a, b);
+      if (Math.hypot(c[0] - p[0], c[1] - p[1], c[2] - p[2]) > reach) continue;
+      consider("corner", a); consider("corner", b);
+      consider("midpoint", [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2]);
+      consider("edge", c);
+    }
+    return cand.corner || cand.midpoint || cand.edge;
+  }
+
+  // The sharp edges of a geometry as a flat [ax, ay, az, bx, by, bz, ...] list, worked out once.
+  function edgesOf(geom) {
+    if (!geom?.attributes?.position) return null;
+    if (!geom.userData.measureEdges) {
+      const e = new THREE.EdgesGeometry(geom, EDGE_ANGLE);
+      geom.userData.measureEdges = e.attributes.position.array.slice();
+      e.dispose();
+      if (!geom.boundingSphere) geom.computeBoundingSphere();
+    }
+    return geom.userData.measureEdges;
   }
 
   // Hole and boss centres (both ends) of the visible parts, to snap to.
@@ -266,8 +303,7 @@ export function createMeasure(st, {
   // ---------------------------------------------------------------- tools
   function click(ev) {
     if (!tool) return;
-    const snap = tool === "distance" || tool === "angle";
-    const p = pick(ev, snap);
+    const p = pick(ev, !!core.TOOLS[tool].snaps);
     if (!p) return;
     if ((tool === "faces" || tool === "thickness") && !p.normal) return;
     if (tool === "thickness") {
@@ -278,7 +314,7 @@ export function createMeasure(st, {
       return;
     }
     pending.push(p.point);
-    if (pending.length < core.TOOLS[tool].points) { drawLive(); return; }
+    if (pending.length < core.TOOLS[tool].points) { drawLive(); renderBar(); return; }
     const pts = pending, w = pts.map(world);
     pending = [];
     if (tool === "distance") {
@@ -301,13 +337,13 @@ export function createMeasure(st, {
   function add(kind, pts, text, detail) {
     items.push({ id: nextId++, kind, label: core.TOOLS[kind].label, pts, text, detail, hidden: false });
     shown = true;             // a new measurement is meant to be seen
-    drawItems(); drawLive(); renderList();
+    drawItems(); drawLive(); renderList(); renderBar();
     onChange?.();
   }
 
   function move(ev) {
     if (!tool) return;
-    const p = pick(ev, tool === "distance" || tool === "angle");
+    const p = pick(ev, !!core.TOOLS[tool].snaps);
     hover = p ? { world: p.normal && (tool === "faces" || tool === "thickness") ? p.hit.point : p.world, snapped: p.snapped } : null;
     drawLive();
   }
@@ -327,28 +363,58 @@ export function createMeasure(st, {
     onChange?.();
   }
 
+  // The bar under the view while measuring: the tools, Snap, Undo and Done.
   function renderBar() {
     bar.hidden = !tool;
     if (!tool) return;
-    bar.innerHTML = `<div class="seg" role="group" aria-label="Measure">${Object.entries(core.TOOLS).map(([k, t]) =>
-      `<button data-t="${k}" class="${k === tool ? "on" : ""}" title="${esc(t.hint)} (${t.key})">${t.label}</button>`).join("")}</div>
-      <span class="hint">${esc(core.TOOLS[tool].hint)}</span>`;
+    const t = core.TOOLS[tool];
+    const hint = t.snaps ? `${t.hint} ${snapOn ? "Snaps to hole centres, corners and edges; Alt places freely." : "Snap is off; Alt snaps."}` : t.hint;
+    bar.innerHTML = `<div class="seg" role="group" aria-label="Measure">${Object.entries(core.TOOLS).map(([k, x]) =>
+      `<button data-t="${k}" class="${k === tool ? "on" : ""}" title="${esc(x.hint)} (${x.key})">${x.label}</button>`).join("")}</div>
+      <div class="seg" role="group" aria-label="Measuring">
+        <button data-a="snap" class="${snapOn ? "on" : ""}" aria-pressed="${snapOn}" ${t.snaps ? "" : "disabled"}
+          title="Snap points to hole centres, corners and edges (S). Hold Alt to do the opposite for one click.">${icon("magnet", "sm")}Snap</button>
+        <button data-a="undo" ${pending.length || items.length ? "" : "disabled"} title="Undo the last point or measurement (Ctrl/⌘ + Z, Backspace)">${icon("undo", "sm")}Undo</button>
+        <button data-a="done" title="Stop measuring (Esc); the measurements stay">${icon("check", "sm")}Done</button>
+      </div>
+      <span class="hint">${esc(hint)}</span>`;
     bar.querySelectorAll("[data-t]").forEach((b) => { b.onclick = () => setTool(b.dataset.t); });
+    bar.querySelector('[data-a="snap"]').onclick = () => setSnap(!snapOn);
+    bar.querySelector('[data-a="undo"]').onclick = undo;
+    bar.querySelector('[data-a="done"]').onclick = () => setTool(null);
   }
 
-  // Esc drops the points placed so far, then leaves the tool; 1-4 pick a tool; Delete drops the last one.
+  function setSnap(on) {
+    snapOn = on;
+    try { localStorage.setItem("measure.snap", on ? "1" : "0"); } catch {}
+    renderBar();
+    toast(on ? "Snap on: points snap to hole centres, corners and edges" : "Snap off: points go exactly where you click");
+  }
+
+  // Undo: the last point of a measurement in progress, else the last measurement.
+  function undo() {
+    if (pending.length) { pending.pop(); drawLive(); renderBar(); }
+    else if (items.length) remove(items[items.length - 1].id);
+  }
+
+  // While measuring: Esc drops the points placed so far, then stops; 1-4 pick a tool; S snap;
+  // Ctrl/⌘+Z, Backspace and Delete undo.
   function key(e) {
     if (!tool) return false;
-    if (e.key === "Escape") { if (pending.length) { pending = []; drawLive(); } else setTool(null); return true; }
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && e.key.toLowerCase() === "z" && !e.shiftKey) { undo(); return true; }
+    if (mod) return false;
+    if (e.key === "Escape") { if (pending.length) { pending = []; drawLive(); renderBar(); } else setTool(null); return true; }
     const t = Object.keys(core.TOOLS).find((k) => core.TOOLS[k].key === e.key);
     if (t) { setTool(t); return true; }
-    if (e.key === "Delete" || e.key === "Backspace") { if (items.length) remove(items[items.length - 1].id); return true; }
+    if (e.key.toLowerCase() === "s") { setSnap(!snapOn); return true; }
+    if (e.key === "Delete" || e.key === "Backspace") { undo(); return true; }
     return false;
   }
 
   function remove(id) {
     items = items.filter((m) => m.id !== id);
-    drawItems(); renderList();
+    drawItems(); renderList(); renderBar();
     onChange?.();
   }
   function clear() {
@@ -489,11 +555,12 @@ export function createMeasure(st, {
 
   renderList();
   return {
-    click, key, update, reset, setTool, setAuto, setShown, clear, loadFeatures,
+    click, key, update, reset, setTool, setAuto, setShown, setSnap, undo, clear, loadFeatures,
     refresh: () => { sig = ""; },     // the geometry changed in place: redraw on the next frame
     get tool() { return tool; },
     get auto() { return auto; },
     get items() { return items; },
     get shown() { return shown; },
+    get snap() { return snapOn; },
   };
 }

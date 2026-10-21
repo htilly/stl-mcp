@@ -1214,7 +1214,7 @@ function refreshButtons() {
 addEventListener("keydown", (e) => {
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || !spec) return;
   const mod = e.metaKey || e.ctrlKey, k = e.key.toLowerCase();
-  if (!mod && measure.key(e)) { e.preventDefault(); return; }
+  if (measure.key(e)) { e.preventDefault(); return; }
   if (mod && k === "s") { e.preventDefault(); save(); }
   else if (mod && k === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); }
   else if (mod && k === "a") { e.preventDefault(); setSelection(pickables.filter((m) => m.visible).map((m) => m.userData.node)); }

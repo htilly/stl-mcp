@@ -128,11 +128,17 @@ countersunk `screw`s as a third part.
   through, 48 × 28 mm apart*: the spacing of a mounting pattern at a glance. Click a line to find
   those holes in the view.
 - **Measure** (<kbd>M</kbd>) has four tools (<kbd>1</kbd>–<kbd>4</kbd>):
-  **Distance** between two points (with dx/dy/dz; points snap to corners and to hole centres, so
-  centre-to-centre distances are one click each; hold <kbd>Alt</kbd> to place freely),
+  **Distance** between two points (with dx/dy/dz),
   **Faces** (the gap between two parallel faces, or the angle between two others),
   **Thickness** (one click: the material straight behind a face, to check a wall or a floor) and
   **Angle** (three points). While you move the pointer the distance is shown live.
+- **Snap** is on by default: Distance and Angle points snap to hole centres (so centre-to-centre
+  is one click each), corners, the middle of an edge and points on edges, and the label under
+  the pointer says which. Switch it off with **Snap** on the measuring bar or <kbd>S</kbd> (it is
+  remembered); <kbd>Alt</kbd> does the opposite for one click.
+- **Undo** (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>Z</kbd> or <kbd>Backspace</kbd>) takes back the last
+  point, or the last measurement; **Done** (<kbd>Esc</kbd>) stops measuring and keeps the
+  measurements.
 - Measurements stay until removed (<kbd>Delete</kbd> drops the last one) and follow their parts
   when you Spread them. Hide them all with the eye button next to **Dimensions** or <kbd>V</kbd>
   (they stay in the list; a new measurement shows them again), or one at a time with the eye in
