@@ -62,5 +62,29 @@
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();
 
+  // Non-production environments (dev) get a colored bar and badge so they are never mistaken for
+  // prod. /auth/config names the environment; the cached value avoids a flash on the next page.
+  const ENV_KEY = "app-env";
+  const showEnv = (env, title = true) => {
+    if (env) {
+      root.dataset.env = env;
+      root.style.setProperty("--env-label", JSON.stringify(env.toUpperCase()));
+    } else {
+      delete root.dataset.env;
+      root.style.removeProperty("--env-label");
+    }
+    if (!title) return;
+    const base = document.title.replace(/^\[[^\]]+\] /, "");
+    document.title = env ? `[${env.toUpperCase()}] ${base}` : base;
+  };
+  const cached = () => { try { return sessionStorage.getItem(ENV_KEY) || ""; } catch { return ""; } };
+  if (cached()) showEnv(cached(), false);
+  fetch("/auth/config").then((r) => (r.ok ? r.json() : {})).then((c) => {
+    const env = typeof c.env === "string" ? c.env.replace(/[^a-z0-9-]/g, "") : "";
+    try { if (env) sessionStorage.setItem(ENV_KEY, env); else sessionStorage.removeItem(ENV_KEY); } catch {}
+    const go = () => showEnv(env);
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", go); else go();
+  }).catch(() => {});
+
   window.autosmithTheme = { get, set, mount, effective: () => effective(get()) };
 })();
