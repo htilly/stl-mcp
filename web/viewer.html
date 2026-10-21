@@ -459,8 +459,9 @@ st.onClick((e) => (measure.tool ? measure.click(e) : comments.click(e)));
 $("commentmode").onclick = () => setCommentMode(!commentMode);
 $("showresolved").onchange = (e) => { comments.showResolved = e.target.checked; };
 addEventListener("keydown", (e) => {
-  if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.metaKey || e.ctrlKey) return;
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
   if (measure.key(e)) { e.preventDefault(); return; }
+  if (e.metaKey || e.ctrlKey) return;
   const k = e.key.toLowerCase();
   if (e.key === "Escape" && commentMode && !comments.open) setCommentMode(false);
   else if (k === "m") $("measuremode").click();
