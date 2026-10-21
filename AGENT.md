@@ -10,6 +10,11 @@ Every new session must create its own branch before making any changes, and neve
 to `main`. Branch off an up-to-date `main` with a short descriptive name (e.g. `feature/<topic>`,
 `fix/<topic>`), commit the session's work there, and merge it into `main` via a pull request.
 
+Always commit, open a PR and merge automatically: when a task is done, commit, push, open a PR to
+`main` and merge it as soon as the checks pass, without asking first. Never merge while a check is
+red or still running. Merging deploys to dev (see Deploying), so dev is always up to date.
+Prod is the exception: only tag a release when the user asks.
+
 ## Testing
 Always create tests for all new code. Every new function, tool, endpoint or behavior change must
 come with automated tests that cover it, and existing tests must be updated when behavior changes.
@@ -23,7 +28,7 @@ The repo is trunk-based: there is no `dev` branch. `main` is the only long-lived
 **Deploy to dev (automatic, nothing to run):** open a pull request to `main`, wait for the `pytest`
 check, merge. The merge builds the image (`docker-image.yml`), and on success `deploy-dev.yml`
 deploys that exact `:main-<sha>` to dev.autosmith.eu. After finishing a task, an agent should push
-its branch, open a PR to `main` and, when the user asks for it on dev, merge it once checks pass.
+its branch, open a PR to `main` and merge it once checks pass.
 
 **Deploy to prod (explicit release):** tag a commit that is already on `main` and has run on dev:
 
