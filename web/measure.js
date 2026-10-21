@@ -14,6 +14,16 @@ import * as core from "/static/measure-core.js";
 const COLORS = { item: 0xdb2777, dim: 0x3b82f6, hole: 0xff8a3c, boss: 0x10b981 };
 const SNAP_PX = 10, CENTER_PX = 14;
 
+// The page's Show/Hide button for the measurements: only there when there are some.
+export function showToggle(btn, measure, text = false) {
+  btn.hidden = !measure.items.length;
+  btn.classList.toggle("on", measure.shown);
+  btn.setAttribute("aria-pressed", measure.shown);
+  btn.title = `${measure.shown ? "Hide" : "Show"} your measurements on the model (V)`;
+  if (text) btn.textContent = measure.shown ? "Hide" : "Show";
+  else btn.querySelector("use")?.setAttribute("href", `/static/icons.svg#i-${measure.shown ? "eye" : "eye-off"}`);
+}
+
 export function createMeasure(st, {
   root,              // the stage element: gets .measuring while a tool is on
   parts,             // () => [{ name, obj }]: each part's frame (an Object3D holding its meshes)
@@ -38,6 +48,7 @@ export function createMeasure(st, {
   group.add(autoGroup, itemGroup, liveGroup);
 
   let tool = null, auto = false, pending = [], items = [], nextId = 1;
+  let shown = true;           // false: the measurements are kept but not drawn (Hide / V)
   let feats = null, featsPromise = null, featsError = "", featsSeq = 0;
   let hover = null, sig = "", autoTags = [], itemTags = [], flashKey = null;
   const hoverTag = tag("item live");
@@ -219,6 +230,7 @@ export function createMeasure(st, {
     itemTags.forEach((t) => t.el.remove());
     itemTags = [];
     items.forEach((m, i) => {
+      if (!shown || m.hidden) return;
       const w = m.pts.map(world);
       if (m.kind === "thickness" || m.kind === "distance" || m.kind === "faces") line(itemGroup, [w[0], w[1]], COLORS.item);
       if (m.kind === "angle") line(itemGroup, w, COLORS.item);
@@ -287,8 +299,10 @@ export function createMeasure(st, {
   }
 
   function add(kind, pts, text, detail) {
-    items.push({ id: nextId++, kind, label: core.TOOLS[kind].label, pts, text, detail });
+    items.push({ id: nextId++, kind, label: core.TOOLS[kind].label, pts, text, detail, hidden: false });
+    shown = true;             // a new measurement is meant to be seen
     drawItems(); drawLive(); renderList();
+    onChange?.();
   }
 
   function move(ev) {
@@ -335,10 +349,28 @@ export function createMeasure(st, {
   function remove(id) {
     items = items.filter((m) => m.id !== id);
     drawItems(); renderList();
+    onChange?.();
   }
   function clear() {
     items = []; pending = [];
     drawItems(); drawLive(); renderList();
+    onChange?.();
+  }
+
+  // Show or hide all measurements on the model (they stay in the list), or one of them.
+  function setShown(on) {
+    shown = on;
+    if (shown && items.length && items.every((m) => m.hidden)) items.forEach((m) => { m.hidden = false; });
+    drawItems(); renderList();
+    onChange?.();
+  }
+  function toggleItem(id) {
+    const m = items.find((x) => x.id === id);
+    if (!m) return;
+    if (!shown) { items.forEach((x) => { x.hidden = x !== m; }); shown = true; }
+    else m.hidden = !m.hidden;
+    drawItems(); renderList();
+    onChange?.();
   }
 
   // ---------------------------------------------------------------- dimensions and features
@@ -364,6 +396,7 @@ export function createMeasure(st, {
     if (!keepItems) { items = []; pending = []; }
     sig = "";
     drawAuto(); drawItems(); drawLive(); renderList(); renderSummary();
+    onChange?.();
     if (summary || auto || tool) loadFeatures();
   }
 
@@ -371,16 +404,22 @@ export function createMeasure(st, {
   function renderList() {
     if (!list) return;
     list.innerHTML = items.length ? `
-      <ol class="mlist">${items.map((m, i) => `
-        <li data-id="${m.id}"><span class="badge">${i + 1}</span>
+      <ol class="mlist">${items.map((m, i) => {
+        const vis = shown && !m.hidden;
+        return `
+        <li data-id="${m.id}" class="${vis ? "" : "off"}"><span class="badge">${i + 1}</span>
           <span><b>${esc(m.text)}</b> <span class="hint">${esc(m.detail || m.label.toLowerCase())}</span></span>
-          <span class="acts">${onComment ? `<button class="icon quiet sm" data-a="comment" title="Leave this measurement as a comment for Claude">${icon("comment", "sm")}</button>` : ""}
-          <button class="icon quiet sm" data-a="remove" title="Remove">${icon("close", "sm")}</button></span></li>`).join("")}</ol>
-      <div class="row"><button class="sm" data-a="copy">${icon("copy", "sm")}Copy</button><button class="sm" data-a="clear">Clear</button></div>`
+          <span class="acts"><button class="icon quiet sm" data-a="eye" aria-pressed="${vis}" title="${vis ? "Hide it on the model" : "Show it on the model"}">${icon(vis ? "eye" : "eye-off", "sm")}</button>
+          ${onComment ? `<button class="icon quiet sm" data-a="comment" title="Leave this measurement as a comment for Claude">${icon("comment", "sm")}</button>` : ""}
+          <button class="icon quiet sm" data-a="remove" title="Remove">${icon("close", "sm")}</button></span></li>`;
+      }).join("")}</ol>
+      <div class="row"><button class="sm" data-a="shown" title="Show or hide the measurements on the model (V)">${icon(shown ? "eye-off" : "eye", "sm")}${shown ? "Hide all" : "Show all"}</button>
+        <button class="sm" data-a="copy">${icon("copy", "sm")}Copy</button><button class="sm" data-a="clear">Clear</button></div>`
       : `<p class="hint">Choose <b>Measure</b> and click the model: distances, gaps between faces, wall thickness and angles.</p>`;
     list.querySelectorAll("li").forEach((li) => {
       const m = items.find((x) => x.id === +li.dataset.id);
       li.querySelector('[data-a="remove"]').onclick = () => remove(m.id);
+      li.querySelector('[data-a="eye"]').onclick = () => toggleItem(m.id);
       const c = li.querySelector('[data-a="comment"]');
       if (c) c.onclick = () => {
         const p = m.pts.find((q) => q.part) || m.pts[0];
@@ -389,6 +428,8 @@ export function createMeasure(st, {
     });
     const copy = list.querySelector('[data-a="copy"]');
     if (copy) copy.onclick = () => { navigator.clipboard?.writeText(core.asText(items)); toast("Measurements copied"); };
+    const sh = list.querySelector('[data-a="shown"]');
+    if (sh) sh.onclick = () => setShown(!shown);
     const cl = list.querySelector('[data-a="clear"]');
     if (cl) cl.onclick = clear;
   }
@@ -448,10 +489,11 @@ export function createMeasure(st, {
 
   renderList();
   return {
-    click, key, update, reset, setTool, setAuto, clear, loadFeatures,
+    click, key, update, reset, setTool, setAuto, setShown, clear, loadFeatures,
     refresh: () => { sig = ""; },     // the geometry changed in place: redraw on the next frame
     get tool() { return tool; },
     get auto() { return auto; },
     get items() { return items; },
+    get shown() { return shown; },
   };
 }

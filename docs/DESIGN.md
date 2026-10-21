@@ -173,6 +173,7 @@ gives the 14 px size. An icon-only button needs `class="icon"` and an `aria-labe
 | `i-fit`, `i-spin`, `i-edges`, `i-wire`, `i-spread` | Viewport: fit, auto-rotate, edges, mesh, spread parts |
 | `i-dimension` | Overall size readout in the viewport, the Dimensions toggle |
 | `i-ruler` | Measure mode in the viewport |
+| `i-eye`, `i-eye-off` | Show / hide measurements on the model |
 | `i-sun`, `i-moon`, `i-monitor` | Theme switch: light, dark, auto |
 | `i-user`, `i-chevron` | Account: the user menu button, Profile in settings |
 | `i-plug` | AI connections (connecting Claude, ChatGPT, Claude Code) |

@@ -134,7 +134,9 @@ countersunk `screw`s as a third part.
   **Thickness** (one click: the material straight behind a face, to check a wall or a floor) and
   **Angle** (three points). While you move the pointer the distance is shown live.
 - Measurements stay until removed (<kbd>Delete</kbd> drops the last one) and follow their parts
-  when you Spread them. **Copy** puts them on the clipboard; the comment button next to one turns
+  when you Spread them. Hide them all with the eye button next to **Dimensions** or <kbd>V</kbd>
+  (they stay in the list; a new measurement shows them again), or one at a time with the eye in
+  the list. **Dimensions** switches the automatic labels on and off the same way. **Copy** puts them on the clipboard; the comment button next to one turns
   it into a [comment](#commenting-directly-in-the-ui) at that spot, so you can write
   *"Measured 3.2 mm here: make this 3.4 so an M3 screw fits"* for Claude.
 

@@ -3,7 +3,7 @@ import { TransformControls } from "/static/vendor/three/TransformControls.js";
 import { api, subscribe, esc, warnHtml, fmt, plainStl, PART_COLORS } from "/static/common.js";
 import { createStage, edgesFor, parseSTL, spreadX, toast as showToast } from "/static/stage.js";
 import { createComments } from "/static/comments.js";
-import { createMeasure } from "/static/measure.js";
+import { createMeasure, showToggle } from "/static/measure.js";
 import {
   resolve, resolveVars, isExpr, isOp, kids, partEntries, setParts, indexTree, pointerOf, atPointer, isHole, directHole,
   label, setHole, group, ungroup, ungroupable, moveNode, solidsOf, holesOf, uniquePartName, primitive, foldScale,
@@ -1112,6 +1112,7 @@ const measure = createMeasure(st, {
   onChange: () => {
     $("measure").classList.toggle("on", !!measure.tool);
     $("dims").classList.toggle("on", measure.auto);
+    showToggle($("mshow"), measure, true);
     if (!measure.tool && tool === "measure") setTool("measure");
   },
 });
@@ -1173,6 +1174,7 @@ $("group").onclick = () => groupSelected();
 $("ungroup").onclick = ungroupSelected;
 $("del").onclick = removeSelected;
 $("measure").onclick = () => setTool("measure");
+$("mshow").onclick = () => measure.setShown(!measure.shown);
 $("dims").onclick = () => {
   measure.setAuto(!measure.auto);
   try { localStorage.setItem("editor.dims", measure.auto ? "1" : "0"); } catch {}
@@ -1225,6 +1227,7 @@ addEventListener("keydown", (e) => {
   else if (k === "h") toggleHole();
   else if (k === "d") dropSelected();
   else if (k === "m") setTool("measure");
+  else if (k === "v" && measure.items.length) measure.setShown(!measure.shown);
   else if (k === "p") setTool("workplane");
   else if (k === "c") setTool("comment");
   else if (e.key === "ArrowLeft") { e.preventDefault(); nudge(-1, 0, 0); }

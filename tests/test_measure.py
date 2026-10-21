@@ -202,5 +202,14 @@ def test_pages_load_the_measuring_module(out_dir):
         assert c.get(path).status_code == 200
     for page in ("/m/anything", "/edit/anything"):
         html = c.get(page).text
-        assert 'id="dims"' in html
+        assert 'id="dims"' in html and 'id="mshow"' in html
     assert 'id="measuremode"' in c.get("/m/anything").text and 'id="mlist"' in c.get("/m/anything").text
+
+
+def test_measuring_can_be_shown_and_hidden():
+    from pathlib import Path
+    web = Path(server.__file__).parent / "web"
+    js = (web / "measure.js").read_text()
+    assert "setShown" in js and "export function showToggle" in js
+    icons = (web / "icons.svg").read_text()
+    assert 'id="i-eye"' in icons and 'id="i-eye-off"' in icons

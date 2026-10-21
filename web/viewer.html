@@ -50,6 +50,7 @@
       <div class="seg" role="group" aria-label="Measure">
         <button id="measuremode" title="Measure distances, gaps between faces, wall thickness and angles (M)"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-ruler"/></svg><span class="label">Measure</span></button>
         <button id="dims" title="Show the size of each part and its holes and bosses (D)"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-dimension"/></svg><span class="label">Dimensions</span></button>
+        <button id="mshow" class="icon on" hidden title="Hide your measurements on the model (V)" aria-label="Show or hide measurements" aria-pressed="true"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-eye"/></svg></button>
       </div>
       <button id="commentmode" title="Then click the model to leave a comment for Claude"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-comment"/></svg><span class="label">Comment</span></button>
     </div>
@@ -151,7 +152,7 @@
 import * as THREE from "three";
 import { createStage, loadSTL, spreadX } from "/static/stage.js";
 import { createComments } from "/static/comments.js";
-import { createMeasure } from "/static/measure.js";
+import { createMeasure, showToggle } from "/static/measure.js";
 import { api, subscribe, ago, fmt, esc, icon, visBadge, warnHtml, sourceBadge, plainStl, PART_COLORS } from "/static/common.js";
 
 const id = decodeURIComponent(location.pathname.split("/").pop());
@@ -440,8 +441,10 @@ const measure = createMeasure(st, {
   onChange: () => {
     $("measuremode").classList.toggle("on", !!measure.tool);
     $("dims").classList.toggle("on", measure.auto);
+    showToggle($("mshow"), measure);
   },
 });
+$("mshow").onclick = () => measure.setShown(!measure.shown);
 $("measuremode").onclick = () => {
   if (commentMode) setCommentMode(false);
   measure.setTool(measure.tool ? null : "distance");
@@ -462,6 +465,7 @@ addEventListener("keydown", (e) => {
   if (e.key === "Escape" && commentMode && !comments.open) setCommentMode(false);
   else if (k === "m") $("measuremode").click();
   else if (k === "d") $("dims").click();
+  else if (k === "v" && measure.items.length) measure.setShown(!measure.shown);
 });
 
 // ------------------------------------------------------------ events
