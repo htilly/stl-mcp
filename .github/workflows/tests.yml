@@ -1,9 +1,9 @@
 name: Tests
 
+# PRs only: pushes to main are tested by docker-image.yml, which gates the
+# build and deploy on the same suite.
 on:
   pull_request:
-  push:
-    branches: [main]
 
 permissions:
   contents: read
